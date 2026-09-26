@@ -50,7 +50,7 @@ test("the api package serves structured documents for every workspace package", 
     assert.ok(responseLength < 750_000, `discovery snapshot exceeds the socket response budget: ${responseLength} characters`);
 
     const bots = found.get("bots") as PackageDoc;
-    assert.deepEqual(Object.keys(bots.events).sort(), ["bots_changed", "chat_queue_changed", "chats_changed", "defaults_changed", "threads_changed", "voice_changed"]);
+    assert.deepEqual(Object.keys(bots.events).sort(), ["bots_changed", "chat_live_changed", "chat_queue_changed", "chats_changed", "defaults_changed", "threads_changed", "voice_changed"]);
     assert.equal(bots.eventScope?.required, false);
     assert.deepEqual(
       bots.operations.map((operation) => operation.name).sort(),

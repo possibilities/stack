@@ -1,6 +1,7 @@
 "use client";
 
-import { BotIcon, FlaskConicalIcon, KeyRoundIcon, GaugeIcon, ListTreeIcon, MegaphoneIcon, SparklesIcon } from "lucide-react";
+import { BotIcon, FlaskConicalIcon, KeyRoundIcon, GaugeIcon, ListTreeIcon, MegaphoneIcon, SparklesIcon, SquareTerminalIcon } from "lucide-react";
+import type { ChatWindows } from "@/lib/stack/chat-windows";
 import type { SpaceId } from "@/lib/stack/spaces";
 import type { StackState } from "@/lib/stack/store";
 import { type Accent } from "./window";
@@ -9,6 +10,7 @@ import { UsageWindow } from "./usage-window";
 import { CatalogWindow } from "./catalog-window";
 import { CallSpeechWindow } from "./call-speech-window";
 import { InferenceWindow } from "./inference-window";
+import { ChatWindow } from "./chat-window";
 
 export type WindowDef = {
   /** Globally unique across spaces; also used by Window and node destinations. */
@@ -20,19 +22,24 @@ export type WindowDef = {
   /** Packing footprint, independent of live record count; content grows the window past it and pushes windows below. Defaults to 760. */
   height?: number;
   column: number;
+  /** Keep the footprint height until a human sizes it, for windows that scroll their own content. */
+  fixed?: boolean;
   element: React.ReactNode;
 };
 
 export const spaceViews: Record<SpaceId, {
   icon: React.ComponentType<{ className?: string }>;
   accent: Accent;
-  windows(state: StackState): WindowDef[];
+  windows(state: StackState, chats: ChatWindows): WindowDef[];
 }> = {
   fleet: {
     icon: BotIcon,
     accent: "bots",
-    windows: () => [
+    windows: (_state, chats) => [
       { id: "bots", title: "Bots", icon: BotIcon, accent: "bots", width: 420, height: 620, column: 0, element: <BotsWindow /> },
+      // The primary chat sits beside Bots; each additional chat opens in the next column.
+      ...chats.map((chat, index) => ({ id: chat.id, title: "Chat", icon: SquareTerminalIcon, accent: "bots" as const, width: 640, height: 720, column: index + 1, fixed: true,
+        element: <ChatWindow id={chat.id} /> })),
     ],
   },
   accounts: {
