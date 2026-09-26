@@ -1,13 +1,13 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { discoverModels } from "./catalog.js";
-import { type CompleteInput, type CompleteOutput, type Model } from "./schema.js";
+import { InferLedger } from "./ledger.js";
+import type { Model, ModelObservation, RequestRecord, StartInput, Usage } from "./schema.js";
 
 type Credentials = { access: string; nativeId: string; auth: string };
-type Discover = (stateDir: string, auth: string) => Promise<Model[]>;
+type Discover = (stateDir: string, auth: string, signal?: AbortSignal) => Promise<Model[]>;
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const count = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 
@@ -43,8 +43,8 @@ export async function readCredentials(stateDir: string, accountId: string): Prom
 }
 
 /** Parse only successful terminal SSE; partial deltas never constitute a completed answer. */
-export async function readCompletion(response: Response, requestId: string, model: string): Promise<CompleteOutput> {
-  if (!response.body) throw new Error(`infer_outcome_unknown:${requestId}`);
+export async function readCompletion(response: Response): Promise<{ text: string; usage: Usage }> {
+  if (!response.body) throw new Error("response_incomplete");
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", text = "", bytes = 0, completed: Record<string, unknown> | null = null, failed = false;
@@ -82,58 +82,145 @@ export async function readCompletion(response: Response, requestId: string, mode
     if (buffer) consume(buffer.replace(/\r$/, ""));
     if (failed || !completed) throw new Error("incomplete");
     const usage = object((completed as Record<string, unknown>).usage), details = object(usage?.output_tokens_details);
-    return { requestId, model, text, usage: {
+    return { text, usage: {
       inputTokens: count(usage?.input_tokens), outputTokens: count(usage?.output_tokens),
       totalTokens: count(usage?.total_tokens), reasoningTokens: count(details?.reasoning_tokens),
     } };
-  } catch { await reader.cancel().catch(() => {}); throw new Error(`infer_outcome_unknown:${requestId}`); }
+  } catch { await reader.cancel().catch(() => {}); throw new Error("response_incomplete"); }
   finally { reader.releaseLock(); }
 }
 
+const httpErrors: Record<number, string> = { 401: "codex_sign_in_required", 403: "codex_access_denied", 429: "codex_rate_limited" };
+
+/**
+ * Admits inference requests into the durable ledger and runs each one in the
+ * background: fresh discovery, then exactly one backend request. Model
+ * discovery is cached per account in memory and refreshed only on demand or by a
+ * request's own discovery. `onChange` fires for every request or observation change.
+ */
 export class InferService {
-  private readonly inFlight = new Set<string>();
-  constructor(readonly stateDir: string, private readonly discover: Discover = discoverModels,
-    private readonly fetcher: typeof fetch = fetch, private readonly credentials: typeof readCredentials = readCredentials) {}
+  onChange?: () => void;
+  private readonly ledger: InferLedger;
+  private readonly running = new Map<string, { controller: AbortController; task: Promise<void> }>();
+  private readonly observations = new Map<string, ModelObservation>();
+  private readonly discoveries = new Map<string, { controller: AbortController; task: Promise<void> }>();
+  private closing = false;
 
-  async models(accountId: string): Promise<{ models: Model[]; observedAt: string }> {
-    const { auth } = await this.credentials(this.stateDir, accountId);
-    try { return { models: await this.discover(this.stateDir, auth), observedAt: new Date().toISOString() }; }
-    catch { throw new Error("catalog_unavailable"); }
+  constructor(readonly stateDir: string, private readonly discover: Discover = (dir, auth, signal) => discoverModels(dir, auth, undefined, signal),
+    private readonly fetcher: typeof fetch = fetch, private readonly credentials: typeof readCredentials = readCredentials) {
+    this.ledger = new InferLedger(join(stateDir, "infer"));
   }
 
-  async complete(input: CompleteInput): Promise<CompleteOutput> {
+  models(accountId?: string): ModelObservation[] {
+    return [...this.observations.values()].filter((row) => !accountId || row.accountId === accountId);
+  }
+
+  /** Starts a background discovery, coalescing with one already running. An unusable account is refused and forgotten. */
+  async refreshModels(accountId: string): Promise<ModelObservation> {
+    if (this.closing) throw new Error("infer_closing");
+    let credentials: Credentials;
+    try { credentials = await this.credentials(this.stateDir, accountId); }
+    catch (error) {
+      if (this.observations.delete(accountId)) this.changed();
+      throw error;
+    }
+    if (this.closing) throw new Error("infer_closing");
+    if (!this.discoveries.has(accountId)) {
+      const controller = new AbortController();
+      this.observe(accountId, { discovering: true });
+      const task = this.discover(this.stateDir, credentials.auth, controller.signal)
+        .then((models) => this.observe(accountId, { models, observedAt: new Date().toISOString(), discovering: false, error: null }),
+          () => this.observe(accountId, { discovering: false, error: "catalog_unavailable" }))
+        .finally(() => this.discoveries.delete(accountId));
+      this.discoveries.set(accountId, { controller, task });
+    }
+    return this.observations.get(accountId)!;
+  }
+
+  /**
+   * Admits one request and returns its running record before any backend work.
+   * An identical resend returns the existing record; it never starts a second request.
+   */
+  async start(input: StartInput): Promise<RequestRecord> {
+    const existing = this.ledger.find(input);
+    if (existing) return existing;
+    if (this.closing) throw new Error("infer_closing");
     // One request per account at a time; callers must not flood shared Codex allowance.
-    if (this.inFlight.has(input.accountId) || this.inFlight.size >= 2) throw new Error("infer_busy");
-    this.inFlight.add(input.accountId);
-    try { return await this.completeOnce(input); }
-    finally { this.inFlight.delete(input.accountId); }
+    if (this.running.has(input.accountId) || this.running.size >= 2) throw new Error("infer_busy");
+    const controller = new AbortController();
+    const slot = { controller, task: Promise.resolve() };
+    this.running.set(input.accountId, slot);
+    let credentials: Credentials;
+    try {
+      credentials = await this.credentials(this.stateDir, input.accountId);
+      if (this.closing) throw new Error("infer_closing");
+    } catch (error) {
+      this.running.delete(input.accountId);
+      throw error;
+    }
+    const record = this.ledger.admit(input);
+    slot.task = this.execute(input, credentials, controller.signal).catch((error: unknown) => {
+      console.error(`infer request ${input.requestId} bookkeeping failed: ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => {
+      this.running.delete(input.accountId);
+      this.changed();
+    });
+    this.changed();
+    return record;
   }
 
-  private async completeOnce(input: CompleteInput): Promise<CompleteOutput> {
-    const credentials = await this.credentials(this.stateDir, input.accountId);
+  list(limit: number, before?: number) { return this.ledger.list(limit, before); }
+
+  get(requestId: string): RequestRecord {
+    const record = this.ledger.get(requestId);
+    if (!record) throw new Error("unknown_request");
+    return record;
+  }
+
+  /** Refuses new work and cancels in-flight discovery and requests; a cancelled request that may have been sent is unknown. */
+  prepareClose(): void {
+    this.closing = true;
+    for (const { controller } of [...this.running.values(), ...this.discoveries.values()]) controller.abort();
+  }
+
+  async close(): Promise<void> {
+    this.prepareClose();
+    await Promise.allSettled([...this.running.values(), ...this.discoveries.values()].map(({ task }) => task));
+    this.ledger.close();
+  }
+
+  private async execute(input: StartInput, credentials: Credentials, signal: AbortSignal): Promise<void> {
+    const finish = (outcome: Parameters<InferLedger["finish"]>[1]) => this.ledger.finish(input.requestId, outcome);
     let models: Model[];
-    try { models = await this.discover(this.stateDir, credentials.auth); }
-    catch { throw new Error("catalog_unavailable"); }
-    if (!models.some((row) => row.id === input.model && row.supportedEfforts.includes(input.effort))) throw new Error("model_unavailable");
-    const requestId = randomUUID();
+    try { models = await this.discover(this.stateDir, credentials.auth, signal); }
+    catch { return finish({ state: "failed", error: signal.aborted ? "cancelled" : "catalog_unavailable" }); }
+    this.observe(input.accountId, { models, observedAt: new Date().toISOString(), error: null });
+    if (!models.some((row) => row.id === input.model && row.supportedEfforts.includes(input.effort))) return finish({ state: "failed", error: "model_unavailable" });
+    if (signal.aborted) return finish({ state: "failed", error: "cancelled" });
     let response: Response;
     try {
       response = await this.fetcher("https://chatgpt.com/backend-api/codex/responses", {
-        method: "POST", redirect: "manual", signal: AbortSignal.timeout(30_000),
+        method: "POST", redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         headers: { Authorization: `Bearer ${credentials.access}`, "chatgpt-account-id": credentials.nativeId,
-          "Content-Type": "application/json", Accept: "text/event-stream", originator: "codex_cli_rs", session_id: requestId },
+          "Content-Type": "application/json", Accept: "text/event-stream", originator: "codex_cli_rs", session_id: input.requestId },
         body: JSON.stringify({ model: input.model, instructions: input.instructions,
           input: [{ role: "user", content: [{ type: "input_text", text: input.input }] }],
           reasoning: { effort: input.effort }, max_output_tokens: input.maxOutputTokens, stream: true, store: false }),
       });
-    } catch { throw new Error(`infer_outcome_unknown:${requestId}`); }
+    } catch { return finish({ state: "unknown", error: "request_interrupted" }); }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
-      if (response.status === 401) throw new Error("codex_sign_in_required");
-      if (response.status === 403) throw new Error("codex_access_denied");
-      if (response.status === 429) throw new Error("codex_rate_limited");
-      throw new Error(`infer_http_error:${response.status}`);
+      return finish({ state: "failed", error: httpErrors[response.status] ?? `http_${response.status}` });
     }
-    return readCompletion(response, requestId, input.model);
+    try { finish({ state: "completed", ...await readCompletion(response) }); }
+    catch { finish({ state: "unknown", error: "response_incomplete" }); }
   }
+
+  private observe(accountId: string, patch: Partial<Omit<ModelObservation, "accountId">>): void {
+    const current = this.observations.get(accountId) ?? { accountId, models: null, observedAt: null, discovering: false, error: null };
+    this.observations.set(accountId, { ...current, ...patch });
+    this.changed();
+  }
+
+  private changed(): void { this.onChange?.(); }
 }

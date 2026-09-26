@@ -168,12 +168,19 @@ test("the api package serves structured documents for every workspace package", 
     assert.equal(usage.transports.find((transport) => transport.type === "websocket")?.subscriptions, true);
 
     const infer = found.get("infer") as PackageDoc;
-    assert.deepEqual(infer.operations.map((operation) => operation.name), ["infer_models", "infer_complete"]);
-    assert.deepEqual(Object.keys(infer.operations[0]?.outputSchema.properties ?? {}).sort(), ["models", "observedAt"]);
-    assert.deepEqual(Object.keys(infer.operations[1]?.inputSchema.properties ?? {}).sort(), ["accountId", "effort", "input", "instructions", "maxOutputTokens", "model"]);
-    assert.equal(infer.operations[1]?.annotations.readOnlyHint, false);
+    assert.deepEqual(infer.operations.map((operation) => operation.name), ["infer_models", "infer_discover", "infer_start", "infer_request_list", "infer_request_get"]);
+    assert.deepEqual(Object.keys(infer.events), ["infer_changed"]);
+    assert.deepEqual(Object.keys(infer.operations[0]?.outputSchema.properties ?? {}), ["accounts"]);
+    const inferStart = infer.operations[2]!;
+    assert.deepEqual(Object.keys(inferStart.inputSchema.properties ?? {}).sort(), ["accountId", "effort", "input", "instructions", "maxOutputTokens", "model", "requestId"]);
+    assert.equal(inferStart.annotations.readOnlyHint, false);
+    assert.equal(inferStart.annotations.idempotentHint, true);
+    assert.ok(Object.keys(inferStart.outputSchema.properties ?? {}).includes("state"));
+    assert.equal(infer.operations[3]?.annotations.readOnlyHint, true);
+    assert.equal(infer.operations[4]?.annotations.readOnlyHint, true);
     // The UIX Lab reaches inference over the loopback WebSocket; agents get no MCP route to spend allowance.
     assert.deepEqual(infer.transports.map((transport) => transport.type), ["socket", "websocket"]);
+    assert.equal(infer.transports.find((transport) => transport.type === "websocket")?.subscriptions, true);
     assert.equal(infer.transports[0]?.endpoint, join(stateDir, "sockets", "infer.sock"));
 
     assert.deepEqual(bots.eventScope, {

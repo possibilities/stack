@@ -7,17 +7,8 @@ export type ServedWebSocket = { urls: Record<string, string>; close(): Promise<v
 
 const maxPayload = 1_000_000;
 const maxClientBuffer = 1_000_000;
-/**
- * Operations whose own bounds exceed the default forwarding timeout. Timing out
- * first would report a failure while the operation continues; for inference that
- * hides a request that may already have been charged.
- */
-const forwardTimeouts = new Map([
-  ["bots/voice_dial", 75_000],
-  // Discovery waits up to 20s for model/list; inference adds one request bounded at 30s.
-  ["infer/infer_models", 30_000],
-  ["infer/infer_complete", 75_000],
-]);
+/** Operations whose own bounds exceed the default forwarding timeout; timing out first would misreport them as failed. */
+const forwardTimeouts = new Map([["bots/voice_dial", 75_000]]);
 
 export async function serveWebSocket(options: { env?: NodeJS.ProcessEnv; root?: string; port?: number } = {}): Promise<ServedWebSocket> {
   const env = options.env ?? process.env;

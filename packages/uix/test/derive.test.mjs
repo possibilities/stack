@@ -14,7 +14,7 @@ registerHooks({
   },
 });
 
-const { workerAccountLabels, providerTitle, untilTime, modelName, usageRows, catalogIdentity, catalogRows, splitArgs, inferenceFailure } = await import("../lib/stack/derive.ts");
+const { workerAccountLabels, providerTitle, untilTime, modelName, usageRows, catalogIdentity, catalogRows, splitArgs, inferErrorText, inferAdmission } = await import("../lib/stack/derive.ts");
 
 const bot = (id, linkedAccounts = []) => ({ id, enabled: true, removing: false, linkedAccounts });
 const worker = (id, provider, extra = {}) => ({ id, provider, enabled: true, ready: true, removing: false, linkedAccounts: [], ...extra });
@@ -91,19 +91,16 @@ test("splitArgs reads a command line: whitespace separates, quotes group, backsl
   assert.equal(splitArgs("-c 'open"), null);
 });
 
-test("inferenceFailure separates definite failures from outcomes that may have been charged", () => {
-  const requestId = "00000000-0000-4000-8000-000000000042";
-  const interrupted = inferenceFailure(`infer_outcome_unknown:${requestId}`);
-  assert.equal(interrupted.unknown, true);
-  assert.equal(interrupted.requestId, requestId);
-  assert.match(interrupted.text, /may have been charged and was not retried/);
-  // A lost bridge connection or forwarding timeout is just as uncertain, without a request ID.
+test("infer codes explain ledger outcomes and separate refused admission from unconfirmed admission", () => {
+  assert.match(inferErrorText("request_interrupted"), /may have been charged and was not retried/);
+  assert.match(inferErrorText("service_restarted"), /may have been charged/);
+  assert.equal(inferErrorText("http_502"), "The Codex backend answered HTTP 502.");
+  assert.equal(inferErrorText("novel_code"), "novel_code");
+  assert.deepEqual(inferAdmission("infer_busy"), { text: inferErrorText("infer_busy"), uncertain: false });
+  // A lost acknowledgement is resent with the same request ID, which the ledger deduplicates.
   for (const message of ["connection closed", "socket call timed out: tools/call"]) {
-    assert.deepEqual({ ...inferenceFailure(message), text: undefined }, { text: undefined, unknown: true, requestId: null, code: message });
+    const admission = inferAdmission(message);
+    assert.equal(admission.uncertain, true);
+    assert.match(admission.text, /same request ID/);
   }
-  assert.equal(inferenceFailure("infer_busy").unknown, false);
-  assert.match(inferenceFailure("infer_busy").text, /already has an inference running/);
-  assert.equal(inferenceFailure("infer_http_error:502").text, "The Codex backend answered HTTP 502.");
-  // Unrecognized messages pass through verbatim and claim nothing about charging.
-  assert.deepEqual(inferenceFailure("infer WebSocket is not connected"), { text: "infer WebSocket is not connected", unknown: false, requestId: null, code: "infer WebSocket is not connected" });
 });

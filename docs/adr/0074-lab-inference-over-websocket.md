@@ -1,7 +1,8 @@
 # 74. Lab inference over the loopback WebSocket
 
 Status: accepted, 2026-09-26. Amends [ADR 0052](0052-private-experimental-inference.md)'s
-socket-only Transport. Adds a second experiment to the Lab space of
+socket-only Transport. Its `infer` forwarding timeouts and page-local runs are
+superseded by [ADR 0075](0075-asynchronous-infer-requests-and-ledger.md). Adds a second experiment to the Lab space of
 [ADR 0073](0073-lab-space-and-call-speech.md).
 
 ## Decision

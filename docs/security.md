@@ -30,9 +30,12 @@ boundary described above.
 
 The UI canvas is a separate loopback-only Next.js listener and child process.
 It reads the Package APIs over local WebSocket and operates account and voice
-controls, and its Lab can make one-shot `infer` requests that spend a chosen Bot
+controls, and its Lab can start `infer` requests that spend a chosen Bot
 account's Codex allowance. `infer` has a WebSocket but no MCP Transport, so Bots
-cannot reach it ([ADR 0074](adr/0074-lab-inference-over-websocket.md)). The UI
+cannot reach it ([ADR 0074](adr/0074-lab-inference-over-websocket.md)). Its
+request ledger, `<state>/infer/requests.sqlite` (mode `0600`), stores each
+request's instructions, input and output, but never credentials
+([ADR 0075](adr/0075-asynchronous-infer-requests-and-ledger.md)). The UI
 shares the local-user trust boundary and is not an authentication boundary.
 
 ## Research and device sharing
