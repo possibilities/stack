@@ -293,7 +293,7 @@ try {
   assert.equal(await inference.getByLabel("Model", { exact: true }).inputValue(), "gpt-fixture");
   assert.equal(await inference.getByLabel("Effort", { exact: true }).inputValue(), "medium");
   await inference.getByLabel("Effort", { exact: true }).selectOption("high");
-  await inference.getByLabel("Max tokens", { exact: true }).fill("64");
+  await inference.getByLabel("Token threshold", { exact: true }).fill("64");
   await inference.getByLabel("Prompt", { exact: true }).fill("  Say hello  ");
   await inference.getByLabel("Prompt", { exact: true }).press("Meta+Enter");
   await inference.getByText("Hello from the fixture", { exact: true }).waitFor();
