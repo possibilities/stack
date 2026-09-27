@@ -1,6 +1,6 @@
 import { loadCatalog } from "./catalog";
 import { Channel } from "./channel";
-import type { Account, Bot, BotSettings, ChannelStatus, Login, OwnerStatus, PackageDoc, Resource, Snapshot, StackEvent, UsageSnapshot, VoiceCall, WorkerAccount, WorkerCatalog, WorkerLogin, WorkerRuntime, WorkerSession } from "./types";
+import type { Account, Bot, BotSettings, ChannelStatus, Login, OwnerStatus, PackageDoc, Resource, RolePreview, RoleSnapshot, Snapshot, StackEvent, UsageSnapshot, VoiceCall, WorkerAccount, WorkerCatalog, WorkerLogin, WorkerRuntime, WorkerSession } from "./types";
 
 export type StackState = Snapshot & {
   /** Main channel status by Package API name. */
@@ -30,7 +30,11 @@ function isWorkerLoginState(value: unknown): value is WorkerLogin {
   return typeof value === "object" && value !== null && "status" in value && "account" in value && "provider" in value && "needsCode" in value;
 }
 
-type ResourceKey = "owner" | "accounts" | "workerAccounts" | "workerRuntimes" | "workerSessions" | "login" | "workerLogins" | "bots" | "botDefaults" | "voice" | "catalog" | "usage";
+type ResourceKey = "owner" | "accounts" | "workerAccounts" | "workerRuntimes" | "workerSessions" | "login" | "workerLogins" | "bots" | "botDefaults" | "voice" | "role" | "rolePreview" | "catalog" | "usage";
+
+function isRoleSnapshot(value: unknown): value is RoleSnapshot {
+  return typeof value === "object" && value !== null && "revision" in value && "categories" in value;
+}
 
 const maxEvents = 250;
 
@@ -102,6 +106,7 @@ export class StackStore {
       this.refresh("workerRuntimes"); this.refresh("workerSessions"); this.reconcileCatalogs(true);
     }, ["workers_changed"]);
     open("usage", () => this.refresh("usage"), () => this.refresh("usage"), ["usage_changed"]);
+    open("roles", () => { this.refresh("role"); this.refresh("rolePreview"); }, () => { this.refresh("role"); this.refresh("rolePreview"); }, ["role_changed"]);
     // Calls only: discovery starts an app-server and inference spends allowance, so neither runs on open.
     open("infer", () => {});
     open("api", () => this.refresh("catalog"));
@@ -138,8 +143,16 @@ export class StackStore {
       }
     }
     if (pkg === "bots" && (name === "voice_dial" || name === "voice_hangup")) this.refresh("voice");
+    // Role writes return the whole snapshot; apply it before role_changed arrives so editors see their own write at once.
+    if (pkg === "roles" && isRoleSnapshot(result) && result.revision >= (this.state.role?.data?.revision ?? -1)) {
+      this.set({ role: { data: result, error: null, at: Date.now() } });
+      this.refresh("rolePreview");
+    }
     return result;
   };
+
+  /** A fresh Role read that starts now, e.g. after a stale-revision refusal; it is applied like a write's result. */
+  reloadRole = (): Promise<RoleSnapshot> => this.call<RoleSnapshot>("roles", "role_snapshot");
 
   dismissAttempt = (): void => this.set({ attempt: null });
 
@@ -224,8 +237,11 @@ export class StackStore {
       return;
     }
     const run = this.load(key)
-      .then((data) => ({ data, error: null, at: Date.now() }), (error: Error) => ({ data: this.state[key].data, error: error.message, at: Date.now() }))
+      .then((data) => ({ data, error: null, at: Date.now() }), (error: Error) => ({ data: this.state[key]?.data ?? null, error: error.message, at: Date.now() }))
       .then((next) => {
+        // A read that started before a write it lost the race to must not roll the Role back.
+        const newer = (key === "role" || key === "rolePreview") && (this.state[key]?.data as { revision: number } | null)?.revision;
+        if (typeof newer === "number" && next.data && (next.data as { revision: number }).revision < newer) return;
         this.set({ [key]: next } as Partial<StackState>);
         if (key === "login") this.reconcileAttempt();
         if (key === "workerLogins") this.reconcileWorkerAttempts();
@@ -255,6 +271,8 @@ export class StackStore {
       case "bots": return call<{ bots: Bot[] }>("bots", "bot_list").then((result) => result.bots);
       case "botDefaults": return call<BotSettings>("bots", "bot_defaults_get");
       case "voice": return call<{ call: VoiceCall | null }>("bots", "voice_status").then((result) => result.call);
+      case "role": return call<RoleSnapshot>("roles", "role_snapshot");
+      case "rolePreview": return call<RolePreview>("roles", "role_preview");
       case "usage": return call<UsageSnapshot>("usage", "usage_snapshot");
       case "catalog": return loadCatalog((name, args) => call<never>("api", name, args)) as Promise<PackageDoc[]>;
     }
