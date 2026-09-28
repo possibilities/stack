@@ -81,8 +81,14 @@ export function useActivity(): Map<string, StackEvent[]> {
 export function useNow(interval = 1_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), interval);
-    return () => clearInterval(timer);
+    const update = () => setNow(Date.now());
+    // React Activity pauses effects on hidden benches. Catch up immediately on
+    // return rather than showing the clock from before the bench was hidden.
+    update();
+    const timer = setInterval(update, interval);
+    // Background tabs can throttle timers well beyond the requested interval.
+    document.addEventListener("visibilitychange", update);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", update); };
   }, [interval]);
   return now;
 }
