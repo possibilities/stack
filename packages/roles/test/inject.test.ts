@@ -76,7 +76,7 @@ if (process.env.FIXTURE_WAIT) {
    const cleanup=await plugin.default.setup({session:{hook:async(name,fn)=>{if(name!=='context')throw new Error('wrong hook');fn(event);return{dispose(){disposed=true}}}}});
    await cleanup(); report.instructions=event.system[0].text; report.disposed=disposed;
   }
-  console.log(JSON.stringify(report)); process.exit(Number(process.env.FIXTURE_EXIT || 0));
+   process.stdout.write(JSON.stringify(report)+'\\n',()=>process.exit(Number(process.env.FIXTURE_EXIT || 0)));
  });
 }
 `;
