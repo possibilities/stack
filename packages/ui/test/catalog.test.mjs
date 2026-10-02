@@ -39,24 +39,27 @@ test("the canvas catalog retains a newly discovered Package API's operations, sc
   assert.equal(fieldsOf(search.outputSchema)[0].children[0].description, "Research document identity.");
 });
 
-test("legacy catalog discovery also retains newly discovered Package APIs", async () => {
+test("catalog read failures preserve the original error without alternate discovery reads", async () => {
   const reads = [];
-  const catalog = await loadCatalog(async (name, args) => {
-    reads.push([name, args]);
-    if (name === "docs_snapshot") throw new Error("older discovery API");
+  const failure = new Error("discovery unavailable");
+  await assert.rejects(loadCatalog(async (name) => {
+    reads.push(name);
+    if (name === "docs_snapshot") throw failure;
     if (name === "docs_list") return { packages: [{ name: "brain" }] };
-    assert.equal(name, "docs_get");
-    assert.deepEqual(args, { package: "brain" });
     return brain;
-  });
-  assert.deepEqual(reads.map(([name]) => name), ["docs_snapshot", "docs_list", "docs_get"]);
-  assert.deepEqual(catalog, [brain]);
+  }), error => error === failure);
+  assert.deepEqual(reads, ["docs_snapshot"]);
 });
 
 test("incompatible transport metadata becomes a read error rather than a render crash", async () => {
   const old = { ...brain, transports: [{ type: "websocket", endpoint: "ws://localhost:1" }] };
-  await assert.rejects(loadCatalog(async (name) => name === "docs_snapshot" ? { packages: [old] }
-    : name === "docs_list" ? { packages: [{ name: "brain" }] } : old), /Incompatible API catalog/);
+  const reads = [];
+  await assert.rejects(loadCatalog(async (name) => {
+    reads.push(name);
+    return name === "docs_snapshot" ? { packages: [old] }
+      : name === "docs_list" ? { packages: [{ name: "brain" }] } : brain;
+  }), /Incompatible API catalog/);
+  assert.deepEqual(reads, ["docs_snapshot"]);
 });
 
 test("MCP discovery requires explicit effective Worker read and occurrence selections and preserves them", async () => {
@@ -67,8 +70,7 @@ test("MCP discovery requires explicit effective Worker read and occurrence selec
   for (const [field, values] of [["workerOperations", [undefined, "all", ["unknown"]]], ["workerEvents", [undefined, "all", ["unknown"], ["changed"]]]]) {
     for (const value of values) {
       const invalid = { ...doc, transports: [{ ...doc.transports[0], [field]: value }] };
-      await assert.rejects(loadCatalog(async name => name === "docs_snapshot" ? { packages: [invalid] }
-        : name === "docs_list" ? { packages: [{ name: "brain" }] } : invalid), /Incompatible API catalog/, field);
+      await assert.rejects(loadCatalog(async () => ({ packages: [invalid] })), /Incompatible API catalog/, field);
     }
   }
 });

@@ -3,12 +3,7 @@ import type { JsonSchema, OperationDoc, PackageDoc } from "./types";
 type Read = <T>(name: string, args?: Record<string, unknown>) => Promise<T>;
 
 export async function loadCatalog(read: Read): Promise<PackageDoc[]> {
-  try {
-    return validateCatalog((await read<{ packages: PackageDoc[] }>("docs_snapshot")).packages);
-  } catch {
-    const { packages } = await read<{ packages: { name: string }[] }>("docs_list");
-    return validateCatalog(await Promise.all(packages.map(({ name }) => read<PackageDoc>("docs_get", { package: name }))));
-  }
+  return validateCatalog((await read<{ packages: PackageDoc[] }>("docs_snapshot")).packages);
 }
 
 /** Fail the resource read before incompatible discovery metadata reaches render.
