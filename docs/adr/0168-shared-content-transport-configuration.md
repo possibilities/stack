@@ -1,4 +1,4 @@
-# 167. Resolve Content transport configuration once
+# 168. Resolve Content transport configuration once
 
 Status: accepted, 2026-10-02. Consolidates the configuration rules of
 [ADR 0077](0077-content-collections.md) under the loopback-only backend boundary
