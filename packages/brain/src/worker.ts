@@ -105,8 +105,6 @@ export interface WorkerOptions {
   extract?: ExtractionProvider;
   /** Provider seam for offline source-run tests. */
   sourceDiscovery?: SourceDiscoveryProvider;
-  /** @deprecated Use sourceDiscovery. */
-  discovery?: SourceDiscoveryProvider;
   /** Fault-injection seam immediately before a source Checkpoint write. */
   beforeSourceCheckpointCommit?: () => void;
   now?: () => Date;
@@ -1080,7 +1078,7 @@ export async function runWorker(
         const network = new ResearchEgress(store).capture(claim.job.id, claim.fencing_token);
         if (sourceJob) {
           const dispatch = await withEgressPolicy(network.policy, network.check, () => dispatchSourceRun(store, claim.job, {
-            discovery: options.sourceDiscovery ?? options.discovery,
+            discovery: options.sourceDiscovery,
             signal: controller.signal,
             now,
             beforeCheckpointCommit: options.beforeSourceCheckpointCommit,
