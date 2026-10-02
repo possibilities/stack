@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { publishedJsonSchema, serveApi, serveSocket, serveWebSocket, socketCall, socketPath } from "@stack/api";
 import { api as botsApi } from "../../bots/dist/api.js";
 import { api as hudApi } from "../../hud/dist/api.js";
-import { authorizeBrowser, fixtureDoc, fixtureOperations, freePort as port, gatewayRoot, root, ui, serveFixture } from "./browser-fixture.mjs";
+import { authorizeBrowser, fixtureDoc, fixtureOperations, freePort as port, gatewayRoot, root, ui, serveFixture, fixtureServerId } from "./browser-fixture.mjs";
 
 if (!process.env.PLAYWRIGHT_MODULE) throw new Error("Set PLAYWRIGHT_MODULE to an installed Playwright module");
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE);
@@ -37,7 +37,7 @@ const session = { id: worker, botId: "bot-1", threadId: "main-bot-1", accountId:
     workContext: { workItemId: ids.design, scopeRevision: 1, source: "explicit" } }, pendingPermissions: 0 };
 
 const handlers = {
-  serve_status: () => ({ pid: process.pid, children: [], mcpUrls: {}, indexUrl: null, uiUrl: null, inspectorUrl: null }),
+  serve_status: () => ({ serverId: fixtureServerId, pid: process.pid, children: [], mcpUrls: {}, indexUrl: null, uiUrl: null, inspectorUrl: null }),
   serve_resource_history: () => ({ snapshots: [], nextCursor: null }),
   // The gateway admits serve only with every operation its manifest selects; this check reads none of them.
   serve_codex_tools: () => { throw new Error("not observed in this fixture"); },
@@ -79,7 +79,7 @@ try {
       operations: fixtureOperations(names, handlers), events: { topics: topics[name], scope: name === "bots" ? { valid: () => true, description: "Fixture", example: "bot-1" } : undefined } }));
   }
   hud = await serveApi({ name: "hud", transport: "socket", env, root });
-  websocket = await serveWebSocket({ env, root: await gatewayRoot(dir, ["hud", "serve", "auth", "worker", "bots", "usage", "api"]), port: 0 });
+  websocket = await serveWebSocket({ env, root: await gatewayRoot(dir, ["hud", "serve", "auth", "worker", "bots", "usage", "api"], ["bots", "worker"]), port: 0 });
   const doc = (name, api) => fixtureDoc(name, api, websocket.url, publishedJsonSchema);
   handlers.docs_snapshot = () => ({ packages: [doc("hud", hudApi), doc("bots", botsApi), doc("serve"), doc("auth"), doc("worker"), doc("usage"), doc("api")] });
 
@@ -180,7 +180,7 @@ try {
   await timeline.getByText("Progress from the human").waitFor();
 
   // Metadata is read only when opened.
-  await item.getByText("Agent metadata").click();
+  await item.locator("summary", { hasText: "Agent metadata" }).click();
   await item.getByText("meta-marker-value", { exact: false }).waitFor();
 
   // Creating a child through the page places it under its parent.

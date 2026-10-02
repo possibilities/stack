@@ -42,7 +42,7 @@ export function contentOrigins(env: NodeJS.ProcessEnv): ContentOrigins | null {
   catch { return null; }
 }
 
-export async function loadSnapshot(remoteOrigin?: string, remoteScope?: "view" | "control", remoteScopes: string[] = []): Promise<Snapshot> {
+export async function loadSnapshot(remoteOrigin?: string, remoteScope?: "view" | "control", remoteScopes: string[] = [], localOrigin?: string): Promise<Snapshot> {
   if (remoteOrigin && remoteScope) {
     // Never execute trusted-local socket reads while rendering an Access viewer's
     // RSC response. All remote reads go through the scoped WebSocket gateway.
@@ -56,7 +56,9 @@ export async function loadSnapshot(remoteOrigin?: string, remoteScope?: "view" |
       voice: empty(), roleCatalog: empty(), catalog: empty(),
       endpoints: Object.fromEntries((await listPackages(workspaceRoot(process.cwd()))).filter(({ config }) => config.websocket && !["access", "auth", "browse", "proc"].includes(config.name))
         .map(({ config }) => [config.name, `${remoteOrigin.replace(/^https:/, "wss:")}/websocket`])),
-      contentOrigins: origins, remote: { scope: remoteScope, scopes: remoteScopes, contentOrigins: origins } };
+      contentOrigins: origins, remote: { scope: remoteScope, scopes: remoteScopes, contentOrigins: origins },
+      // The scoped gateway's serve_status names the server once connected; trusted-local reads never run here.
+      destination: { authority: "remote", origin: remoteOrigin, serverId: null } };
   }
   const [server, resources, accounts, workerAccounts, workerRuntimes, workerSessions, login, workerLogins, bots, botDefaults, voice, roleCatalog, catalog, usage] = await Promise.all([
     resource(() => call<ServerStatus>("serve", "serve_status")),
@@ -76,5 +78,6 @@ export async function loadSnapshot(remoteOrigin?: string, remoteScope?: "view" |
     resource(() => loadCatalog((name, args) => call("api", name, args))),
     resource(() => call<UsageSnapshot>("usage", "usage_snapshot")),
   ]);
-  return { server, resources, accounts, workerAccounts, workerRuntimes, workerSessions, login, workerLogins, bots, botDefaults, voice, roleCatalog, catalog, usage, endpoints: await websocketEndpoints(catalog.data), contentOrigins: contentOrigins(process.env) };
+  return { server, resources, accounts, workerAccounts, workerRuntimes, workerSessions, login, workerLogins, bots, botDefaults, voice, roleCatalog, catalog, usage, endpoints: await websocketEndpoints(catalog.data), contentOrigins: contentOrigins(process.env),
+    destination: { authority: "local", origin: localOrigin ?? null, serverId: server.data?.serverId ?? null } };
 }

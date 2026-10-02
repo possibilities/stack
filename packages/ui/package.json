@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "stage": "node scripts/stage.mjs",
+    "test:portable": "node test/client-portable-check.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@stack/access": "workspace:*",
     "@stack/api": "workspace:*",
     "@stack/client": "workspace:*",
     "@base-ui/react": "^1.8.0",

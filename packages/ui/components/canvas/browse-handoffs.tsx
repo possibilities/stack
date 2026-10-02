@@ -17,13 +17,10 @@ import { cn } from "@/lib/utils";
 import { ContentCleared, Empty, Flash, NodeCard, NodeLink, NodeTitle, Row, StatusDot, Time } from "./primitives";
 import { browseMaintenanceOperations } from "./browse-maintenance";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
-import { useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
+import { notRecorded, waitingForIdentity } from "@/lib/stack/destination";
+import { useDestination, useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
 import { BotWatch, useObservedRead } from "./watch-receipts";
 import { PlacementContext, Section, Window } from "./window";
-
-function session(): Storage | null {
-  try { return window.sessionStorage; } catch { return null; }
-}
 
 function mint(): string {
   return crypto.randomUUID();
@@ -36,6 +33,16 @@ export function useBrowseBlocked(): string | null {
 }
 
 /**
+ * Why take and finish can't be used right now, or null. They record their exact retry arguments before sending, so on top of
+ * the Browse reasons they wait for this destination's storage: a take that cannot be recorded is never sent.
+ */
+export function useHandoffBlocked(): string | null {
+  const base = useBrowseBlocked();
+  const { session } = useDestination();
+  return base ?? (session ? null : waitingForIdentity);
+}
+
+/**
  * Take and finish, following the API's retry contract. Each intended action keeps one request ID
  * with its exact arguments in sessionStorage before it is sent. An unknown outcome keeps the
  * intent for an identical retry; nothing is resent automatically. A take this page made stays
@@ -45,12 +52,18 @@ export function useHandoffActions() {
   const store = useStore();
   const { viewers, actions, grants } = useViewerWindows();
   const { goTo } = useWorkbench();
+  // Intents live in this destination's sessionStorage: a take or finish recorded for one server is never offered to another.
+  const { session } = useDestination();
   const act = async (kind: "take" | "finish", handoff: BrowserHandoff, choice: HandoffActionState["choice"] = {}) => {
     if (actions[handoff.id]?.pending) return;
-    const storage = session();
+    const storage = session;
     const stored = loadIntent(storage, handoff.id);
     const intent = intentFor(kind, handoff, stored, choice, mint);
-    saveIntent(storage, intent, handoff.id);
+    // Record the exact intent first; if it cannot be recorded nothing is sent.
+    if (!saveIntent(storage, intent, handoff.id)) {
+      viewers.setAction(handoff.id, { kind, choice, pending: false, error: { text: storage ? notRecorded : waitingForIdentity, uncertain: false, stale: false } });
+      return;
+    }
     viewers.setAction(handoff.id, { kind, choice, pending: true, error: null });
     try {
       const result = await store.browse<BrowserHandoffAction>(kind === "take" ? "browser_handoff_take" : "browser_handoff_finish", { ...intent.args });
@@ -68,7 +81,7 @@ export function useHandoffActions() {
   };
   /** A stored intent this page can repeat for a handoff that has moved on without it. */
   const resumable = (handoff: BrowserHandoff): "take" | "finish" | null => {
-    const stored = loadIntent(session(), handoff.id);
+    const stored = loadIntent(session, handoff.id);
     if (stored?.kind === "take" && handoff.state === "human_controlling" && !grants[handoff.id]) return "take";
     if (stored?.kind === "finish" && handoff.state === "returning") return "finish";
     return null;
@@ -77,7 +90,7 @@ export function useHandoffActions() {
     const state = actions[handoff.id];
     if (state) return act(state.kind, handoff, state.choice);
     const kind = resumable(handoff);
-    const stored = loadIntent(session(), handoff.id);
+    const stored = loadIntent(session, handoff.id);
     if (kind && stored) return act(kind, handoff, { outcome: stored.args.outcome, note: stored.args.note });
   };
   return { act, retry, resumable, actions, grants };
@@ -97,7 +110,7 @@ function firstLine(message: string): string {
 /** Completed or Skipped with an optional note. Completed is the operator's report; the Bot verifies it. */
 export function FinishForm({ handoff, compact, onDone }: { handoff: BrowserHandoff; compact?: boolean; onDone?: () => void }) {
   const { act, actions } = useHandoffActions();
-  const blocked = useBrowseBlocked();
+  const blocked = useHandoffBlocked();
   const id = useId();
   const state = actions[handoff.id];
   const [note, setNote] = useState(state?.kind === "finish" ? state.choice.note ?? "" : "");
@@ -121,7 +134,7 @@ export function FinishForm({ handoff, compact, onDone }: { handoff: BrowserHando
 
 function ActionNote({ handoff }: { handoff: BrowserHandoff }) {
   const { actions, retry } = useHandoffActions();
-  const blocked = useBrowseBlocked();
+  const blocked = useHandoffBlocked();
   const error = actions[handoff.id]?.error;
   if (!error) return null;
   return (
@@ -137,7 +150,7 @@ function HandoffControls({ handoff, inViewer }: { handoff: BrowserHandoff; inVie
   const { act, retry, resumable, actions, grants } = useHandoffActions();
   const { viewers } = useViewerWindows();
   const { goTo } = useWorkbench();
-  const blocked = useBrowseBlocked();
+  const blocked = useHandoffBlocked();
   const [finishing, setFinishing] = useState(false);
   const state = actions[handoff.id];
   const taking = Boolean(state?.pending && state.kind === "take");
@@ -179,6 +192,7 @@ function HandoffControls({ handoff, inViewer }: { handoff: BrowserHandoff; inVie
           <Button type="button" size="xs" variant="ghost" className="ml-auto" aria-expanded={finishing} onClick={() => setFinishing(!finishing)}>Finish…</Button>
         )}
       </div>
+      {blocked === waitingForIdentity ? <p role="status" className="text-[0.68rem] text-muted-foreground">{blocked}</p> : null}
       {finishing && !inViewer ? <FinishForm handoff={handoff} onDone={() => setFinishing(false)} /> : null}
     </>
   );

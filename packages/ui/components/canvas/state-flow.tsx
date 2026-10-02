@@ -11,7 +11,7 @@ import { planReadiness, receiptTone, receiptWords, StateFlowController, type Sta
 import type { StateOutcome, StatePlan, StateReceipt } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { CopyButton, StatusDot, type Tone } from "./primitives";
-import { useNow } from "./provider";
+import { useDestination, useNow } from "./provider";
 
 /*
  * The shared owner maintenance flow (docs/state-control.md, ADR 0135): prepare → preview → apply → receipt.
@@ -119,6 +119,8 @@ export type StateFlowControls = {
   retry(): void;
   readReceipt(): void;
   reset(): void;
+  /** Why no decision can be made yet: the server has not named itself, so there is nowhere to record a request first. */
+  waiting: string | null;
 };
 
 /**
@@ -126,12 +128,16 @@ export type StateFlowControls = {
  * calls it makes. `observe` is any owner invalidation, such as an event generation: a running receipt is read
  * again when it changes; nothing polls.
  */
-export function useStateFlow<Extra extends Record<string, string> = Record<string, never>>({ observe, ...options }: StateFlowOptions<Extra> & { observe?: unknown }): StateFlowControls {
-  const controller = useMemo(() => new StateFlowController<Extra>(options), [options.recoveryKey]);
-  controller.update(options);
+export function useStateFlow<Extra extends Record<string, string> = Record<string, never>>({ observe, ...options }: Omit<StateFlowOptions<Extra>, "recovery"> & { observe?: unknown }): StateFlowControls {
+  // The flow saves and recovers requests only in this destination's storage; with none yet, nothing is saved or recovered.
+  const { local: recovery } = useDestination();
+  const controller = useMemo(() => new StateFlowController<Extra>({ ...options, recovery }), [options.recoveryKey]);
+  controller.update({ ...options, recovery });
   const flow = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   // Unmounting only drops in-flight results; a saved request stays recoverable.
-  useEffect(() => { void controller.recover(); return () => controller.detach(); }, [controller]);
+  useEffect(() => () => controller.detach(), [controller]);
+  // A saved request is read back once this destination is known, and only into an idle flow.
+  useEffect(() => { void controller.recover(); }, [controller, recovery]);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
@@ -144,6 +150,7 @@ export function useStateFlow<Extra extends Record<string, string> = Record<strin
     retry: () => void controller.retry(),
     readReceipt: () => void controller.readReceipt(),
     reset: () => controller.reset(),
+    waiting: controller.getBlock(),
   };
 }
 
@@ -152,7 +159,7 @@ export function useStateFlow<Extra extends Record<string, string> = Record<strin
  * receipt or uncertainty afterwards. `unavailable` disables preparing with its reason (remote, disconnected,
  * nothing selected). Downstream views pass their owner's explicit operations.
  */
-export function StateMaintenance<Extra extends Record<string, string> = Record<string, never>>({ label, applyLabel = "Apply this plan", unavailable, className, ...options }: StateFlowOptions<Extra> & { observe?: unknown } & {
+export function StateMaintenance<Extra extends Record<string, string> = Record<string, never>>({ label, applyLabel = "Apply this plan", unavailable, className, ...options }: Omit<StateFlowOptions<Extra>, "recovery"> & { observe?: unknown } & {
   /** The decision being prepared, e.g. "Prepare workspace clear". */
   label: string;
   applyLabel?: string;
@@ -163,13 +170,15 @@ export function StateMaintenance<Extra extends Record<string, string> = Record<s
   return <StateFlowView controls={controls} label={label} applyLabel={applyLabel} unavailable={unavailable} className={className} />;
 }
 
-export function StateFlowView({ controls, label, applyLabel = "Apply this plan", unavailable, className, receiptOnlyRecovery = false }: {
+export function StateFlowView({ controls, label, applyLabel = "Apply this plan", unavailable: unavailableReason, className, receiptOnlyRecovery = false }: {
    controls: StateFlowControls; label: string; applyLabel?: string; unavailable?: string | null; className?: string;
    /** External effects must be inspected, not rearmed, after an uncertain admission or an unsettled receipt. */
    receiptOnlyRecovery?: boolean;
 }) {
   const now = useNow(15_000);
-  const { flow } = controls;
+  const { flow, waiting } = controls;
+  // Until the server has named itself nothing is recorded, so nothing is prepared, applied, resent or read.
+  const unavailable = waiting ?? unavailableReason;
   const prepareButton = (text: string, variant: "outline" | "ghost" = "outline") => (
     <Button size="sm" variant={variant} disabled={!!unavailable} title={unavailable ?? undefined} onClick={controls.prepare}>
       <ClipboardListIcon data-icon="inline-start" />{text}
@@ -196,7 +205,7 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
         return (
           <>
             <StatePlanReview plan={flow.plan} now={now} />
-            {readiness.reason || unavailable ? <p role="status" className="text-xs text-destructive">{readiness.reason ?? unavailable}</p> : null}
+            {readiness.reason || unavailable || flow.refused ? <p role="status" className="text-xs text-destructive">{flow.refused ?? readiness.reason ?? unavailable}</p> : null}
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" variant="destructive" disabled={!readiness.canApply || !!unavailable} title={readiness.reason ?? unavailable ?? undefined} onClick={controls.apply}>{applyLabel}</Button>
               {readiness.expired || readiness.blocked ? prepareButton("Prepare a new plan", "ghost") : null}
@@ -230,7 +239,7 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
             {Object.entries(flow.input).filter(([name]) => !["requestId", "planId", "expectedRevision"].includes(name)).map(([name, value]) => <Identity key={name} label={name} value={String(value)} />)}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" variant="outline" onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt</Button>
+            <Button size="sm" variant="outline" disabled={!!waiting} title={waiting ?? undefined} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt</Button>
             {!receiptOnlyRecovery ? <Button size="sm" variant="outline" disabled={!!unavailable} onClick={controls.retry}><RotateCwIcon data-icon="inline-start" />Send identical request</Button> : null}
             {!receiptOnlyRecovery ? prepareButton("Prepare a new plan", "ghost") : null}
           </div>
@@ -240,7 +249,7 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
         <>
           <StateReceiptView receipt={flow.receipt} now={now} />
           <div className="flex flex-wrap gap-1.5">
-            {flow.receipt.status === "running" || (receiptOnlyRecovery && (flow.receipt.status === "partial" || flow.receipt.status === "unknown")) ? <Button size="sm" variant="outline" onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt again</Button> : null}
+            {flow.receipt.status === "running" || (receiptOnlyRecovery && (flow.receipt.status === "partial" || flow.receipt.status === "unknown")) ? <Button size="sm" variant="outline" disabled={!!waiting} title={waiting ?? undefined} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt again</Button> : null}
             {flow.receipt.status === "blocked" || (!receiptOnlyRecovery && (flow.receipt.status === "partial" || flow.receipt.status === "unknown")) ? prepareButton("Prepare a new plan", "ghost") : null}
             {!receiptOnlyRecovery || flow.receipt.status === "completed" || flow.receipt.status === "blocked" ? <Button size="sm" variant="ghost" onClick={controls.reset}>Close receipt</Button> : null}
           </div>

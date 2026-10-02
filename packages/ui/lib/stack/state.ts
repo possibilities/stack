@@ -1,3 +1,4 @@
+import { notRecorded, waitingForIdentity, type ScopedStorage } from "./destination";
 import type { SpaceId } from "./spaces";
 import type { NodeRef, PackageDoc, ServeCompletionPage, ServeCompletionReceipt, ServeOccurrencePage, ServeStateList, ServeSubscriptionPage, StateApplyInput, StateEntry, StateLink, StateOwner, StatePlan, StateReceipt, StateReceiptStatus, StateRelationship } from "./types";
 
@@ -253,7 +254,7 @@ export type StateFlow =
   | { phase: "idle" }
   | { phase: "preparing" }
   | { phase: "prepare-failed"; error: string }
-  | { phase: "preview"; plan: StatePlan }
+  | { phase: "preview"; plan: StatePlan; /** Why the last apply was refused before anything was sent. */ refused?: string }
   | { phase: "applying"; plan: StatePlan | null; input: StateApplyInput }
   | { phase: "checking"; plan: StatePlan | null; input: StateApplyInput; error: string | null }
   | { phase: "uncertain"; plan: StatePlan | null; input: StateApplyInput; error: string }
@@ -269,15 +270,23 @@ function afterReceiptRead(flow: Extract<StateFlow, { phase: "checking" }>, recei
 
 /** Minimal reload-recovery identity: request, plan and revision IDs plus owner routing identity, never content. */
 export type StateRecovery = { input: StateApplyInput & Record<string, string>; at: number };
-const recoveryPrefix = "stack.state-flow.";
+/** One destination's storage (see destination.ts). Null while the server has not named itself: nothing is saved, read or recovered. */
+export type RecoveryStore = Pick<ScopedStorage, "getItem" | "setItem" | "removeItem" | "keys">;
+const recoveryPrefix = "state-flow.";
 
-export function saveRecovery(key: string, input: StateApplyInput & Record<string, string>): void {
-  try { localStorage.setItem(recoveryPrefix + key, JSON.stringify({ input, at: Date.now() } satisfies StateRecovery)); } catch { /* recovery is a convenience */ }
+/** Records the request before it is sent. False means it could not be recorded (no destination yet, or the storage refused), and it must not be sent. */
+export function saveRecovery(storage: RecoveryStore | null, key: string, input: StateApplyInput & Record<string, string>): boolean {
+  if (!storage) return false;
+  try {
+    const raw = JSON.stringify({ input, at: Date.now() } satisfies StateRecovery);
+    storage.setItem(recoveryPrefix + key, raw);
+    return storage.getItem(recoveryPrefix + key) === raw;
+  } catch { return false; }
 }
 
-export function readRecovery(key: string): StateRecovery | null {
+export function readRecovery(storage: RecoveryStore | null, key: string): StateRecovery | null {
   try {
-    const value = JSON.parse(localStorage.getItem(recoveryPrefix + key) ?? "null") as StateRecovery | null;
+    const value = JSON.parse(storage?.getItem(recoveryPrefix + key) ?? "null") as StateRecovery | null;
     const input = value?.input;
     if (!input || [input.planId, input.expectedRevision, input.requestId].some((part) => typeof part !== "string")) return null;
     if (Object.values(input).some((part) => typeof part !== "string")) return null;
@@ -285,18 +294,16 @@ export function readRecovery(key: string): StateRecovery | null {
   } catch { return null; }
 }
 
-export function clearRecovery(key: string): void {
-  try { localStorage.removeItem(recoveryPrefix + key); } catch { /* recovery is a convenience */ }
+export function clearRecovery(storage: RecoveryStore | null, key: string): void {
+  try { storage?.removeItem(recoveryPrefix + key); } catch { /* recovery is a convenience */ }
 }
 
 /** Every saved request whose key starts with `prefix`, so a view can show requests left unconfirmed by a selection that is no longer chosen. */
-export function listRecoveries(prefix: string): { key: string; at: number }[] {
+export function listRecoveries(storage: RecoveryStore | null, prefix: string): { key: string; at: number }[] {
   const found: { key: string; at: number }[] = [];
   try {
-    for (let index = 0; index < localStorage.length; index++) {
-      const stored = localStorage.key(index);
-      if (!stored?.startsWith(recoveryPrefix + prefix)) continue;
-      const key = stored.slice(recoveryPrefix.length), saved = readRecovery(key);
+    for (const stored of storage?.keys(recoveryPrefix + prefix) ?? []) {
+      const key = stored.slice(recoveryPrefix.length), saved = readRecovery(storage, key);
       if (saved) found.push({ key, at: saved.at });
     }
   } catch { /* recovery is a convenience */ }
@@ -309,8 +316,12 @@ export type StateFlowOptions<Extra extends Record<string, string> = Record<strin
   extra?: Extra;
   /** Stable per owner/subject/action; with it, an apply awaiting its receipt is recovered after reload. */
   recoveryKey?: string;
+  /** Where that request is saved: this destination's storage, never another's. Omitted or null saves and recovers nothing. */
+  recovery?: RecoveryStore | null;
   /** Called with each receipt read, so the owner view can refresh its own reads. */
   onReceipt?(receipt: StateReceipt): void;
+  /** Run once before an apply is recorded or sent. A reason refuses the apply, which then sends nothing. */
+  guard?(): string | null;
 };
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -334,7 +345,7 @@ export class StateFlowController<Extra extends Record<string, string> = Record<s
     this.clock = clock;
   }
 
-  /** Newer callbacks and identity for later transitions; the recovery key is fixed per controller. */
+  /** Newer callbacks, identity and storage for later transitions; the recovery key is fixed per controller. */
   update(options: Omit<StateFlowOptions<Extra>, "recoveryKey">): void { this.options = { ...options, recoveryKey: this.options.recoveryKey }; }
   getState = (): StateFlow => this.flow;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -344,7 +355,7 @@ export class StateFlowController<Extra extends Record<string, string> = Record<s
   private received(receipt: StateReceipt): void {
     const key = this.options.recoveryKey;
     // Settled results need no recovery; running, partial and unknown stay recoverable until the operator leaves them.
-    if (key && (receipt.status === "completed" || receipt.status === "blocked")) clearRecovery(key);
+    if (key && (receipt.status === "completed" || receipt.status === "blocked")) clearRecovery(this.options.recovery ?? null, key);
     this.options.onReceipt?.(receipt);
   }
 
@@ -371,15 +382,28 @@ export class StateFlowController<Extra extends Record<string, string> = Record<s
     });
   }
 
-  /** Resume an apply that was awaiting its receipt when the page went away. */
+  /** Resume an apply that was awaiting its receipt when the page went away. Only from idle, and only from this destination's storage. */
   recover(): Promise<void> {
-    const key = this.options.recoveryKey, saved = key ? readRecovery(key) : null;
+    if (this.flow.phase !== "idle") return Promise.resolve();
+    const key = this.options.recoveryKey, saved = key ? readRecovery(this.options.recovery ?? null, key) : null;
     return saved ? this.check({ phase: "checking", plan: null, input: saved.input, error: null }) : Promise.resolve();
+  }
+
+  /**
+   * Why no decision can be made yet. A flow with a recovery slot saves each request before sending it, so while this
+   * destination has no storage (the server has not named itself) it prepares, applies, retries and reads nothing.
+   */
+  getBlock = (): string | null => this.options.recoveryKey && !this.options.recovery ? waitingForIdentity : null;
+
+  private refuse(message: string): void {
+    const current = this.flow;
+    if (current.phase === "preview") this.set({ ...current, refused: message });
   }
 
   /** Ask the owner for a plan. From an uncertain or unsettled result this is an explicit new decision. */
   prepare(): Promise<void> {
-    if (this.options.recoveryKey) clearRecovery(this.options.recoveryKey);
+    if (this.getBlock()) return Promise.resolve();
+    if (this.options.recoveryKey) clearRecovery(this.options.recovery ?? null, this.options.recoveryKey);
     const mine = ++this.token;
     this.set({ phase: "preparing" });
     return this.options.operations.prepare().then((plan) => { if (mine === this.token) this.set({ phase: "preview", plan }); },
@@ -390,21 +414,25 @@ export class StateFlowController<Extra extends Record<string, string> = Record<s
   apply(): Promise<void> {
     const current = this.flow;
     if (current.phase !== "preview" || !planReadiness(current.plan, this.clock.now()).canApply) return Promise.resolve();
+    const block = this.getBlock() ?? this.options.guard?.() ?? null;
+    if (block) { this.refuse(block); return Promise.resolve(); }
     const input = applyInput(current.plan, this.clock.uuid(), this.options.extra);
-    if (this.options.recoveryKey) saveRecovery(this.options.recoveryKey, input);
+    // A request that cannot be recorded is not sent: storage failure blocks dispatch.
+    if (this.options.recoveryKey && !saveRecovery(this.options.recovery ?? null, this.options.recoveryKey, input)) { this.refuse(notRecorded); return Promise.resolve(); }
     return this.send(current.plan, input);
   }
 
   /** Send the identical input again under the same request UUID. */
   retry(): Promise<void> {
     const current = this.flow;
+    if (this.getBlock()) return Promise.resolve();
     return current.phase === "uncertain" ? this.send(current.plan, current.input as StateApplyInput & Extra) : Promise.resolve();
   }
 
   /** Read the same request's receipt again. */
   readReceipt(): Promise<void> {
     const current = this.flow;
-    if (current.phase !== "uncertain" && current.phase !== "receipt") return Promise.resolve();
+    if (this.getBlock() || (current.phase !== "uncertain" && current.phase !== "receipt")) return Promise.resolve();
     return this.check({ phase: "checking", plan: current.plan, input: current.input, error: current.phase === "uncertain" ? current.error : null });
   }
 
@@ -419,7 +447,7 @@ export class StateFlowController<Extra extends Record<string, string> = Record<s
 
   /** Leave the flow; forgets reload recovery. */
   reset(): void {
-    if (this.options.recoveryKey) clearRecovery(this.options.recoveryKey);
+    if (this.options.recoveryKey) clearRecovery(this.options.recovery ?? null, this.options.recoveryKey);
     this.token++;
     this.set({ phase: "idle" });
   }
