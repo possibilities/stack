@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { assertInstallationOpen, mcpPort, runApi, runMcp, runMcpStdio, runWebSocket, serveApi, serveMcp, socketCall, socketPath, websocketPort, withLocalAuth, executeOperation } from "@stack/api";
+import { assertInstallationOpen, contentTransportConfig, mcpPort, runApi, runMcp, runMcpStdio, runWebSocket, serveApi, serveMcp, socketCall, socketPath, websocketPort, withLocalAuth, executeOperation } from "@stack/api";
 import { spawn } from "node:child_process";
-import { contentNetworkConfig } from "@stack/content";
 import { githubPort } from "@stack/source";
 import { lookup } from "node:dns/promises";
 import { connect } from "node:net";
@@ -68,8 +67,9 @@ if (existing && typeof existing.pid === "number") {
 
 const inspectorListenPort = inspectorPort(process.env);
 const uiListenPort = uiPort(process.env);
-const contentPort = Number(process.env.STACK_CONTENT_PORT ?? process.env.STACK_WIKI_PORT ?? 8777);
-const contentArtifactPort = Number(process.env.STACK_CONTENT_ARTIFACT_PORT ?? process.env.STACK_WIKI_ARTIFACT_PORT ?? 8778);
+let content: ReturnType<typeof contentTransportConfig>;
+try { content = contentTransportConfig(process.env); }
+catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }
 const accessHost = process.env.STACK_ACCESS_HOST;
 const accessPort = Number(process.env.STACK_ACCESS_PORT ?? 8943);
 const accessArtifactPort = Number(process.env.STACK_ACCESS_ARTIFACT_PORT ?? 8944);
@@ -90,17 +90,12 @@ if (accessHost) {
     process.exit(1);
   }
 }
-let contentHost: string;
-try { contentHost = contentNetworkConfig(process.env).host; }
-catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }
 const brainSharePort = Number(process.env.STACK_BRAIN_SHARE_PORT ?? 8877);
 const brainShareHost = process.env.STACK_BRAIN_SHARE_HOST ?? "127.0.0.1";
 const githubListenPort = githubPort(process.env);
-for (const [name, value] of [["STACK_CONTENT_PORT", contentPort], ["STACK_CONTENT_ARTIFACT_PORT", contentArtifactPort], ["STACK_BRAIN_SHARE_PORT", brainSharePort]] as const) {
-  if (!Number.isInteger(value) || value < 0 || value > 65535 || process.env[name] === "" || (name === "STACK_CONTENT_PORT" && process.env.STACK_CONTENT_PORT === undefined && process.env.STACK_WIKI_PORT === "") || (name === "STACK_CONTENT_ARTIFACT_PORT" && process.env.STACK_CONTENT_ARTIFACT_PORT === undefined && process.env.STACK_WIKI_ARTIFACT_PORT === "")) {
-    console.error(`${name} must be a port from 0 to 65535`);
-    process.exit(1);
-  }
+if (!Number.isInteger(brainSharePort) || brainSharePort < 0 || brainSharePort > 65535 || process.env.STACK_BRAIN_SHARE_PORT === "") {
+  console.error("STACK_BRAIN_SHARE_PORT must be a port from 0 to 65535");
+  process.exit(1);
 }
 if (brainShareHost !== "127.0.0.1") {
   console.error("Brain backend must bind 127.0.0.1; configure remote clients through Access");
@@ -113,17 +108,13 @@ try {
   console.error(`STACK_BRAIN_SHARE_HOST could not be resolved: ${brainShareHost}`);
   process.exit(1);
 }
-if (contentPort !== 0 && contentPort === contentArtifactPort) {
-  console.error("content document and artifact ports must differ");
-  process.exit(1);
-}
 const listeners: Array<readonly [string, number, string, string]> = [
   ["MCP", mcpPort(process.env), "STACK_MCP_PORT", "127.0.0.1"],
   ["WebSocket", websocketPort(process.env), "STACK_WEBSOCKET_PORT", "127.0.0.1"],
   ["Inspector", inspectorListenPort, "STACK_INSPECTOR_PORT", "127.0.0.1"],
   ["UI canvas", uiListenPort, "STACK_UI_PORT", "127.0.0.1"],
-  ["Content documents", contentPort, "STACK_CONTENT_PORT", contentHost],
-  ["Content artifacts", contentArtifactPort, "STACK_CONTENT_ARTIFACT_PORT", contentHost],
+  ["Content documents", content.port, "STACK_CONTENT_PORT", content.host],
+  ["Content artifacts", content.artifactPort, "STACK_CONTENT_ARTIFACT_PORT", content.host],
   ["Brain share", brainSharePort, "STACK_BRAIN_SHARE_PORT", brainShareHost],
   ["GitHub webhooks", githubListenPort, "STACK_GITHUB_PORT", "127.0.0.1"],
   ...(accessHost ? [
@@ -134,10 +125,7 @@ const listeners: Array<readonly [string, number, string, string]> = [
 ];
 // Resolve the share host as net.Server.listen does so aliases and wildcard
 // binds cannot conceal a collision with the server's IPv4 loopback listeners.
-const contentAddress = contentHost === "127.0.0.1" ? contentHost : (await lookup(contentHost).catch(() => {
-  console.error("STACK_CONTENT_HOST could not be resolved"); process.exit(1);
-})).address;
-const bindAddress = (host: string) => host === brainShareHost ? brainShareAddress : host === contentHost ? contentAddress : host;
+const bindAddress = (host: string) => host === brainShareHost ? brainShareAddress : host;
 const loopbackBinds = new Set(["127.0.0.1", "0.0.0.0", "::", "::ffff:127.0.0.1"]);
 for (const [index, [, port, setting, host]] of listeners.entries()) {
   const conflict = listeners.slice(0, index).find(([, otherPort, , otherHost]) =>

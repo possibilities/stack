@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { serveHttp, socketCall, socketPath } from "@stack/api";
+import { contentListenerOrigin, contentTransportConfig, serveHttp, socketCall, socketPath } from "@stack/api";
 import { z } from "zod";
 import { AccessError, AccessStore, scopes, type Principal } from "./store.js";
 import { tailnetAddress, verifier, localApi, type Peer } from "./network.js";
@@ -157,10 +157,16 @@ export function handler(options: IngressOptions) {
         }
         // Fixed loopback destinations, no caller-selected upstream, Host or
         // forwarding headers. Never follow backend redirects with credentials.
-        const port = origin === "documents" ? env.STACK_CONTENT_PORT ?? env.STACK_WIKI_PORT ?? "8777" : env.STACK_CONTENT_ARTIFACT_PORT ?? env.STACK_WIKI_ARTIFACT_PORT ?? "8778";
-        const upstream = await (options.fetchBackend ?? fetch)(`http://127.0.0.1:${port}${path}`, { method: request.method, redirect: "manual", signal: AbortSignal.timeout(10_000) });
+        const config = contentTransportConfig(env);
+        const backend = contentListenerOrigin(origin === "documents" ? config.port : config.artifactPort);
+        if (!backend) throw new AccessError("service_unavailable", 503);
+        const upstream = await (options.fetchBackend ?? fetch)(`${backend}${path}`, { method: request.method, redirect: "manual", signal: AbortSignal.timeout(10_000) });
         const headers = new Headers(upstream.headers); headers.set("cache-control", "no-store"); headers.set("referrer-policy", "no-referrer");
-         if (headers.has("location")) { const location = new URL(headers.get("location")!, `http://127.0.0.1:${port}`); if (location.origin !== `http://127.0.0.1:${port}`) throw new AccessError("cross_origin_redirect_refused", 403); headers.set("location", view ? `/view/${view[1]}${location.pathname}` : location.pathname); }
+        if (headers.has("location")) {
+          const location = new URL(headers.get("location")!, backend);
+          if (location.origin !== backend) throw new AccessError("cross_origin_redirect_refused", 403);
+          headers.set("location", view ? `/view/${view[1]}${location.pathname}` : location.pathname);
+        }
         if (origin === "artifacts") headers.set("content-security-policy", "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; connect-src 'none'; worker-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'");
         else headers.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
         response = new Response(upstream.body, { status: upstream.status, headers });

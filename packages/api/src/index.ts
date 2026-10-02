@@ -48,6 +48,7 @@ export {
 } from "./socket.js";
 export { serveWebSocket, type ServedWebSocket, type RemoteWebSocketAdmission } from "./websocket.js";
 export { serveHttp, type HttpPeer } from "./http.js";
+export { contentTransportConfig, contentListenerOrigin, contentPublicOrigins, CONTENT_DOCUMENT_PORT, CONTENT_ARTIFACT_PORT, type ContentTransportConfig } from "./content-transport.js";
 export { configuredMcpPackages, configuredMcpServers, serveMcp, type ServedMcp } from "./mcp.js";
 export { McpEventSubscriptions, type EventTarget, type EventValue, type EventSubscription } from "./mcp-subscriptions.js";
 export { completionHistoryRevision, completionHistoryState, completionHistoryReceipt, notifyCompletionLink, browseCompletionLink, workerCompletionLink,

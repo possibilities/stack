@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { CONTENT_ARTIFACT_PORT, CONTENT_DOCUMENT_PORT } from "@stack/api";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { ArtifactKind, ArtifactRow } from "./artifacts.js";
@@ -12,8 +13,6 @@ import { editFrontmatter } from "./frontmatter.js";
 import { normalizeTags, parseTagList } from "./slug.js";
 import {
   absolute,
-  DEFAULT_ARTIFACT_PORT,
-  DEFAULT_PORT,
   latestArtifactUrl,
   versionArtifactUrl,
 } from "./urls.js";
@@ -28,11 +27,11 @@ function portValue(raw: string | undefined, fallback: number, flag: string): num
 }
 
 export function portOf(flags: ParsedFlags): number {
-  return portValue(flags.values["port"], DEFAULT_PORT, "--port");
+  return portValue(flags.values["port"], CONTENT_DOCUMENT_PORT, "--port");
 }
 
 export function artifactPortOf(flags: ParsedFlags): number {
-  return portValue(flags.values["artifact-port"], DEFAULT_ARTIFACT_PORT, "--artifact-port");
+  return portValue(flags.values["artifact-port"], CONTENT_ARTIFACT_PORT, "--artifact-port");
 }
 
 function kindOf(flags: ParsedFlags): ArtifactKind | undefined {
@@ -278,7 +277,7 @@ export async function openCommand(context: Context, flags: ParsedFlags): Promise
     throw new CliError(
       "server_not_running",
       `nothing is serving ${url}`,
-      `Start it first: agentwiki serve${port === DEFAULT_PORT ? "" : ` --port ${port}`}`,
+      `Start it first: agentwiki serve${port === CONTENT_DOCUMENT_PORT ? "" : ` --port ${port}`}`,
     );
   }
   const opener = process.platform === "darwin" ? "open" : "xdg-open";

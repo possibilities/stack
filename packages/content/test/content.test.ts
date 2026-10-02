@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { serveApi, socketCall, socketPath } from "@stack/api";
-import { api, contentNetworkConfig } from "../api.js";
+import { executeOperation, serveApi, socketCall, socketPath, type McpContent } from "@stack/api";
+import { api } from "../api.js";
+import { Collections } from "../src/collections.js";
 import { resolveObjectPath } from "../src/serve.js";
 import { listingPage } from "../src/render.js";
 
@@ -321,12 +322,6 @@ test("the original collection schema migrates IDs and byte references without re
   } finally { await api.closeContext(ctx); await rm(state, { recursive: true, force: true }); }
 });
 
-test("Content backends cannot bind remotely; Access owns authenticated remote ingress", () => {
-  assert.throws(() => contentNetworkConfig({ STACK_CONTENT_HOST: "0.0.0.0" }), /must bind 127/);
-  assert.throws(() => contentNetworkConfig({ STACK_CONTENT_DOCUMENT_ORIGIN: "https://same.example", STACK_CONTENT_ARTIFACT_ORIGIN: "https://same.example" }), /must differ/);
-  assert.throws(() => contentNetworkConfig({ STACK_CONTENT_HOST: "0.0.0.0", STACK_CONTENT_DOCUMENT_ORIGIN: "https://docs.example", STACK_CONTENT_ARTIFACT_ORIGIN: "https://assets.example" }), /must bind 127/);
-});
-
 test("configured public origins drive static redirects without appearing in stored item identities", { timeout: 30_000 }, async () => {
   const state = await mkdtemp(join(tmpdir(), "stack-public-origin-"));
   const ctx = await api.createContext({ ...process.env, STACK_STATE_DIR: state,
@@ -339,6 +334,32 @@ test("configured public origins drive static redirects without appearing in stor
     assert.equal(redirected.headers.get("location"), `https://assets.example${item.url}`);
     assert.equal(ctx.server.url, "https://docs.example");
   } finally { await api.closeContext(ctx); await rm(state, { recursive: true, force: true }); }
+});
+
+test("standalone item reads preserve bytes and portable paths when ephemeral listener origins are unknown", async () => {
+  const state = await mkdtemp(join(tmpdir(), "stack-content-standalone-"));
+  const collections = new Collections(join(state, "wiki", "collections"));
+  const items = [
+    collections.put({ name: "note.txt", kind: "document", mediaType: "text/plain", bytes: Buffer.from("offline note") }),
+    collections.put({ name: "data.bin", kind: "file", mediaType: "application/octet-stream", bytes: Buffer.from([0, 255]) }),
+  ];
+  collections.close();
+  const operation = api.operations.find(op => op.name === "item_get")!;
+  const standalone = operation.standalone!;
+  const ctx = await standalone.open({ STACK_STATE_DIR: state, STACK_CONTENT_PORT: "0", STACK_CONTENT_ARTIFACT_PORT: "0" }, new AbortController().signal);
+  try {
+    for (const item of items) for (const includeData of [false, true]) {
+      const result = await executeOperation(operation, ctx, { id: item.id, includeData }, undefined, "mcp") as { structuredContent: { url: string }; content: McpContent };
+      assert.equal(result.structuredContent.url, `/c/${item.id}`);
+      assert.equal(result.content.length, 1, "unknown origins cannot produce resource links or resource URIs");
+      const block = result.content[0];
+      assert.ok(block?.type === "text");
+      const data = JSON.parse(block.text);
+      assert.equal(data.url, `/c/${item.id}`);
+      assert.equal(data.content, includeData && item.kind === "document" ? "offline note" : null);
+      assert.equal(data.base64, includeData && item.kind === "file" ? "AP8=" : null);
+    }
+  } finally { await standalone.close(ctx); await rm(state, { recursive: true, force: true }); }
 });
 
 test("collections survive a context restart without moving the legacy vault", { timeout: 30_000 }, async () => {

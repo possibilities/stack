@@ -15,6 +15,7 @@ registerHooks({
 
 const content = await import("../lib/stack/content.ts");
 const { stageBytes, StageStalled, stageKey } = await import("../lib/stack/content-upload.ts");
+const { contentOrigins } = await import("../lib/stack/snapshot.ts");
 
 test("local files map to item kinds and media types the Content API accepts", () => {
   assert.deepEqual(content.itemKindFor("photo.png", "image/png"), { kind: "image", mediaType: "image/png" });
@@ -73,6 +74,23 @@ test("Content origin links are offered only to loopback pages", () => {
   assert.equal(content.contentHref(origins, "artifact", "/c/abc", "host.tailnet.ts.net"), null);
   assert.equal(content.contentHref(null, "artifact", "/c/abc", "127.0.0.1"), null);
   assert.equal(content.fillRoute("/d/{slug}", { slug: "a b" }), "/d/a%20b");
+});
+
+test("invalid Content configuration and unresolved ports suppress UI links", () => {
+  for (const env of [
+    { STACK_CONTENT_DOCUMENT_ORIGIN: "javascript:alert(1)", STACK_CONTENT_ARTIFACT_ORIGIN: "https://assets.example" },
+    { STACK_CONTENT_DOCUMENT_ORIGIN: "http://127.0.0.1:8777/path", STACK_CONTENT_ARTIFACT_ORIGIN: "http://127.0.0.1:8778" },
+    { STACK_CONTENT_DOCUMENT_ORIGIN: "", STACK_CONTENT_ARTIFACT_ORIGIN: "" },
+    { STACK_CONTENT_HOST: "0.0.0.0" },
+    { STACK_CONTENT_PORT: "0" },
+    { STACK_CONTENT_ARTIFACT_PORT: "0" },
+  ]) {
+    const origins = contentOrigins(env);
+    assert.equal(origins, null);
+    assert.equal(content.contentHref(origins, "document", "/d/note", "127.0.0.1"), null);
+  }
+  const origins = contentOrigins({ STACK_CONTENT_DOCUMENT_ORIGIN: "http://127.0.0.1:9101", STACK_CONTENT_ARTIFACT_ORIGIN: "http://127.0.0.1:9102" });
+  assert.equal(content.contentHref(origins, "artifact", "/c/item", "127.0.0.1"), "http://127.0.0.1:9102/c/item");
 });
 
 /** A fake stage store that can drop chosen responses after applying them, like a lost acknowledgement. */
