@@ -649,13 +649,6 @@ function ensureCaptureDirectoryGuards(dataHome: string, presetName: string): Dir
   }
 }
 
-let overlaySampleGuardHook: ((directory: string) => void) | undefined;
-
-/** @internal Test-only hook at the retained overlay sample guard boundary. */
-export function __setCorpusOverlaySampleGuardHookForTest(hook?: (directory: string) => void): void {
-  overlaySampleGuardHook = hook;
-}
-
 async function runCorpusRoot(
   root: string,
   labelPrefix: string,
@@ -687,7 +680,6 @@ async function runCorpusRoot(
         const sampleGuards = sampleGuard ? [...presetGuards!, sampleGuard] : undefined;
         try {
           if (sampleGuards) {
-            overlaySampleGuardHook?.(directory);
             revalidateDirectoryGuards(sampleGuards);
             validatePrivateCorpusTree(directory, sampleGuards, true);
           }
@@ -915,15 +907,6 @@ function publishCapturedSample(
   } finally {
     closeDirectoryGuards(guards);
   }
-}
-
-/** @internal Test-only entrypoint for capture publication after browser/result preparation. */
-export function __publishCapturedSampleForTest(
-  presetName: string,
-  files: Record<string, string>,
-  explicitRoot?: string,
-): string {
-  return publishCapturedSample(presetName, files, explicitRoot);
 }
 
 export async function captureCorpus(

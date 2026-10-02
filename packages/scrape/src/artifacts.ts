@@ -136,11 +136,7 @@ function requirePublishedIdentity(
     throw new Error("staging artifact identity changed");
 }
 
-interface AtomicReplaceHooks {
-  readonly beforeRename?: (temporary: string) => void;
-}
-
-function atomicReplace(artifact: PreparedTextArtifact, hooks: AtomicReplaceHooks = {}): void {
+function atomicReplace(artifact: PreparedTextArtifact): void {
   const directory = dirname(artifact.path);
   const temporary = join(directory, `.agentscrape-artifact-${randomUUID()}.tmp`);
   let descriptor: number | null = null;
@@ -160,7 +156,6 @@ function atomicReplace(artifact: PreparedTextArtifact, hooks: AtomicReplaceHooks
     if (!isPrivateArtifact(ready, artifact.bytes.byteLength))
       throw new Error("staging artifact is not private");
 
-    hooks.beforeRename?.(temporary);
     const beforePath = lstatSync(temporary, { bigint: true });
     const beforeDescriptor = fstatSync(descriptor, { bigint: true });
     requirePublishedIdentity(beforePath, beforeDescriptor, ready, artifact.bytes.byteLength);
@@ -199,14 +194,6 @@ function atomicReplace(artifact: PreparedTextArtifact, hooks: AtomicReplaceHooks
       }
     }
   }
-}
-
-/** @internal Test-only injection at the final staging-path verification boundary. */
-export function __atomicReplaceForTest(
-  artifact: PreparedTextArtifact,
-  beforeRename: (temporary: string) => void,
-): void {
-  atomicReplace(artifact, { beforeRename });
 }
 
 export function writePreparedTextArtifacts(artifacts: readonly PreparedTextArtifact[]): void {
