@@ -194,3 +194,41 @@ test("ingress checks network on every route; duplicate admissions confer indepen
     assert.equal(calls[0][1].payload.client, "chrome-extension");
   } finally { f.close(); }
 });
+
+test("Content proxy uses configured loopback listeners and refuses unknown backends and external redirects", async () => {
+  const f = fixture();
+  try {
+    const client = pair(f.store);
+    const token = f.store.refresh(client.receipt.refreshToken, randomUUID(), "content");
+    const peer = { remoteAddress: "100.80.0.2", localAddress: "100.80.0.1", remotePort: 1 };
+    const publicOrigins = { STACK_CONTENT_DOCUMENT_ORIGIN: "https://docs.example", STACK_CONTENT_ARTIFACT_ORIGIN: "https://assets.example" };
+    for (const origin of ["documents", "artifacts"] as const) {
+      const path = origin === "documents" ? "/d/test" : "/c/a1e7b246-6e12-43ae-8d85-2178bf0bb238";
+      const request = () => new Request(`https://test${path}`, { headers: { authorization: `Bearer ${token.accessToken}`, "x-stack-server-id": f.store.serverId } });
+      const calls: string[] = [];
+      let location: string | undefined;
+      const fetchBackend: typeof fetch = async (url, init) => {
+        calls.push(String(url));
+        assert.equal(init?.redirect, "manual");
+        assert.equal(init?.headers, undefined, "client credentials and host are never forwarded");
+        return location ? new Response(null, { status: 302, headers: { location } }) : new Response("content");
+      };
+      const env = { ...publicOrigins, STACK_WIKI_PORT: "9011", STACK_WIKI_ARTIFACT_PORT: "9012", STACK_CONTENT_PORT: "9021", STACK_CONTENT_ARTIFACT_PORT: "9022" };
+      const serve = handler({ store: f.store, env, origin, verify: async () => {}, fetchBackend });
+      const backend = origin === "documents" ? "http://127.0.0.1:9021" : "http://127.0.0.1:9022";
+      assert.equal(await (await serve(request(), peer)).text(), "content");
+      assert.deepEqual(calls, [`${backend}${path}`]);
+      location = `${backend}${path}`;
+      assert.equal((await serve(request(), peer)).headers.get("location"), path);
+      location = `${origin === "documents" ? publicOrigins.STACK_CONTENT_DOCUMENT_ORIGIN : publicOrigins.STACK_CONTENT_ARTIFACT_ORIGIN}${path}`;
+      assert.equal((await serve(request(), peer)).status, 403, "public origins are not backend redirect authority");
+      location = undefined;
+      const before = calls.length;
+      for (const port of ["0", "", "not-a-port"]) {
+        const unresolved = handler({ store: f.store, env: { ...env, [origin === "documents" ? "STACK_CONTENT_PORT" : "STACK_CONTENT_ARTIFACT_PORT"]: port }, origin, verify: async () => {}, fetchBackend });
+        assert.equal((await unresolved(request(), peer)).status, 503);
+      }
+      assert.equal(calls.length, before, "unresolved listeners never dispatch an HTTP request");
+    }
+  } finally { f.close(); }
+});

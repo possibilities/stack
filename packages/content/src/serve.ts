@@ -3,7 +3,7 @@
 
 import type { Dirent, Stats } from "node:fs";
 import { createReadStream, lstatSync, readdirSync } from "node:fs";
-import { serveHttp } from "@stack/api";
+import { contentPublicOrigins, serveHttp, type ContentTransportConfig } from "@stack/api";
 import { join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { ArtifactRow, ArtifactStore } from "./artifacts.js";
@@ -21,20 +21,15 @@ import {
   renderMarkdown,
 } from "./render.js";
 import { buildLinkLookup, lookupLinkTarget } from "./resolve.js";
-import { documentUrl, latestArtifactUrl, origin, versionArtifactUrl } from "./urls.js";
+import { documentUrl, latestArtifactUrl, versionArtifactUrl } from "./urls.js";
 
-export interface ServeOptions {
+export interface ServeOptions extends ContentTransportConfig {
   env?: NodeJS.ProcessEnv;
   vaultRoot: string;
   casRoot: string;
   index: VaultIndex;
   store: ArtifactStore;
   collections: Collections;
-  port: number;
-  artifactPort: number;
-  host: string;
-  documentOrigin?: string;
-  artifactOrigin?: string;
   routes?: { documents: readonly { path: string }[]; artifacts: readonly { path: string }[] };
 }
 
@@ -101,8 +96,10 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
 
   const port = documentServer.port;
   const artifactPort = artifactServer.port;
-  documentOrigin = options.documentOrigin ?? origin(port, options.host);
-  artifactOrigin = options.artifactOrigin ?? origin(artifactPort, options.host);
+  // Both listeners now report nonzero ports, including ephemeral bindings.
+  const origins = contentPublicOrigins({ ...options, port, artifactPort })!;
+  documentOrigin = origins.document;
+  artifactOrigin = origins.artifact;
 
   return {
     port,

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { operation, stateDir, type PackageApi, type StandaloneContext } from "@stack/api";
+import { contentPublicOrigins, contentTransportConfig, operation, stateDir, type PackageApi, type StandaloneContext } from "@stack/api";
 import { ARTIFACT_KINDS, ArtifactStore, MAX_ARTIFACT_BYTES } from "./src/artifacts.js";
 import { Collections, MAX_COLLECTION_ITEM_BYTES, MAX_INLINE_BYTES } from "./src/collections.js";
 import type { Context, Handler } from "./src/context.js";
@@ -19,7 +19,6 @@ import { agentTools, invocationFor } from "./src/mcp-tools.js";
 import * as publish from "./src/publish.js";
 import { parseTagList } from "./src/slug.js";
 import { startServer, type RunningServer } from "./src/serve.js";
-import { DEFAULT_ARTIFACT_PORT, DEFAULT_HOST, DEFAULT_PORT } from "./src/urls.js";
 import { ensureVault } from "./src/vault.js";
 
 export type ContentContext = { command: Context; server: RunningServer; index: ReturnType<typeof openIndex>; store: ArtifactStore; collections: Collections;
@@ -35,7 +34,7 @@ const mutating = new Set(["collection_create", "collection_update", "collection_
   "document_update", "new", "add", "rm", "restore", "artifacts_rm", "artifacts_restore", "artifact_publish", "gc", "blob_stage_abort", "content_storage_collect"]);
 
 type StoredContext = Pick<ContentContext, "collections">;
-type ItemReadContext = StoredContext & { server: Pick<RunningServer, "artifactUrl"> };
+type ItemReadContext = StoredContext & { server: { artifactUrl: string | null } };
 const standaloneCollections: StandaloneContext<StoredContext> = {
   open(env) {
     try { return { collections: new Collections(join(stateDir(env), "wiki", "collections"), { readOnly: true }) }; }
@@ -45,9 +44,8 @@ const standaloneCollections: StandaloneContext<StoredContext> = {
 };
 const standaloneItem: StandaloneContext<ItemReadContext> = {
   async open(env, signal) {
-    const artifactPort = port(env, env.STACK_CONTENT_ARTIFACT_PORT === undefined ? "STACK_WIKI_ARTIFACT_PORT" : "STACK_CONTENT_ARTIFACT_PORT", DEFAULT_ARTIFACT_PORT);
-    const network = contentNetworkConfig(env);
-    return { ...await standaloneCollections.open(env, signal), server: { artifactUrl: network.artifactOrigin ?? `http://127.0.0.1:${artifactPort}` } };
+    const origins = contentPublicOrigins(contentTransportConfig(env));
+    return { ...await standaloneCollections.open(env, signal), server: { artifactUrl: origins?.artifact ?? null } };
   },
   close(ctx) { ctx.collections.close(); },
 };
@@ -205,12 +203,15 @@ const collectionOperations = [
     },
     mcpContent(ctx, _input, item) {
       const { content, base64, ...metadata } = item;
-      const uri = new URL(item.url, ctx.server.artifactUrl).href;
       const summary = { type: "text" as const, text: JSON.stringify(metadata) };
-      if (item.kind === "document" && content !== null)
-        return [summary, { type: "resource" as const, resource: { uri, mimeType: item.mediaType, text: content } }];
       if (item.kind === "image" && base64 !== null)
         return [summary, { type: "image" as const, data: base64, mimeType: item.mediaType }];
+      // Standalone reads cannot resolve a port-zero listener. Preserve the data
+      // and portable path without inventing an HTTP resource address.
+      if (!ctx.server.artifactUrl) return [{ type: "text" as const, text: JSON.stringify(item) }];
+      const uri = new URL(item.url, ctx.server.artifactUrl).href;
+      if (item.kind === "document" && content !== null)
+        return [summary, { type: "resource" as const, resource: { uri, mimeType: item.mediaType, text: content } }];
       if (item.kind === "file" && base64 !== null)
         return [summary, { type: "resource" as const, resource: { uri, mimeType: item.mediaType, blob: base64 } }];
       return [summary, { type: "resource_link" as const, uri, name: item.name, mimeType: item.mediaType, size: item.bytes }];
@@ -306,34 +307,6 @@ const commandOperations = agentTools(contract)
     });
   });
 
-function port(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
-  const value = env[name] === undefined ? fallback : Number(env[name]);
-  if (!Number.isInteger(value) || value < 0 || value > 65535 || env[name] === "") {
-    throw new Error(`${name} must be a port from 0 to 65535`);
-  }
-  return value;
-}
-
-export function contentNetworkConfig(env: NodeJS.ProcessEnv): { host: string; documentOrigin?: string; artifactOrigin?: string } {
-  const host = env.STACK_CONTENT_HOST ?? DEFAULT_HOST;
-  if (host !== "127.0.0.1") throw new Error("Content backend must bind 127.0.0.1; configure remote clients through Access");
-  const parseOrigin = (value: string | undefined, name: string): string | undefined => {
-    if (value === undefined) return undefined;
-    let url: URL;
-    try { url = new URL(value); } catch { throw new Error(`${name} must be an HTTP(S) origin`); }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash || value !== url.origin)
-      throw new Error(`${name} must be an HTTP(S) origin with no path, credentials or query`);
-    return url.origin;
-  };
-  const documentOrigin = parseOrigin(env.STACK_CONTENT_DOCUMENT_ORIGIN, "STACK_CONTENT_DOCUMENT_ORIGIN");
-  const artifactOrigin = parseOrigin(env.STACK_CONTENT_ARTIFACT_ORIGIN, "STACK_CONTENT_ARTIFACT_ORIGIN");
-  if ((documentOrigin === undefined) !== (artifactOrigin === undefined)) throw new Error("content document and artifact origins must be configured together");
-  if (documentOrigin && documentOrigin === artifactOrigin) throw new Error("content document and artifact origins must differ");
-  if (![DEFAULT_HOST, "localhost"].includes(host) && !documentOrigin)
-    throw new Error("non-loopback content hosts require explicit document and artifact origins");
-  return { host, ...(documentOrigin ? { documentOrigin, artifactOrigin } : {}) };
-}
-
 type AnyContentOperation = PackageApi<ContentContext>["operations"][number];
 
 const documentRoutes = [
@@ -389,6 +362,7 @@ const packageApi: PackageApi<ContentContext, keyof typeof topics> = {
     start(ctx, publish) { ctx.changed = () => publish("content_changed"); return () => { ctx.changed = undefined; }; },
   },
   async createContext(env) {
+    const network = contentTransportConfig(env);
     const home = homedir();
     const state = env.STACK_STATE_DIR ?? join(home, ".local", "state", "stack");
     const vaultRoot = join(state, "wiki", "vault");
@@ -401,11 +375,8 @@ const packageApi: PackageApi<ContentContext, keyof typeof topics> = {
     try {
       store = ArtifactStore.open(env, home);
       collections = new Collections(join(state, "wiki", "collections"));
-      const documentPort = port(env, env.STACK_CONTENT_PORT === undefined ? "STACK_WIKI_PORT" : "STACK_CONTENT_PORT", DEFAULT_PORT);
-      const artifactPort = port(env, env.STACK_CONTENT_ARTIFACT_PORT === undefined ? "STACK_WIKI_ARTIFACT_PORT" : "STACK_CONTENT_ARTIFACT_PORT", DEFAULT_ARTIFACT_PORT);
-      if (documentPort !== 0 && documentPort === artifactPort) throw new Error("content document and artifact ports must differ");
       const server = await startServer({ env, vaultRoot, casRoot: store.casRoot, index, store, collections,
-        port: documentPort, artifactPort, ...contentNetworkConfig(env), routes: {
+        ...network, routes: {
           documents: documentRoutes, artifacts: artifactRoutes,
         } });
       return { command, server, index, store, collections };

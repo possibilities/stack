@@ -1,7 +1,7 @@
 import { ARTIFACT_KINDS, MAX_ARTIFACT_BYTES } from "./artifacts.js";
 import { INDEX_SCHEMA_VERSION } from "./index.js";
 import { MIN_MENTION_LENGTH } from "./links.js";
-import { DEFAULT_ARTIFACT_PORT, DEFAULT_PORT } from "./urls.js";
+import { CONTENT_ARTIFACT_PORT, CONTENT_DOCUMENT_PORT } from "@stack/api";
 import { DEFAULT_VAULT } from "./vault.js";
 
 export const VERSION = "0.1.0";
@@ -799,7 +799,7 @@ const COMMANDS: ContractCommand[] = [
         name: "--port",
         type: "integer",
         description: "Where serve is listening.",
-        default: DEFAULT_PORT,
+        default: CONTENT_DOCUMENT_PORT,
         minimum: PORT_MINIMUM,
         maximum: PORT_MAXIMUM,
       },
@@ -834,7 +834,7 @@ const COMMANDS: ContractCommand[] = [
         name: "--port",
         type: "integer",
         description: "Document listen port.",
-        default: DEFAULT_PORT,
+        default: CONTENT_DOCUMENT_PORT,
         minimum: PORT_MINIMUM,
         maximum: PORT_MAXIMUM,
       },
@@ -842,7 +842,7 @@ const COMMANDS: ContractCommand[] = [
         name: "--artifact-port",
         type: "integer",
         description: "Artifact listen port; must differ from --port.",
-        default: DEFAULT_ARTIFACT_PORT,
+        default: CONTENT_ARTIFACT_PORT,
         minimum: PORT_MINIMUM,
         maximum: PORT_MAXIMUM,
       },
@@ -1034,13 +1034,13 @@ export function buildContract(paths: ContractPaths): Contract {
           urls: { latest: "/a/<name>/", immutable: "/a/<name>/v/<hash>/", document: "/d/<slug>" },
         },
         serving: {
-          command: `agentwiki serve --port ${DEFAULT_PORT}`,
+          command: `agentwiki serve --port ${CONTENT_DOCUMENT_PORT}`,
           host: "loopback only",
           execution: "none — static bytes and rendered markdown only",
           daemon:
             "io.arthack.agentwiki.serve, a user launch agent installed by AgentStart; every other command still works with it stopped",
-          document_port: DEFAULT_PORT,
-          artifact_port: DEFAULT_ARTIFACT_PORT,
+          document_port: CONTENT_DOCUMENT_PORT,
+          artifact_port: CONTENT_ARTIFACT_PORT,
           artifact_isolation:
             "artifacts answer on their own origin, so their scripts can read neither /d/<slug> nor the network; /a/… on the document port redirects there",
         },

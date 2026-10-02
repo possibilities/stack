@@ -489,9 +489,13 @@ test("Brain share rejects invalid ports before creating sockets", { timeout: 30_
   assert.match(await refusedStartup({ STACK_BRAIN_SHARE_HOST: "" }), /Brain backend must bind 127/);
 });
 
-test("remote content listeners require two distinct public origins before creating sockets", { timeout: 30_000 }, async () => {
+test("Content transport configuration is rejected before creating sockets", { timeout: 30_000 }, async () => {
   assert.match(await refusedStartup({ STACK_CONTENT_HOST: "0.0.0.0" }), /Content backend must bind 127/);
   assert.match(await refusedStartup({ STACK_CONTENT_DOCUMENT_ORIGIN: "https:\/\/same.example", STACK_CONTENT_ARTIFACT_ORIGIN: "https:\/\/same.example" }), /origins must differ/);
+  assert.match(await refusedStartup({ STACK_CONTENT_DOCUMENT_ORIGIN: "https://docs.example" }), /configured together/);
+  assert.match(await refusedStartup({ STACK_CONTENT_PORT: "1.5" }), /STACK_CONTENT_PORT must be a port/);
+  assert.match(await refusedStartup({ STACK_CONTENT_PORT: undefined, STACK_WIKI_PORT: "" }), /STACK_WIKI_PORT must be a port/);
+  assert.match(await refusedStartup({ STACK_CONTENT_PORT: "9001", STACK_CONTENT_ARTIFACT_PORT: "9001" }), /ports must differ/);
 });
 
 test("remote UI requires an exact HTTPS certificate origin and three distinct Access ports before creating sockets", { timeout: 30_000 }, async () => {

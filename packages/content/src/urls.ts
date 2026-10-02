@@ -2,12 +2,7 @@
  * and the server — a link written into the vault must still resolve years
  * later, so the shapes live here rather than in whichever module builds one. */
 
-export const DEFAULT_PORT = 8777;
-/** Artifact bytes bind a second loopback port so they land on an origin of
- * their own — the isolation serve.ts relies on. Paths are unchanged, so a
- * citation written before the split still resolves. */
-export const DEFAULT_ARTIFACT_PORT = 8778;
-export const DEFAULT_HOST = "127.0.0.1";
+import { contentListenerOrigin } from "@stack/api";
 
 /** Moves as new versions land: what a human wants bookmarked. */
 export function latestArtifactUrl(name: string): string {
@@ -23,10 +18,8 @@ export function documentUrl(slug: string): string {
   return `/d/${slug}`;
 }
 
-export function origin(port: number, host: string = DEFAULT_HOST): string {
-  return `http://${host}:${port}`;
-}
-
-export function absolute(port: number, path: string, host: string = DEFAULT_HOST): string {
-  return `${origin(port, host)}${path}`;
+export function absolute(port: number, path: string): string {
+  const origin = contentListenerOrigin(port);
+  if (!origin) throw new Error("Content listener port is unresolved");
+  return `${origin}${path}`;
 }
