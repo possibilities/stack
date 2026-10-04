@@ -72,7 +72,10 @@ export const hookPlan = z.strictObject({ id: z.uuid(), endpointId: z.uuid(), end
   hookId: z.number().int().positive().nullable(), webhookUrl: z.string(), events: z.array(z.string()), observedRevision: z.string(), expiresAt: z.iso.datetime(),
   consequences: z.array(z.string()) });
 export const remoteReceipt = z.strictObject({ requestId: z.uuid(), endpointId: z.uuid(), action: z.string(), status: z.enum(["running", "succeeded", "failed", "unknown"]),
-  hookId: z.number().int().positive().nullable(), startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(), error: z.string().nullable() });
+  hookId: z.number().int().positive().nullable(), deliveryId: z.number().int().positive().optional(), startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(), error: z.string().nullable() });
 export type RemoteReceipt = z.infer<typeof remoteReceipt>;
+export const remoteReceiptPageInput = z.strictObject({ endpointId: z.uuid(), before: sequence.refine(value => value > 0).optional(), limit: z.number().int().min(1).max(50).default(25) });
+export const remoteReceiptPage = z.strictObject({ entries: z.array(remoteReceipt), nextCursor: sequence.nullable(), unsettled: sequence });
+export type RemoteReceiptPage = z.infer<typeof remoteReceiptPage>;
 export const ingressResponse = z.strictObject({ accepted: z.literal(true), duplicate: z.boolean(), sequence, deliveryId: z.string() });
 export const ingressError = z.strictObject({ error: z.string() });

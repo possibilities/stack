@@ -19,7 +19,8 @@ export type GithubWatch = { id: string; label: string; filter: GithubFilter; ena
   createdAt: string; updatedAt: string; scope: string };
 export type GithubWatchRead = { watch: GithubWatch; entries: GithubDelivery[]; pending: number; through: number; nextCursor: number | null };
 export type GithubRemoteReceipt = { requestId: string; endpointId: string; action: string; status: "running" | "succeeded" | "failed" | "unknown";
-  hookId: number | null; startedAt: string; completedAt: string | null; error: string | null };
+  hookId: number | null; deliveryId?: number; startedAt: string; completedAt: string | null; error: string | null };
+export type GithubRemoteReceiptPage = { entries: GithubRemoteReceipt[]; nextCursor: number | null; unsettled: number };
 /** A hook as GitHub reports it (secrets are never part of it), a reviewed hook plan, and the upstream records of the gh-backed operations. */
 export type GithubHook = { id: number; active: boolean; events: string[]; url: string; contentType: string | null; insecureSsl: string | null; updatedAt: string | null };
 export type GithubHookPlan = { id: string; endpointId: string; endpointRevision: number; action: "create" | "update"; hookId: number | null; webhookUrl: string; events: string[];

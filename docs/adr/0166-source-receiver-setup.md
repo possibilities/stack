@@ -6,6 +6,11 @@ operations and remote receipts of [ADR 0159](0159-github-webhook-ledger-and-watc
 no window, node kind or operation: setup lives in the existing **Receivers** window and is the
 local operator's work.
 
+The browser-history ownership and absent-receipt replay decisions below are
+superseded by [ADR 0169](0169-source-server-request-history.md): receipt discovery
+is server-owned, browser records cover only unconfirmed admission, and a missing
+receipt never authorizes resending an uncertain request.
+
 ## Decision
 
 **Five facts stay distinct.** Local configuration, public prerequisite, remote configuration,

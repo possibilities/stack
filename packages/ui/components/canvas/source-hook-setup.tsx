@@ -74,7 +74,8 @@ export function HookSetup({ endpoint, setup, requests }: { endpoint: GithubEndpo
       intent: `${review.headline} for ${receiverName(endpoint)}: ${review.eventsWords}, to ${review.url}` };
     const outcome = await requests.send(entry);
     setConfirming(false);
-    // The plan is spent once a request has gone out, whatever came back: a change of mind is a new plan, and a retry is the recorded request's own.
+    // The plan is spent once a request has gone out, whatever came back. Recovery
+    // reads only its receipt; a deliberate change of intent requires a new plan.
     setPlan(null);
     setApplied(outcome.sent ? entryWords(outcome.entry).text : outcome.reason);
   };
@@ -231,7 +232,7 @@ function ConfirmApply({ plan, hooks, endpoint, open, pending, waiting, onCancel,
           <AlertDialogTitle>{review.headline}?</AlertDialogTitle>
           <AlertDialogDescription className="flex flex-col gap-2">
             <span><span className="font-medium text-foreground">{endpoint.label}</span> at GitHub, events <code className="font-mono text-[0.68rem]">{review.eventsWords}</code>, URL <code className="font-mono text-[0.68rem] break-all">{review.url}</code>.</span>
-            <span>This changes the hook at GitHub through gh. A request ID is recorded in this browser before it is sent. If the answer is lost, its receipt is read under that same ID; the request is never sent again under a new one.</span>
+            <span>This changes the hook at GitHub through gh. The server retains the receipt; this browser keeps the request ID only until admission is confirmed. If the answer is lost, only that ID&rsquo;s receipt is read; the request is never resent.</span>
             <span>Success will mean GitHub accepted the configuration. It will not mean anything has arrived.</span>
             {waiting ? <span role="status" className="text-foreground">{waiting}</span> : null}
           </AlertDialogDescription>

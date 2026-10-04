@@ -7,7 +7,7 @@ import type { z } from "zod";
 import { matches } from "./filter.js";
 import { decodePayload } from "./payload.js";
 import { object, summarize, type DeliveryHeaders } from "./summary.js";
-import { endpointCreate, watchCreate, hookPlan, type Delivery, type Endpoint, type Filter, type Watch, type RemoteReceipt } from "./schema.js";
+import { endpointCreate, watchCreate, hookPlan, type Delivery, type Endpoint, type Filter, type Watch, type RemoteReceipt, type RemoteReceiptPage } from "./schema.js";
 
 type EndpointRow = { id: string; digest: string; value: string; secret: string; previous_secret: string | null };
 type DeliveryRow = { sequence: number; endpoint_id: string; delivery_id: string; digest: string; value: string; raw: Uint8Array | null };
@@ -41,6 +41,9 @@ export class GithubStore {
         CREATE TABLE remote_requests(id TEXT PRIMARY KEY, digest TEXT NOT NULL, value TEXT NOT NULL);
         PRAGMA user_version=1; COMMIT;`);
       this.maintenance = new StateJournal(this.db, "source");
+      // Derived index also covers receipts retained by older installations. Its
+      // implicit rowid suffix gives stable admission order, independent of status.
+      this.db.exec("CREATE INDEX IF NOT EXISTS remote_requests_endpoint ON remote_requests(json_extract(value,'$.endpointId'))");
       for (const row of this.db.prepare("SELECT id,value FROM remote_requests WHERE json_extract(value,'$.status')='running'").all() as { id: string; value: string }[]) {
         const receipt = JSON.parse(row.value) as RemoteReceipt;
         this.finishRemote({ ...receipt, status: "unknown", completedAt: new Date().toISOString(), error: "owner_interrupted: inspect GitHub before preparing a new request; this request will not execute again" });
@@ -261,6 +264,17 @@ export class GithubStore {
   remoteReceipt(requestId: string): RemoteReceipt | null {
     const row = this.db.prepare("SELECT value FROM remote_requests WHERE id=?").get(requestId) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;
+  }
+  remoteReceipts(input: { endpointId: string; before?: number; limit: number }): RemoteReceiptPage {
+    this.getEndpoint(input.endpointId);
+    const where = "json_extract(value,'$.endpointId')=?";
+    const params: Array<string | number> = [input.endpointId];
+    if (input.before !== undefined) params.push(input.before);
+    params.push(input.limit + 1);
+    const rows = this.db.prepare(`SELECT rowid AS cursor,value FROM remote_requests WHERE ${where}${input.before === undefined ? "" : " AND rowid<?"} ORDER BY rowid DESC LIMIT ?`).all(...params) as { cursor: number; value: string }[];
+    const page = rows.slice(0, input.limit);
+    const unsettled = (this.db.prepare(`SELECT COUNT(*) AS n FROM remote_requests WHERE ${where} AND json_extract(value,'$.status') IN ('running','unknown')`).get(input.endpointId) as { n: number }).n;
+    return { entries: page.map(row => JSON.parse(row.value)), nextCursor: rows.length > page.length ? page.at(-1)!.cursor : null, unsettled };
   }
   existingRemote(requestId: string, input: unknown): RemoteReceipt | null {
     const row = this.db.prepare("SELECT digest,value FROM remote_requests WHERE id=?").get(requestId) as { digest: string; value: string } | undefined;

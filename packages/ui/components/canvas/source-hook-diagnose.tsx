@@ -63,7 +63,7 @@ export function HookDiagnose({ endpoint, requests }: { endpoint: GithubEndpoint;
           <dd className="flex min-w-0 flex-col gap-0.5">
             {latest ? <><span className="flex items-baseline gap-2"><Word tone={entryWords(latest).tone} className="text-[0.72rem]">{entryWords(latest).word}</Word><span className="text-muted-foreground">{remoteKindWords[latest.kind]} · <Stamp at={latest.at} /></span></span>
               <span className="text-muted-foreground">Receipt only: what GitHub did with the request.</span></>
-              : <span className="text-muted-foreground">No probe requested from this browser.</span>}
+              : <span className="text-muted-foreground">{requests.history.loaded && !requests.history.error ? "No probe in the server receipts read so far." : "Server probe history is not available yet."}</span>}
           </dd>
           <dt className="text-muted-foreground">Arrival</dt>
           <dd className="flex min-w-0 flex-col gap-0.5">
@@ -87,7 +87,7 @@ export function HookDiagnose({ endpoint, requests }: { endpoint: GithubEndpoint;
                   <span>GitHub resends this one attempt once. If Stack already holds this GUID the arrival is recognized as a duplicate: no second sequence and no new watch entry. A payload that was cleared is not restored. GitHub&rsquo;s answer is admission, not arrival.</span>
                 </>
               ) : <span>GitHub sends one {confirm?.kind === "test" ? "push event for the repository's latest commit" : "ping"} to the hook&rsquo;s URL. GitHub&rsquo;s answer is admission, not arrival: whether a signed request reaches Stack is shown separately.</span>}
-              <span>A request ID is recorded in this browser before sending. If the answer is lost its receipt is read under the same ID; it is never sent again under a new one.</span>
+              <span>The server retains this request&rsquo;s receipt. This browser keeps its ID until admission is confirmed. If the answer is lost, only that ID&rsquo;s receipt is read; the request is never resent.</span>
               {requests.waiting ? <span role="status" className="text-foreground">{requests.waiting}</span> : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -147,7 +147,7 @@ function Attempts({ endpoint, hookId, requests, onRedeliver }: { endpoint: Githu
     } catch (failure) { setError(codeWords(failure)); } finally { setLoading(false); }
   };
   const further = () => { back.current += correlationSpan; if (attempts) void correlate(attempts, back.current); };
-  const pendingFor = (attempt: GithubAttempt) => requests.entries.find((entry) => entry.kind === "redeliver" && entry.attemptId === attempt.id && (entry.status === "pending" || entry.status === "running" || entry.status === "unknown"));
+  const pendingFor = (attempt: GithubAttempt) => requests.entries.find((entry) => entry.kind === "redeliver" && (entry.attemptId === attempt.id || entry.attemptId === undefined && entry.hookId === hookId) && (entry.status === "pending" || entry.status === "running" || entry.status === "unknown"));
   return (
     <div className="flex flex-col gap-1.5">
       <span className={sourceLabel}>GitHub&rsquo;s delivery attempts</span>

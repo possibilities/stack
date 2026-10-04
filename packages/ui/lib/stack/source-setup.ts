@@ -243,10 +243,10 @@ export function memoryStorage(): KeyValue & { entries: Map<string, string> } {
   return { entries, get: (key) => entries.get(key) ?? null, set: (key, value) => { entries.set(key, value); return true; }, remove: (key) => { entries.delete(key); } };
 }
 
-export type RemoteKind = "apply" | "ping" | "test" | "redeliver";
-export const remoteKindWords: Record<RemoteKind, string> = { apply: "Hook configuration", ping: "Ping", test: "Push test", redeliver: "Redelivery" };
-/** `pending`: persisted and sent, no answer seen. `absent`: the owner has no record, so it never went to GitHub. The rest are the owner's own receipt statuses. */
-export type JournalStatus = "pending" | "running" | "succeeded" | "failed" | "unknown" | "absent";
+export type RemoteKind = "apply" | "ping" | "test" | "redeliver" | "other";
+export const remoteKindWords: Record<RemoteKind, string> = { apply: "Hook configuration", ping: "Ping", test: "Push test", redeliver: "Redelivery", other: "Remote request" };
+/** `pending`: browser-held identity without confirmed server admission. All other states are server receipts. */
+export type JournalStatus = "pending" | "running" | "succeeded" | "failed" | "unknown";
 export type JournalEntry = {
   requestId: string; endpointId: string; kind: RemoteKind; at: number; intent: string; status: JournalStatus;
   planId?: string; hookId?: number; attemptId?: number; guid?: string;
@@ -254,11 +254,9 @@ export type JournalEntry = {
 };
 const journalPrefix = "source-setup.requests.";
 export const journalKey = (endpointId: string): string => journalPrefix + endpointId;
-const keepSettled = 12;
-const unsettled = (entry: JournalEntry) => entry.status === "pending" || entry.status === "running" || entry.status === "unknown";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const statuses = new Set<string>(["pending", "running", "succeeded", "failed", "unknown", "absent"]);
-const kinds = new Set<string>(["apply", "ping", "test", "redeliver"]);
+const kinds = new Set<string>(["apply", "ping", "test", "redeliver", "other"]);
 
 function valid(value: unknown): value is JournalEntry {
   if (!value || typeof value !== "object") return false;
@@ -277,13 +275,15 @@ const changed = () => { version++; for (const listener of listeners) listener();
 export function readJournal(kv: KeyValue, endpointId: string): JournalEntry[] {
   try {
     const parsed: unknown = JSON.parse(kv.get(journalKey(endpointId)) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter(valid).filter((entry) => entry.endpointId === endpointId).sort((a, b) => a.at - b.at) : [];
+    // Legacy "absent" entries never establish non-admission forever: a delayed
+    // request can still arrive. Keep their identity, but remove replay authority.
+    return Array.isArray(parsed) ? parsed.filter(valid).filter((entry) => entry.endpointId === endpointId)
+      .map((entry) => ({ ...entry, status: "pending" as const })).sort((a, b) => a.at - b.at) : [];
   } catch { return []; }
 }
 
 function writeJournal(kv: KeyValue, endpointId: string, entries: JournalEntry[]): boolean {
-  const open = entries.filter(unsettled), done = entries.filter((entry) => !unsettled(entry)).slice(-keepSettled);
-  const kept = [...open, ...done].sort((a, b) => a.at - b.at);
+  const kept = entries.sort((a, b) => a.at - b.at);
   if (!kept.length) { kv.remove(journalKey(endpointId)); changed(); return true; }
   const ok = kv.set(journalKey(endpointId), JSON.stringify(kept));
   if (ok) changed();
@@ -296,15 +296,15 @@ export function begin(kv: KeyValue, entry: JournalEntry): boolean {
   return writeJournal(kv, entry.endpointId, [...entries, entry]);
 }
 
-/** Fold what the owner says into the entry. A receipt is the owner's word; `null` is the owner having no record of that ID. */
+/** Once the owner has a receipt, history belongs to the server. Absence now never grants replay authority. */
 export function settle(kv: KeyValue, endpointId: string, requestId: string, receipt: GithubRemoteReceipt | null, error: string | null = null): JournalEntry | null {
   const entries = readJournal(kv, endpointId);
   const held = entries.find((entry) => entry.requestId === requestId);
   if (!held) return null;
   const next: JournalEntry = receipt
-    ? { ...held, status: receipt.status, startedAt: receipt.startedAt, completedAt: receipt.completedAt, error: receipt.error, hookId: receipt.hookId ?? held.hookId }
-    : { ...held, status: "absent", error: error ?? held.error };
-  writeJournal(kv, endpointId, entries.map((entry) => entry.requestId === requestId ? next : entry));
+    ? { ...held, status: receipt.status, startedAt: receipt.startedAt, completedAt: receipt.completedAt, error: receipt.error, hookId: receipt.hookId ?? held.hookId, attemptId: receipt.deliveryId ?? held.attemptId }
+    : { ...held, status: "pending", error: error ?? held.error };
+  writeJournal(kv, endpointId, receipt ? entries.filter((entry) => entry.requestId !== requestId) : entries.map((entry) => entry.requestId === requestId ? next : entry));
   return next;
 }
 
@@ -324,12 +324,12 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 
 /**
  * Read what the owner recorded for this exact request ID, and nothing else: never a second dispatch, never a new ID. A receipt settles
- * the entry; no receipt means the owner never began it, so it never reached GitHub; a failed read leaves the entry as it was.
+ * the entry; no receipt means admission is not confirmed yet, not that a delayed request cannot arrive. A failed read keeps its identity.
  */
 export async function recover(kv: KeyValue, io: RemoteIo, entry: JournalEntry, error: string | null = null): Promise<Extract<RemoteOutcome, { sent: true }>> {
   try {
     const receipt = await io.readReceipt(entry.requestId);
-    const next = settle(kv, entry.endpointId, entry.requestId, receipt, error) ?? entry;
+    const next = settle(kv, entry.endpointId, entry.requestId, receipt, error) ?? (receipt ? receiptEntry(receipt) : entry);
     return { sent: true, entry: next, receipt, error, readError: null };
   } catch (readError) {
     return { sent: true, entry: readJournal(kv, entry.endpointId).find((held) => held.requestId === entry.requestId) ?? entry, receipt: null, error, readError: errorText(readError) };
@@ -341,6 +341,8 @@ export async function recover(kv: KeyValue, io: RemoteIo, entry: JournalEntry, e
  * the receipt for the same request ID; this function never dispatches twice.
  */
 export async function sendRemote(kv: KeyValue, io: RemoteIo, entry: JournalEntry): Promise<RemoteOutcome> {
+  if (entry.status !== "pending" || readJournal(kv, entry.endpointId).some((held) => held.requestId === entry.requestId))
+    return { sent: false, reason: "This request is already recorded. Read its receipt; never dispatch an uncertain request again." };
   if (!begin(kv, entry)) return { sent: false, reason: "This browser could not record the request, so it was not sent. Stack never sends a hook request it cannot recover." };
   try {
     const receipt = await io.dispatch(entry);
@@ -352,16 +354,32 @@ export async function sendRemote(kv: KeyValue, io: RemoteIo, entry: JournalEntry
 }
 
 /** The exact operation arguments for a recorded request: the same request ID, the same inputs, never a different intent. */
-export function resendArguments(entry: JournalEntry): { name: string; args: Record<string, unknown> } | null {
+export function remoteArguments(entry: JournalEntry): { name: string; args: Record<string, unknown> } | null {
+  if (entry.kind === "other") return null;
   if (entry.kind === "apply") return entry.planId ? { name: "github_hook_apply", args: { planId: entry.planId, requestId: entry.requestId } } : null;
   if (!entry.hookId) return null;
   if (entry.kind === "redeliver") return entry.attemptId ? { name: "github_hook_redeliver", args: { endpointId: entry.endpointId, hookId: entry.hookId, deliveryId: entry.attemptId, requestId: entry.requestId } } : null;
   return { name: "github_hook_probe", args: { endpointId: entry.endpointId, hookId: entry.hookId, requestId: entry.requestId, action: entry.kind === "test" ? "test" : "ping" } };
 }
 
-/** Only a request the owner never recorded can be sent again, and only with its own ID. Anything that may have reached GitHub is never sent again. */
-export const canSendAgain = (entry: JournalEntry): boolean => entry.status === "absent" && resendArguments(entry) !== null;
 export const canReadReceipt = (entry: JournalEntry): boolean => entry.status === "pending" || entry.status === "running" || entry.status === "unknown";
+
+/** Server history is inspectable without any browser-held intent or request IDs. Old receipts may not name the redelivery attempt. */
+export function receiptEntry(receipt: GithubRemoteReceipt): JournalEntry {
+  const kind: RemoteKind = receipt.action === "create" || receipt.action === "update" ? "apply"
+    : ["ping", "test", "redeliver"].includes(receipt.action) ? receipt.action as RemoteKind : "other";
+  const intent = `${receipt.action === "create" ? "Create webhook" : receipt.action === "update" ? "Update webhook" : remoteKindWords[kind]}${receipt.hookId ? ` · hook #${receipt.hookId}` : ""}${receipt.deliveryId ? ` · attempt ${receipt.deliveryId}` : kind === "redeliver" ? " · exact attempt not retained in this older receipt" : ""}`;
+  return { requestId: receipt.requestId, endpointId: receipt.endpointId, kind, at: Date.parse(receipt.startedAt), intent, status: receipt.status,
+    hookId: receipt.hookId ?? undefined, attemptId: receipt.deliveryId, startedAt: receipt.startedAt, completedAt: receipt.completedAt, error: receipt.error };
+}
+
+/** Server receipts are authoritative; browser records add only not-yet-confirmed requests. */
+export function requestEntries(receipts: readonly GithubRemoteReceipt[], pending: readonly JournalEntry[]): JournalEntry[] {
+  const retained = new Set(receipts.map(receipt => receipt.requestId));
+  // Preserve the owner's admission order even if its wall clock changed. Local
+  // unconfirmed requests lead in the view without pretending to be receipts.
+  return [...receipts].reverse().map(receiptEntry).concat(pending.filter(entry => !retained.has(entry.requestId)).sort((a, b) => a.at - b.at));
+}
 
 const codeWords: Record<string, string> = {
   github_gh_not_installed: "gh is not installed on this machine.", github_gh_spawn_failed: "gh could not be started.", github_gh_request_failed: "gh failed without a usable answer.",
@@ -394,21 +412,23 @@ export function entryWords(entry: JournalEntry): { word: string; tone: Tone; tex
       return { word: "Outcome unknown", tone: "warning", text: `The ${what} request may or may not have reached GitHub.${detail ? ` ${detail}` : ""} It will not run again. Inspect GitHub before asking for anything new.` };
     case "running":
       return { word: "Running", tone: "info", text: `The owner is still running the ${what} request.` };
-    case "absent":
-      return { word: "Never sent", tone: "muted", text: `Stack has no record of this ${what} request, so it never reached GitHub.${entry.error ? ` The answer it got: ${entry.error}` : ""}` };
     case "pending":
-      return { word: "Not confirmed", tone: "warning", text: `The ${what} request was sent from this browser and no answer was seen. Read its receipt to learn what happened; it is never sent again under a new ID.` };
+      return { word: "Not confirmed", tone: "warning", text: `Server admission of this ${what} request is not confirmed. Read its receipt to learn what happened. A missing receipt does not authorize resending a delayed or uncertain request.` };
   }
 }
 
-/** The receiver's "Request receipt" fact from what this browser's journal holds: requests, as the owner answered them, and no more. */
-export function requestFact(entries: readonly JournalEntry[], when: (at: number) => string): { word: string; tone: Tone; lines: string[] } {
-  if (!entries.length) return { word: "None recorded", tone: "muted", lines: ["No hook, ping or redelivery request is recorded in this browser. A request being admitted by GitHub would still not be a signed arrival."] };
+/** The receiver's "Request receipt" fact is server-owned history, never an inference from an empty browser. */
+export function requestFact(entries: readonly JournalEntry[], when: (at: number) => string, history: { loaded: boolean; error: string | null; unsettled: number; more: boolean }): { word: string; tone: Tone; lines: string[] } {
+  if (history.error) return { word: "Unavailable", tone: "warning", lines: [`Server request history could not be read: ${history.error}. Previously read receipts are not current confirmation.`] };
+  if (!history.loaded) return { word: "Not read", tone: "muted", lines: ["Server request history has not been read yet. An empty browser does not establish empty history."] };
+  if (!entries.length) return { word: "None recorded", tone: "muted", lines: ["This server has no recorded hook, ping or redelivery request for this receiver. A request being admitted by GitHub would still not be a signed arrival."] };
   const latest = entries[entries.length - 1]!;
   const view = entryWords(latest);
   const lines = entries.slice(-3).reverse().map((entry) => `${remoteKindWords[entry.kind]} ${entry.requestId.slice(0, 8)} · ${entryWords(entry).word} · ${when(entry.at)}`);
-  lines.push("Requests are what this browser sent and the owner's receipt for each; a request is not an arrival.");
-  return { word: view.word, tone: view.tone, lines };
+  if (history.unsettled) lines.push(`${history.unsettled} running or unknown ${history.unsettled === 1 ? "request" : "requests"} across the receiver's server history.`);
+  if (history.more) lines.push("Older server receipts are available in Requests; this is not the whole history.");
+  lines.push("Receipts are retained by the server across local browsers; a request is not an arrival.");
+  return { word: history.unsettled ? "Needs inspection" : view.word, tone: history.unsettled ? "warning" : view.tone, lines };
 }
 
 /* ---------- Probes and attempts ---------- */

@@ -134,7 +134,7 @@ test("a request is recorded before it is sent, and a clear answer settles it wit
   assert.equal(outcome.sent, true);
   assert.equal(outcome.entry.status, "succeeded");
   assert.equal(outcome.entry.startedAt, "2026-10-02T12:00:01.000Z");
-  assert.equal(setup.readJournal(kv, endpointId)[0].status, "succeeded");
+  assert.deepEqual(setup.readJournal(kv, endpointId), [], "confirmed admission leaves history to the server");
 });
 
 test("a lost answer is resolved by reading the receipt for the same request ID, never by sending again", async () => {
@@ -146,36 +146,43 @@ test("a lost answer is resolved by reading the receipt for the same request ID, 
   assert.deepEqual(read, [requestId], "the receipt is read under the same ID");
   assert.equal(outcome.entry.status, "succeeded");
   assert.equal(outcome.error, "connection lost");
-  // The owner never recorded it: it never reached GitHub, and the only way to send it again is with its own ID.
+  // No receipt now is not proof a delayed request cannot arrive. Preserve its ID without replay authority.
   const kv2 = setup.memoryStorage();
   const none = await setup.sendRemote(kv2, { dispatch: async () => { throw new Error("github_hook_plan_missing_or_expired"); }, readReceipt: async () => null }, entry());
-  assert.equal(none.entry.status, "absent");
-  assert.match(setup.entryWords(none.entry).text, /never reached GitHub/);
-  assert.equal(setup.canSendAgain(none.entry), true);
-  assert.deepEqual(setup.resendArguments(none.entry), { name: "github_hook_apply", args: { planId: entry().planId, requestId } }, "the same ID and the same plan");
+  assert.equal(none.entry.status, "pending");
+  assert.match(setup.entryWords(none.entry).text, /missing receipt does not authorize resending/);
+  let replayed = 0;
+  const refused = await setup.sendRemote(kv2, { dispatch: async () => { replayed++; return receipt("succeeded"); }, readReceipt: async () => null }, none.entry);
+  assert.equal(refused.sent, false); assert.equal(replayed, 0);
   // A receipt that cannot be read leaves the request unconfirmed, with its ID kept.
   const kv3 = setup.memoryStorage();
   const stuck = await setup.sendRemote(kv3, { dispatch: async () => { throw new Error("socket closed"); }, readReceipt: async () => { throw new Error("socket still closed"); } }, entry());
   assert.equal(stuck.entry.status, "pending");
   assert.equal(stuck.readError, "socket still closed");
-  assert.equal(setup.canSendAgain(stuck.entry), false, "an unconfirmed request may have reached GitHub");
   assert.equal(setup.canReadReceipt(stuck.entry), true);
   assert.equal(setup.readJournal(kv3, endpointId)[0].requestId, requestId);
 });
 
-test("unknown outcomes are never sent again, only read, and survive until forgotten", async () => {
+test("unknown server outcomes drop browser bookkeeping and can still be inspected by exact ID", async () => {
   const kv = setup.memoryStorage();
   const outcome = await setup.sendRemote(kv, { dispatch: async () => receipt("unknown", { error: "github_gh_request_failed" }), readReceipt: async () => null }, entry());
   assert.equal(outcome.entry.status, "unknown");
-  assert.equal(setup.canSendAgain(outcome.entry), false);
   assert.equal(setup.canReadReceipt(outcome.entry), true);
   assert.match(setup.entryWords(outcome.entry).text, /will not run again/);
-  for (let index = 0; index < 20; index++) setup.begin(kv, entry({ requestId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, at: now + 1 + index, status: "succeeded" }));
-  const kept = setup.readJournal(kv, endpointId);
-  assert.ok(kept.some((held) => held.requestId === requestId), "an unsettled request is never trimmed away");
-  assert.ok(kept.length <= 13, "settled history is bounded");
+  assert.deepEqual(setup.readJournal(kv, endpointId), [], "unknown is confirmed server admission, not an unconfirmed browser request");
+  const inspected = await setup.recover(kv, { dispatch: async () => { throw new Error("never dispatch"); }, readReceipt: async () => receipt("unknown") }, outcome.entry);
+  assert.equal(inspected.entry.status, "unknown");
+  const refused = await setup.sendRemote(kv, { dispatch: async () => { throw new Error("never dispatch"); }, readReceipt: async () => null }, inspected.entry);
+  assert.equal(refused.sent, false);
+  // Old browser histories, including the unsafe "absent" state, migrate conservatively.
+  for (const status of ["absent", "unknown", "succeeded"]) {
+    kv.set(setup.journalKey(endpointId), JSON.stringify([entry({ status })]));
+    const migrated = setup.readJournal(kv, endpointId)[0];
+    assert.equal(migrated.status, "pending");
+    assert.equal((await setup.sendRemote(kv, { dispatch: async () => { throw new Error("never dispatch"); }, readReceipt: async () => null }, migrated)).sent, false);
+  }
   setup.forget(kv, endpointId, requestId);
-  assert.equal(setup.readJournal(kv, endpointId).some((held) => held.requestId === requestId), false);
+  assert.deepEqual(setup.readJournal(kv, endpointId), []);
 });
 
 test("a request that cannot be recorded is not sent", async () => {
@@ -201,11 +208,11 @@ test("journals are per receiver and ignore anything that is not a recorded reque
   assert.ok(!JSON.stringify([...kv.entries.values()]).match(/secret/i), "nothing secret is ever recorded");
 });
 
-test("resending a probe or redelivery carries the recorded inputs and ID, and every kind says what it did and did not show", () => {
-  assert.deepEqual(setup.resendArguments(entry({ kind: "ping", planId: undefined })), { name: "github_hook_probe", args: { endpointId, hookId: 17, requestId, action: "ping" } });
-  assert.deepEqual(setup.resendArguments(entry({ kind: "test", planId: undefined })).args.action, "test");
-  assert.deepEqual(setup.resendArguments(entry({ kind: "redeliver", planId: undefined, attemptId: 91 })), { name: "github_hook_redeliver", args: { endpointId, hookId: 17, deliveryId: 91, requestId } });
-  assert.equal(setup.resendArguments(entry({ kind: "redeliver", planId: undefined })), null, "a redelivery without its exact attempt cannot be rebuilt");
+test("sending a probe or redelivery carries the recorded inputs and ID, and every kind says what it did and did not show", () => {
+  assert.deepEqual(setup.remoteArguments(entry({ kind: "ping", planId: undefined })), { name: "github_hook_probe", args: { endpointId, hookId: 17, requestId, action: "ping" } });
+  assert.deepEqual(setup.remoteArguments(entry({ kind: "test", planId: undefined })).args.action, "test");
+  assert.deepEqual(setup.remoteArguments(entry({ kind: "redeliver", planId: undefined, attemptId: 91 })), { name: "github_hook_redeliver", args: { endpointId, hookId: 17, deliveryId: 91, requestId } });
+  assert.equal(setup.remoteArguments(entry({ kind: "redeliver", planId: undefined })), null, "a redelivery without its exact attempt cannot be rebuilt");
   assert.match(setup.entryWords(entry({ kind: "apply", status: "succeeded" })).text, /not delivery verification/);
   assert.match(setup.entryWords(entry({ kind: "ping", status: "succeeded" })).text, /admission, not arrival/);
   assert.match(setup.entryWords(entry({ kind: "ping", status: "failed", error: "github_http_403" })).text, /did not take effect.*permission/);
@@ -214,13 +221,17 @@ test("resending a probe or redelivery carries the recorded inputs and ID, and ev
   assert.equal(setup.errorWords(null), null);
 });
 
-test("the request-receipt fact reports what the journal holds and keeps requests apart from arrivals", () => {
-  assert.equal(setup.requestFact([], String).word, "None recorded");
-  const fact = setup.requestFact([entry({ status: "succeeded", kind: "ping", at: 1 }), entry({ requestId: "77777777-7777-4777-8777-777777777777", status: "unknown", at: 2 })], (at) => `t${at}`);
-  assert.equal(fact.word, "Outcome unknown", "the newest request leads");
+test("the request-receipt fact discloses unread, unavailable, truncated and unsettled server history", () => {
+  const history = { loaded: true, error: null, unsettled: 0, more: false };
+  assert.equal(setup.requestFact([], String, history).word, "None recorded");
+  assert.equal(setup.requestFact([], String, { ...history, loaded: false }).word, "Not read");
+  assert.equal(setup.requestFact([], String, { ...history, error: "disconnected" }).word, "Unavailable");
+  const fact = setup.requestFact([entry({ status: "succeeded", kind: "ping", at: 1 }), entry({ requestId: "77777777-7777-4777-8777-777777777777", status: "unknown", at: 2 })], (at) => `t${at}`, { ...history, unsettled: 1, more: true });
+  assert.equal(fact.word, "Needs inspection");
   assert.equal(fact.tone, "warning");
   assert.match(fact.lines[0], /Hook configuration 77777777 · Outcome unknown · t2/);
   assert.match(fact.lines.at(-1), /a request is not an arrival/);
+  assert.ok(fact.lines.some(line => line.includes("Older server receipts")));
 });
 
 test("a probe's arrival is judged separately: observed since the request began, or not", () => {

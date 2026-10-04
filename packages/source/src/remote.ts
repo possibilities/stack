@@ -156,6 +156,7 @@ export class GithubRemote {
       const endpoint = this.managed(input.endpointId, input.hookId);
       const path = `${hookPath(endpoint)}/${input.hookId}/${input.action === "redeliver" ? `deliveries/${input.deliveryId}/attempts` : input.action === "test" ? "tests" : "pings"}`;
       const receipt: RemoteReceipt = { requestId: input.requestId, endpointId: input.endpointId, action: input.action, status: "running", hookId: input.hookId,
+        ...(input.action === "redeliver" ? { deliveryId: input.deliveryId } : {}),
         startedAt: new Date().toISOString(), completedAt: null, error: null };
       this.store.beginRemote(receipt, input); this.changed();
       try { await this.request("POST", path); receipt.status = "succeeded"; }

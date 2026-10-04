@@ -20,8 +20,8 @@ import { loadTree, type HudTree } from "./hud";
 import { initialLedger, SourceLedger, type LedgerState } from "./source";
 import { initialInbox, WatchInbox, type InboxState, type WatchCreateInput } from "./source-watches";
 import type { ReceiverCreateInput } from "./source-setup";
-import type { GithubDelivery, GithubDeliveryPage, GithubEndpoint, GithubFilter, GithubSetup, GithubStatus, GithubWatch, GithubWatchRead } from "./types";
-import { continueCompletions, continueInventory, continueOccurrences, continueSubscriptions, loadCompletions, loadInventory, loadOccurrences, loadSubscriptions, type CompletionFilter, type CompletionList, type OccurrenceFilter, type OccurrenceList, type StateInventory, type StateSelection, type SubscriptionFilter, type SubscriptionList } from "./state";
+import type { GithubDelivery, GithubDeliveryPage, GithubEndpoint, GithubFilter, GithubRemoteReceiptPage, GithubSetup, GithubStatus, GithubWatch, GithubWatchRead } from "./types";
+import { continueCompletions, continueInventory, continueOccurrences, continueSubscriptions, loadCompletions, loadInventory, loadOccurrences, loadSubscriptions, localOperation, type CompletionFilter, type CompletionList, type OccurrenceFilter, type OccurrenceList, type StateInventory, type StateSelection, type SubscriptionFilter, type SubscriptionList } from "./state";
 import { checkSettled, developerModeOn, type HarnessCheck } from "./developer";
 import type { HarnessCheckAdmission, HarnessReleases, ServeSettings } from "./types";
 
@@ -204,6 +204,9 @@ export type StackState = Snapshot & {
   sourceEndpoints: Resource<GithubEndpoint[]>;
   /** `github_setup_read` for receivers a window has opened, by receiver ID. Never carries a secret. */
   sourceSetups: Record<string, Resource<GithubSetup>>;
+  /** Local-only durable request history by receiver, discovered without browser-held request IDs. */
+  sourceReceipts: Record<string, Resource<GithubRemoteReceiptPage>>;
+  sourceReceiptPending: Record<string, boolean>;
   /** Delivery summaries any Source window has read, by local sequence, so a link to one outside the loaded page still resolves. */
   sourceDeliveries: Record<string, Resource<GithubDelivery>>;
   /** The Deliveries ledger's paging session. Its filter values exist only in this page's memory. */
@@ -361,6 +364,8 @@ export class StackStore {
   private sourceWatchChannel: { id: string; channel: Channel } | null = null;
   private sourceCountsTimer: ReturnType<typeof setTimeout> | null = null;
   private sourceCountsRun = 0;
+  private sourceReceiptsInflight = new Map<string, Promise<void>>();
+  private sourceReceiptsDirty = new Set<string>();
   private workItemWatchers = new Map<string, number>();
   private workItemChannels = new Map<string, Channel>();
   private statusInflight = new Map<string, Promise<void>>();
@@ -421,7 +426,7 @@ export class StackStore {
       procStatus: { data: null, error: null, at: null }, procScheduleGeneration: 0, procRunGenerations: {},
       settingsViews: {}, settingsCatalogs: {},
       hudTree: { data: null, error: null, at: null }, hudTreeBudget: hudTreePage, hudGeneration: 0, hudResourceGeneration: 0, hudItemGenerations: {},
-      sourceStatus: { data: null, error: null, at: null }, sourceEndpoints: { data: null, error: null, at: null }, sourceSetups: {}, sourceDeliveries: {},
+      sourceStatus: { data: null, error: null, at: null }, sourceEndpoints: { data: null, error: null, at: null }, sourceSetups: {}, sourceReceipts: {}, sourceReceiptPending: {}, sourceDeliveries: {},
       sourceLedger: initialLedger, sourceSelected: null, sourceGeneration: 0,
       sourceWatches: { data: null, error: null, at: null }, sourceWatchCounts: {}, sourceWatchSelected: null, sourceInbox: initialInbox,
     };
@@ -1845,6 +1850,7 @@ export class StackStore {
     this.refresh("sourceStatus"); this.refresh("sourceEndpoints"); this.refresh("sourceWatches");
     this.sourceInboxSession.invalidate(0);
     for (const id of Object.keys(this.state.sourceSetups)) void this.loadSourceSetup(id);
+    for (const id of Object.keys(this.state.sourceReceipts)) void this.loadSourceReceipts(id);
     for (const sequence of Object.keys(this.state.sourceDeliveries)) void this.loadSourceDelivery(Number(sequence));
     this.set({ sourceGeneration: this.state.sourceGeneration + 1 });
     const ledger = this.sourceLedgerSession.getState();
@@ -1855,7 +1861,32 @@ export class StackStore {
   private sourceEndpointsChanged(): void {
     this.refresh("sourceStatus"); this.refresh("sourceEndpoints");
     for (const id of Object.keys(this.state.sourceSetups)) void this.loadSourceSetup(id);
+    for (const id of Object.keys(this.state.sourceReceipts)) void this.loadSourceReceipts(id);
   }
+
+  /** Latest server receipts, or an explicit older page. Coalesced invalidations refresh after an in-flight read; nothing dispatches gh. */
+  loadSourceReceipts = (endpointId: string, older = false): Promise<void> => {
+    if (!localOperation(this.state, "source", "github_remote_receipt_list").available) return Promise.resolve();
+    const inflight = this.sourceReceiptsInflight.get(endpointId);
+    if (inflight) { if (!older) this.sourceReceiptsDirty.add(endpointId); return inflight; }
+    const held = this.state.sourceReceipts[endpointId]?.data ?? null;
+    if (older && held?.nextCursor == null) return Promise.resolve();
+    this.set({ sourceReceipts: { ...this.state.sourceReceipts, [endpointId]: this.state.sourceReceipts[endpointId] ?? { data: null, error: null, at: null } },
+      sourceReceiptPending: { ...this.state.sourceReceiptPending, [endpointId]: true } });
+    const run = this.call<GithubRemoteReceiptPage>("source", "github_remote_receipt_list", { endpointId, limit: 25, ...(older ? { before: held!.nextCursor } : {}) })
+      .then(page => {
+        const data = older ? { ...page, entries: [...held!.entries, ...page.entries] } : page;
+        this.set({ sourceReceipts: { ...this.state.sourceReceipts, [endpointId]: { data, error: null, at: Date.now() } } });
+      }, error => {
+        this.set({ sourceReceipts: { ...this.state.sourceReceipts, [endpointId]: { data: this.state.sourceReceipts[endpointId]?.data ?? null, error: callMessage(error), at: Date.now() } } });
+      }).finally(() => {
+        this.sourceReceiptsInflight.delete(endpointId);
+        this.set({ sourceReceiptPending: { ...this.state.sourceReceiptPending, [endpointId]: false } });
+        if (this.sourceReceiptsDirty.delete(endpointId)) void this.loadSourceReceipts(endpointId);
+      });
+    this.sourceReceiptsInflight.set(endpointId, run);
+    return run;
+  };
 
   private sourceDeliveriesChanged(): void {
     this.refresh("sourceStatus");

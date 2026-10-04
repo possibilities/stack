@@ -167,6 +167,7 @@ try {
   // Setup checks also need to shape the wire itself: hold one named request before it reaches the owner (to see what the page recorded first),
   // swallow its reply, or swap its reply for an error (a lost answer after the owner has acted), and drop the connection.
   const hold = { on: false, held: [], ws: null, all: [], gate: null, gated: [], drop: null, lose: null };
+  const sent = [];
   await page.routeWebSocket((url) => url.pathname.endsWith("/websocket"), (ws) => {
     const server = ws.connectToServer();
     const dropped = new Set(), lost = new Set();
@@ -190,6 +191,7 @@ try {
       if (hold.on && typeof message === "string" && message.includes('"events/changed"')) hold.held.push(message); else ws.send(message);
     });
     ws.onMessage((message) => {
+      try { const call = JSON.parse(String(message)); if (call.method === "tools/call") sent.push(call.params); } catch { /* non-JSON frame */ }
       if (hold.gate && typeof message === "string") {
         try { if (JSON.parse(message).params?.name === hold.gate) { hold.gated.push(message); return; } } catch { /* not JSON */ }
       }
@@ -202,10 +204,6 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("dialog", (dialog) => { errors.push(`dialog: ${dialog.message()}`); void dialog.dismiss(); });
-  const sent = [];
-  page.on("websocket", (ws) => ws.on("framesent", (frame) => {
-    try { const message = JSON.parse(String(frame.payload)); if (message.method === "tools/call") sent.push(message.params); } catch { /* non-JSON frame */ }
-  }));
   const listCalls = () => sent.filter((item) => item.name === "github_delivery_list").map((item) => item.arguments);
 
   await page.goto(`${origin}/source`);
@@ -1114,32 +1112,45 @@ try {
   await planReview.waitFor({ state: "detached" });
   await hookRegion.getByRole("button", { name: "Prepare plan" }).click();
   await planReview.waitFor();
-  hold.drop = "github_hook_apply";
+  hold.gate = "github_hook_apply";
   await activate(planReview.getByRole("button", { name: "Apply this plan…" }));
   const applyDialog = page.getByRole("alertdialog");
-  await applyDialog.getByText(/A request ID is recorded in this browser before it is sent/).waitFor();
-  await applyDialog.getByText(/never sent again under a new one/).waitFor();
+  await applyDialog.getByText(/The server retains the receipt/).waitFor();
+  await applyDialog.getByText(/request is never resent/).waitFor();
   await dialogCaptures("source-hook-apply-confirm");
   await applyDialog.getByRole("button", { name: "Apply to GitHub" }).click();
   await page.waitForFunction(() => /"requestId"/.test(localStorage.getItem(Object.keys(localStorage).find((key) => key.includes(".source-setup.requests.")) ?? "") ?? ""));
-  await until(async () => (await ghWrites()).length === 1);
+  await until(() => hold.gated.length > 0);
   const applyRequest = frames("github_hook_apply").at(-1);
   const recorded = JSON.parse(await page.evaluate((key) => localStorage.getItem(key), destinationKey(origin, `source-setup.requests.${repoId}`)));
   assert.equal(recorded[0].requestId, applyRequest.requestId, "the request ID was recorded before the answer, and is the one sent");
   assert.equal(recorded[0].status, "pending");
   assert.equal(JSON.stringify(recorded).includes(repo.secret), false, "the journal holds no secret");
-  hold.drop = null;
+  // Reload ends the originating page's outstanding call while this transport
+  // fixture keeps its original input delayed before owner admission.
+  hold.gate = null; hold.gated.length = 0;
   await page.reload();
-  await productCard.getByRole("status", { name: "Unconfirmed requests" }).waitFor();
   await openSetup(repoId);
   await fact(productCard, "Request receipt").getByText("Not confirmed", { exact: true }).waitFor();
   const recordedRequests = productCard.getByRole("region", { name: "Recorded requests" });
   const applyEntry = recordedRequests.locator(`[data-request="${applyRequest.requestId}"]`);
-  await applyEntry.getByText(/no answer was seen\. Read its receipt/).waitFor();
+  await applyEntry.getByText(/Server admission.*is not confirmed/).waitFor();
+  await recordedRequests.getByText(/0 server receipts shown.*1 unconfirmed browser request/).waitFor();
   assert.equal(await applyEntry.getByRole("button", { name: /Send again/ }).count(), 0, "an unconfirmed request is never sent again");
-  assert.equal((await ghWrites()).length, 1);
+  assert.equal((await ghWrites()).length, 0, "the delayed request has not reached the owner yet");
   await captures(recordedRequests, "source-requests-unconfirmed");
   await activate(applyEntry.getByRole("button", { name: "Read receipt" }));
+  assert.equal((await call("github_remote_receipt_get", { requestId: applyRequest.requestId })).receipt, null);
+  await applyEntry.getByText("Not confirmed", { exact: true }).waitFor();
+  assert.equal(await applyEntry.getByRole("button", { name: /Send again/ }).count(), 0, "a missing receipt is not replay authority");
+  // Deliver that saved original input at the actual owner boundary, after a
+  // missing-receipt read. Its original page cannot receive the answer. The UI
+  // must discover its receipt rather than emit another apply under any ID.
+  const delayedAnswer = call("github_hook_apply", applyRequest);
+  await until(async () => (await ghWrites()).length === 1);
+  await delayedAnswer;
+  await page.reload();
+  await openSetup(repoId);
   await applyEntry.getByText("Admitted by GitHub", { exact: true }).waitFor();
   await applyEntry.getByText(/not delivery verification: nothing has been shown to arrive/).waitFor();
   assert.deepEqual(frames("github_remote_receipt_get").at(-1), { requestId: applyRequest.requestId }, "the receipt was read under the same ID");
@@ -1151,12 +1162,14 @@ try {
   await fact(productCard, "Signed arrival").getByText("Delivery observed", { exact: true }).waitFor();
   assert.equal(await productCard.getByRole("status", { name: "Unconfirmed requests" }).count(), 0);
   await captures(recordedRequests, "source-requests-recovered");
+  await page.waitForFunction((key) => localStorage.getItem(key) === null, destinationKey(origin, `source-setup.requests.${repoId}`));
   const written = (await ghWrites())[0];
   assert.equal(written.args.join(" ").includes(docsSecret), false);
   assert.equal(written.args.join(" ").includes((await call("github_endpoint_secret_reveal", { id: repoId, reveal: true })).secret), false, "the secret travels on stdin, not on a command line");
   assert.equal(JSON.parse(written.input).events[0], "*");
 
-  // An unknown outcome is never sent again and never replaced by a new request ID; it is read, then forgotten on purpose.
+  // An unknown outcome is server-owned, inspectable in another empty browser,
+  // never resent, and never hidden by forgetting a browser-local history entry.
   await toggleGroup(productCard, "Hook at GitHub");
   await hookRegion.getByRole("button", { name: "Read hooks", exact: true }).click();
   await hooksList.locator('[data-hook="17"]').getByText("Managed by Stack").waitFor();
@@ -1185,11 +1198,31 @@ try {
   await unknownEntry.getByText("Outcome unknown", { exact: true }).waitFor();
   assert.equal((await ghWrites()).length, writesBefore, "reading a receipt sends nothing");
   assert.equal(frames("github_hook_apply").filter((item) => item.requestId === unknownId).length, 1);
-  await fact(productCard, "Request receipt").getByText("Outcome unknown", { exact: true }).waitFor();
+  await fact(productCard, "Request receipt").getByText("Needs inspection", { exact: true }).waitFor();
   await captures(unknownEntry, "source-request-unknown");
-  await activate(unknownEntry.getByRole("button", { name: "Forget this request" }));
-  await unknownEntry.waitFor({ state: "detached" });
+  assert.equal(await unknownEntry.getByRole("button", { name: "Forget this request" }).count(), 0, "a server receipt is not removable from browser history");
   assert.equal((await call("github_remote_receipt_get", { requestId: unknownId })).receipt.status, "unknown", "the owner keeps its receipt");
+  const freshContext = await browser.newContext({ viewport: { width: 2600, height: 1300 }, reducedMotion: "reduce" });
+  const freshPage = await freshContext.newPage();
+  const freshCalls = [];
+  freshPage.on("websocket", ws => ws.on("framesent", frame => {
+    try { const message = JSON.parse(String(frame.payload)); if (message.method === "tools/call") freshCalls.push(message.params.name); } catch { /* non-JSON */ }
+  }));
+  await authorizeBrowser(freshPage, origin, env);
+  await freshPage.goto(`${origin}/source`);
+  const freshCard = freshPage.locator(`li[data-node="github-receiver:${repoId}"]`);
+  await freshCard.getByRole("status", { name: "Unconfirmed requests" }).waitFor();
+  await activate(freshCard.getByRole("button", { name: "Setup facts" }));
+  const freshUnknown = freshCard.locator(`[data-request="${unknownId}"]`);
+  await freshUnknown.getByText("Outcome unknown", { exact: true }).waitFor();
+  await freshCard.locator(`[data-request="${applyRequest.requestId}"]`).getByText("Admitted by GitHub", { exact: true }).waitFor();
+  assert.equal(await freshPage.evaluate(() => Object.keys(localStorage).some(key => key.includes("source-setup.requests."))), false, "this browser has no request journal");
+  assert.ok(freshCalls.includes("github_remote_receipt_list"));
+  assert.ok(!freshCalls.some(name => /github_hook_(apply|probe|redeliver)/.test(name)), "opening another browser sends no mutation");
+  assert.equal((await ghWrites()).length, writesBefore);
+  await freshUnknown.getByRole("button", { name: "Read receipt" }).click();
+  await freshUnknown.getByText("Outcome unknown", { exact: true }).waitFor();
+  await freshCard.screenshot({ path: join(evidence, "source-fresh-browser-history.png"), animations: "disabled" });
   await patchGh({ mode: "normal" });
 
   // ---- Probe: the request's receipt and the signed arrival are two separate facts.
@@ -1260,6 +1293,26 @@ try {
   assert.ok((await ghWrites()).at(-1).path.endsWith("/hooks/17/deliveries/92/attempts"));
   await redeliverEntry.getByText(/admission, not arrival/).waitFor();
   assert.equal((await call("github_remote_receipt_get", { requestId: redeliverRequest.requestId })).receipt.status, "succeeded");
+
+  // Keep the independent browser open to verify invalidations and UI paging,
+  // including an unknown request outside the newest page. Only fake gh runs.
+  for (let index = 0; index < 26; index++) await call("github_hook_probe", { endpointId: repoId, hookId: 17, requestId: randomUUID(), action: "ping" });
+  const freshRequests = freshCard.getByRole("region", { name: "Recorded requests" });
+  await freshRequests.getByText(/25 server receipts shown, newest admission first; older server receipts are available/).waitFor();
+  assert.equal(await freshUnknown.count(), 0, "the unknown receipt is outside the latest page");
+  await freshRequests.getByText(/1 running or unknown across/).waitFor();
+  await toggleGroup(freshCard, "Probe and delivery attempts");
+  await freshCard.getByRole("button", { name: "Request ping…" }).click();
+  const freshConfirm = freshPage.getByRole("alertdialog");
+  await freshConfirm.getByText(/Older running or unknown requests exist/).waitFor();
+  assert.equal(await freshConfirm.getByRole("button", { name: "Request ping", exact: true }).isDisabled(), true, "unread older uncertainty holds new requests");
+  await freshConfirm.getByRole("button", { name: "Cancel" }).click();
+  await freshRequests.getByRole("button", { name: "Read older receipts" }).click();
+  await freshUnknown.getByText("Outcome unknown", { exact: true }).waitFor();
+  await freshRequests.getByText(/31 server receipts shown, newest admission first; end of server history/).waitFor();
+  await freshRequests.locator(`[data-request="${redeliverRequest.requestId}"]`).getByText(/attempt 92/).waitFor();
+  assert.ok(!freshCalls.some(name => /github_hook_(apply|probe|redeliver)/.test(name)), "discovery, live refresh and pagination never send a mutation");
+  await freshContext.close();
 
   // ---- Manual targets: the App receiver gets settings, exact values and the secret, and no automated hook control.
   const appCard = await openSetup(app.endpoint.id);
@@ -1343,8 +1396,8 @@ try {
   await createDialog.getByRole("button", { name: "Save again (same ID)" }).click();
   await createDialog.getByText("Receiver saved locally", { exact: true }).first().waitFor();
   const marketSends = frames("github_endpoint_create").filter((item) => item.id === marketId);
-  assert.equal(marketSends.length, 1, "only the retry reached the owner; the held request died with the page");
-  assert.deepEqual(marketSends[0], heldRecord, "the retry is the recorded request: the same ID and the same definition");
+  assert.equal(marketSends.length, 2, "the browser emitted a held original and one explicit idempotent receiver-save retry; only the retry reached the owner");
+  for (const input of marketSends) assert.deepEqual(input, heldRecord, "both local receiver-save inputs have the same ID and definition");
   assert.equal((await call("github_endpoint_list")).endpoints.filter((item) => item.id === marketId).length, 1);
   await createDialog.getByRole("button", { name: "Done" }).click();
   await unconfirmedCreate.waitFor({ state: "detached" });
@@ -1458,7 +1511,7 @@ try {
     ["source", "github_hook_probe", { endpointId: repo.endpoint.id, hookId: 17, requestId: randomUUID(), action: "ping" }],
     ["source", "github_hook_deliveries", { endpointId: repo.endpoint.id, hookId: 17 }],
     ["source", "github_hook_redeliver", { endpointId: repo.endpoint.id, hookId: 17, deliveryId: 92, requestId: randomUUID() }],
-    ["source", "github_remote_receipt_get", { requestId: zero }]];
+    ["source", "github_remote_receipt_get", { requestId: zero }], ["source", "github_remote_receipt_list", { endpointId: repoId }]];
   for (const result of await remoteCalls(fenced)) assert.ok(result.error, `the remote gateway refuses ${JSON.stringify(result)}`);
   const allowed = await remoteCalls([["source", "github_status", {}], ["source", "github_delivery_get", { sequence: 3 }], ["source", "github_setup_read", { id: org.endpoint.id }],
     ["source", "github_watch_list", {}], ["source", "github_watch_get", { id: issuesId }], ["source", "github_watch_read", { id: issuesId, limit: 1 }]]);

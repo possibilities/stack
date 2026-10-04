@@ -118,6 +118,12 @@ test("the api package serves structured documents for every workspace package", 
       assert.ok(!transport.operations.includes("worker_event_receive"), "native intake remains owner-only, not a transport-disclosed mutation");
     assert.ok(sourceMcp.operations.includes("github_watch_read") && sourceMcp.events.includes("github_watches_changed"));
     assert.ok(!sourceMcp.operations.includes("github_endpoint_secret_reveal") && !sourceMcp.operations.includes("github_hook_apply"));
+    const receipts = source.operations.find(op => op.name === "github_remote_receipt_list")!;
+    assert.equal(receipts.annotations.readOnlyHint, true);
+    assert.deepEqual(Object.keys(receipts.outputSchema.properties ?? {}).sort(), ["entries", "nextCursor", "unsettled"]);
+    assert.equal((receipts.inputSchema.properties as { limit: { maximum: number } }).limit.maximum, 50);
+    assert.ok(source.transports.find(t => t.type === "websocket")!.operations.includes(receipts.name));
+    assert.ok(!sourceMcp.operations.includes(receipts.name), "remote request inspection stays local-operator-only");
     const webhookRoute = source.transports.find(t => t.type === "http")!.routes[0]!;
     assert.equal(webhookRoute.path, "/github/webhooks/{endpointId}");
     assert.ok(webhookRoute.outputSchema && webhookRoute.errorSchema);

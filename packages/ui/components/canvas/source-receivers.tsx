@@ -12,7 +12,7 @@ import { CopyButton, Empty, Flash, NodeCard, NodeTitle, StatusDot } from "./prim
 import { useDestination, useStack, useStore, useWorkbench } from "./provider";
 import { clearCreateRecord, CreateReceiver, readCreateRecord } from "./source-receiver-create";
 import { ReceiverSetupControls } from "./source-receiver-setup";
-import { useJournal } from "./source-requests";
+import { useRequestHistory } from "./source-requests";
 import { Capacity, sourceChip, sourceHint, sourceLabel, sourceUnavailable, Stamp, Word } from "./source-shared";
 import { Section, Window } from "./window";
 
@@ -97,8 +97,8 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 function ReceiverRow({ endpoint, open, onToggle }: { endpoint: GithubEndpoint; open: boolean; onToggle(): void }) {
   const { remote } = useStack();
-  const requests = useJournal(endpoint.id);
-  const unconfirmed = remote ? 0 : requests.filter((entry) => entry.status === "pending" || entry.status === "running" || entry.status === "unknown").length;
+  const requests = useRequestHistory(endpoint.id);
+  const unconfirmed = remote ? 0 : requests.history.unsettled + requests.entries.filter((entry) => entry.status === "pending").length;
   const node = { kind: "github-receiver" as const, id: endpoint.id };
   const detail = `receiver-${endpoint.id}-setup`;
   const refused = endpoint.lastFailure !== null;
@@ -158,12 +158,12 @@ function Setup({ endpoint }: { endpoint: GithubEndpoint }) {
   const store = useStore();
   const { sourceSetups, remote } = useStack();
   const held = sourceSetups[endpoint.id];
-  const journal = useJournal(endpoint.id);
+  const requests = useRequestHistory(endpoint.id);
   useEffect(() => { void store.loadSourceSetup(endpoint.id); }, [store, endpoint.id, endpoint.revision]);
   const setup: GithubSetup | null = held?.data ?? null;
-  // Requests are recorded by the local operator's browser; a remote view has none to show and says so rather than "None".
-  const receipt = remote ? { word: "Local only", tone: "muted" as const, lines: ["Hook, ping and redelivery requests are made by the local operator and recorded in that browser. A request being admitted by GitHub would still not be a signed arrival."] }
-    : requestFact(journal, (at) => new Date(at).toLocaleString());
+  // Server receipt history is still local-operator-only, even in another browser.
+  const receipt = remote ? { word: "Local only", tone: "muted" as const, lines: ["Hook, ping and redelivery receipts are retained by the server and inspected on the local UI. A request being admitted by GitHub would still not be a signed arrival."] }
+    : requestFact(requests.entries, (at) => new Date(at).toLocaleString(), requests.history);
   const facts = receiverFacts(endpoint, setup, undefined, receipt);
   return (
     <div className="flex flex-col gap-3 border-t pt-2.5">
