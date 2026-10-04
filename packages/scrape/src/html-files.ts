@@ -62,48 +62,6 @@ const PREPARATION_ARTIFACTS = new Set([
 ]);
 const CLEANUP_ARTIFACTS = new Set([MANIFEST_NAME, OUTPUT_NAME, COMMIT_NAME, CLEANUP_NAME]);
 
-export type HtmlConversionTransactionPhase =
-  | "afterPreparationDirectoryCreation"
-  | "afterPreparationOutputCreation"
-  | "afterPreparationOutputWrite"
-  | "afterPreparationManifestCreation"
-  | "afterPreparationManifestWrite"
-  | "afterPreparationFilesSync"
-  | "afterPreparationReadyModeTransition"
-  | "afterPreparationTransition"
-  | "transactionPrepared"
-  | "beforeDestinationLink"
-  | "afterDestinationLink"
-  | "beforeSourceRetirement"
-  | "beforeSourceRetirementRename"
-  | "afterSourceRetirementRename"
-  | "afterSourceRetirementTargetSync"
-  | "afterSourceRetirement"
-  | "beforeDestinationCaptureRename"
-  | "afterDestinationCaptureRename"
-  | "afterDestinationCaptureTargetSync"
-  | "afterDestinationCapture"
-  | "beforeRollbackDestinationQuarantineRename"
-  | "afterRollbackDestinationQuarantineRename"
-  | "afterRollbackDestinationQuarantineTargetSync"
-  | "beforeCommit"
-  | "afterCommitPendingCreation"
-  | "afterCommitPendingWrite"
-  | "afterCommitMarkerLink"
-  | "afterCommitPendingRemoval"
-  | "afterDurableCommit"
-  | "afterCleanupPendingCreation"
-  | "afterCleanupPendingWrite"
-  | "afterCleanupMarkerLink"
-  | "afterCleanupPendingRemoval"
-  | "afterCleanupMarker"
-  | "afterCleanupTransition"
-  | "afterPreparationCleanupModeTransition"
-  | "afterCleanupManifestRemoval"
-  | "afterCleanupOutputRemoval"
-  | "afterCleanupCommitRemoval"
-  | "afterCleanupMarkerRemoval";
-
 export interface HtmlConversionTransactionContext {
   source: string;
   destination: string;
@@ -117,11 +75,6 @@ export interface HtmlConversionTransactionContext {
   commitMarker: string;
   cleanupMarker: string;
 }
-
-export type HtmlConversionTransactionHook = (
-  phase: HtmlConversionTransactionPhase,
-  context: Readonly<HtmlConversionTransactionContext>,
-) => void;
 
 interface Identity {
   device: string;
@@ -391,12 +344,7 @@ function assertStrictRegular(path: string, mode: bigint): BigIntStats {
   return stat;
 }
 
-function writeStrictFile(
-  path: string,
-  content: string | Buffer,
-  afterCreation?: () => void,
-  afterWrite?: () => void,
-): BigIntStats {
+function writeStrictFile(path: string, content: string | Buffer): BigIntStats {
   const descriptor = openSync(
     path,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
@@ -404,9 +352,7 @@ function writeStrictFile(
   );
   try {
     fchmodSync(descriptor, 0o600);
-    afterCreation?.();
     writeFileSync(descriptor, content);
-    afterWrite?.();
     fsyncSync(descriptor);
     return fstatSync(descriptor, { bigint: true });
   } finally {
@@ -883,7 +829,7 @@ function repairMarker(directory: string, kind: MarkerKind, synchronizeDirectory 
     return false;
   }
 
-  // A crash after the write hook may leave complete bytes that were not yet file-fsynced. Recovery
+  // A crash after writing may leave complete bytes that were not yet file-fsynced. Recovery
   // must make those validated bytes durable before allowing their inode to acquire the final name.
   const descriptor = openSync(pendingPath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -915,14 +861,11 @@ function repairMarker(directory: string, kind: MarkerKind, synchronizeDirectory 
 
 function publishMarker(
   directory: string,
-  context: HtmlConversionTransactionContext,
   kind: MarkerKind,
-  hook?: HtmlConversionTransactionHook,
   synchronizeDirectory = true,
 ): void {
   if (repairMarker(directory, kind, synchronizeDirectory)) return;
   const { finalPath, pendingPath, content } = markerPaths(directory, kind);
-  const phasePrefix = kind === "commit" ? "Commit" : "Cleanup";
   const descriptor = openSync(
     pendingPath,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
@@ -930,16 +873,13 @@ function publishMarker(
   );
   try {
     fchmodSync(descriptor, 0o600);
-    hook?.(`after${phasePrefix}PendingCreation` as HtmlConversionTransactionPhase, context);
     writeFileSync(descriptor, content);
-    hook?.(`after${phasePrefix}PendingWrite` as HtmlConversionTransactionPhase, context);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);
   }
 
   linkSync(pendingPath, finalPath);
-  hook?.(`after${phasePrefix}MarkerLink` as HtmlConversionTransactionPhase, context);
   if (synchronizeDirectory) syncDirectory(directory);
   const finalMarker = validateStrictMarker(
     finalPath,
@@ -950,7 +890,6 @@ function publishMarker(
   if (!sameInode(pendingMarker, identity(finalMarker)))
     throw new Error("HTML transaction marker publication identity changed");
   unlinkSync(pendingPath);
-  hook?.(`after${phasePrefix}PendingRemoval` as HtmlConversionTransactionPhase, context);
   if (synchronizeDirectory) syncDirectory(directory);
 }
 
@@ -1087,7 +1026,6 @@ function restoreCapturedForeign(
 function rollbackDestination(
   context: HtmlConversionTransactionContext,
   outputIdentity: Identity,
-  hook?: HtmlConversionTransactionHook,
 ): void {
   const existingCapture = statMaybe(context.capturedDestination);
   if (existingCapture !== null) {
@@ -1109,7 +1047,6 @@ function rollbackDestination(
   if (publicDestination === null || !sameInode(publicDestination, outputIdentity)) return;
   if (!regular(publicDestination)) throw new Error("Owned public output is not regular");
 
-  hook?.("beforeRollbackDestinationQuarantineRename", context);
   // Recheck even though the preexisting-capture branch above already handled the earlier snapshot.
   requirePrivateRenameTargetAbsent(
     context.capturedDestination,
@@ -1121,10 +1058,8 @@ function rollbackDestination(
     if (isMissing(error)) return;
     throw error;
   }
-  hook?.("afterRollbackDestinationQuarantineRename", context);
   // A preserving cross-directory rename is recorded at its target before its public source parent.
   syncDirectory(context.transactionDirectory);
-  hook?.("afterRollbackDestinationQuarantineTargetSync", context);
   syncDirectory(resolve(context.destination, ".."));
   const captured = lstatSync(context.capturedDestination, { bigint: true });
   if (sameInode(captured, outputIdentity)) {
@@ -1248,7 +1183,6 @@ function rollbackUncommitted(
   manifest: Manifest,
   destinationMayBeOwned: boolean,
   sourceEvidencePolicy: SourceEvidencePolicy,
-  hook?: HtmlConversionTransactionHook,
 ): void {
   let sourceFailure: unknown = null;
   try {
@@ -1270,7 +1204,6 @@ function rollbackUncommitted(
           inode: manifest.outputInode,
           size: manifest.outputSize,
         },
-        hook,
       );
     } catch (error) {
       failures.push(error);
@@ -1278,7 +1211,7 @@ function rollbackUncommitted(
   }
   if (sourceFailure === null && failures.length === 0) {
     try {
-      transitionToCleanup(context, hook);
+      transitionToCleanup(context);
     } catch (error) {
       failures.push(error);
     }
@@ -1308,12 +1241,7 @@ function cleanupContext(
 }
 
 /** Sweep only an explicitly marked private cleanup directory; this never examines public paths. */
-function sweepCleanup(
-  directory: string,
-  cleanupDirectory: string,
-  hook?: HtmlConversionTransactionHook,
-  hookContext = cleanupContext(directory, cleanupDirectory),
-): void {
+function sweepCleanup(directory: string, cleanupDirectory: string): void {
   const names = assertExpectedArtifacts(cleanupDirectory, CLEANUP_ARTIFACTS);
   const markerPath = join(cleanupDirectory, CLEANUP_NAME);
   if (!names.includes(CLEANUP_NAME)) {
@@ -1331,40 +1259,29 @@ function sweepCleanup(
   for (const name of names) {
     if (name !== CLEANUP_NAME) assertStrictRegular(join(cleanupDirectory, name), 0o600n);
   }
-  const removals: ReadonlyArray<readonly [string, HtmlConversionTransactionPhase]> = [
-    [MANIFEST_NAME, "afterCleanupManifestRemoval"],
-    [OUTPUT_NAME, "afterCleanupOutputRemoval"],
-    [COMMIT_NAME, "afterCleanupCommitRemoval"],
-  ];
-  for (const [name, phase] of removals) {
+  for (const name of [MANIFEST_NAME, OUTPUT_NAME, COMMIT_NAME]) {
     const path = join(cleanupDirectory, name);
     if (statMaybe(path) === null) continue;
     unlinkSync(path);
     syncDirectory(cleanupDirectory);
-    hook?.(phase, hookContext);
   }
   // Marker-last makes a markerless nonempty cleanup surface malformed, while an empty one is a
   // harmless tombstone after a crash between this unlink and rmdir.
   validateStrictMarker(markerPath, CLEANUP_CONTENT, "cleanup marker");
   unlinkSync(markerPath);
   syncDirectory(cleanupDirectory);
-  hook?.("afterCleanupMarkerRemoval", hookContext);
   rmdirSync(cleanupDirectory);
   syncDirectory(directory);
 }
 
-function transitionToCleanup(
-  context: HtmlConversionTransactionContext,
-  hook?: HtmlConversionTransactionHook,
-): void {
+function transitionToCleanup(context: HtmlConversionTransactionContext): void {
   const directory = resolve(context.transactionDirectory, "..");
   const before = lstatSync(context.transactionDirectory, { bigint: true });
   assertExpectedArtifacts(context.transactionDirectory, TRANSACTION_ARTIFACTS);
   if (statMaybe(context.retiredSource) !== null || statMaybe(context.capturedDestination) !== null)
     throw new Error("HTML transaction still contains preservation evidence");
 
-  publishMarker(context.transactionDirectory, context, "cleanup", hook);
-  hook?.("afterCleanupMarker", context);
+  publishMarker(context.transactionDirectory, "cleanup");
 
   const beforeRename = lstatSync(context.transactionDirectory, { bigint: true });
   if (!sameInode(beforeRename, identity(before)))
@@ -1373,14 +1290,12 @@ function transitionToCleanup(
     throw new Error(`HTML cleanup destination already exists: ${context.cleanupDirectory}`);
   renameSync(context.transactionDirectory, context.cleanupDirectory);
   syncDirectory(directory);
-  hook?.("afterCleanupTransition", context);
-  sweepCleanup(directory, context.cleanupDirectory, hook, context);
+  sweepCleanup(directory, context.cleanupDirectory);
 }
 
 function finalizeCommitted(
   context: HtmlConversionTransactionContext,
   manifest: Manifest,
-  hook?: HtmlConversionTransactionHook,
 ): void {
   repairMarker(context.transactionDirectory, "commit");
   repairMarker(context.transactionDirectory, "cleanup");
@@ -1404,7 +1319,7 @@ function finalizeCommitted(
   assertStrictRegular(context.manifest, 0o600n);
   const markerNow = assertStrictRegular(context.commitMarker, 0o600n);
   if (!sameInode(markerNow, identity(marker))) throw new Error("Commit marker identity changed");
-  transitionToCleanup(context, hook);
+  transitionToCleanup(context);
 }
 
 function canonicalPreparationSuffix(preparationDirectory: string): string {
@@ -1423,19 +1338,12 @@ function canonicalCleanupSuffix(cleanupDirectory: string): string {
   return suffix;
 }
 
-function preparationCleanupContext(
+function preparationCleanupDirectory(
   directory: string,
   preparationDirectory: string,
-): HtmlConversionTransactionContext {
+): string {
   const suffix = canonicalPreparationSuffix(preparationDirectory);
-  const cleanupDirectory = join(directory, `${CLEANUP_PREFIX}${suffix}`);
-  return {
-    ...cleanupContext(directory, cleanupDirectory),
-    preparationDirectory,
-    manifest: join(preparationDirectory, MANIFEST_NAME),
-    output: join(preparationDirectory, OUTPUT_NAME),
-    cleanupMarker: join(preparationDirectory, CLEANUP_NAME),
-  };
+  return join(directory, `${CLEANUP_PREFIX}${suffix}`);
 }
 
 /** Mode 0300 prevents enumeration, so validate every permitted known path before transition. */
@@ -1479,11 +1387,8 @@ function finishReadyPreparationCleanup(
   directory: string,
   preparationDirectory: string,
   initial: BigIntStats,
-  context: HtmlConversionTransactionContext,
-  hook?: HtmlConversionTransactionHook,
+  cleanupDirectory: string,
 ): void {
-  hook?.("afterCleanupMarker", context);
-
   const names = validateEnumerablePreparationArtifacts(preparationDirectory);
   if (!names.includes(CLEANUP_NAME) || names.includes(CLEANUP_PENDING_NAME))
     throw new Error(
@@ -1492,15 +1397,14 @@ function finishReadyPreparationCleanup(
   const beforeRename = lstatSync(preparationDirectory, { bigint: true });
   if (!sameInode(beforeRename, identity(initial)))
     throw new Error("HTML preparation directory identity changed before cleanup transition");
-  if (statMaybe(context.cleanupDirectory) !== null)
-    throw new Error(`HTML cleanup destination already exists: ${context.cleanupDirectory}`);
-  renameSync(preparationDirectory, context.cleanupDirectory);
-  const afterRename = lstatSync(context.cleanupDirectory, { bigint: true });
+  if (statMaybe(cleanupDirectory) !== null)
+    throw new Error(`HTML cleanup destination already exists: ${cleanupDirectory}`);
+  renameSync(preparationDirectory, cleanupDirectory);
+  const afterRename = lstatSync(cleanupDirectory, { bigint: true });
   if (!sameInode(afterRename, identity(initial)))
     throw new Error("HTML preparation directory identity changed during cleanup transition");
   syncDirectory(directory);
-  hook?.("afterCleanupTransition", context);
-  sweepCleanup(directory, context.cleanupDirectory, hook, context);
+  sweepCleanup(directory, cleanupDirectory);
 }
 
 /**
@@ -1510,8 +1414,6 @@ function finishReadyPreparationCleanup(
 function recoverTransitionalPreparationCleanup(
   directory: string,
   cleanupDirectory: string,
-  hook?: HtmlConversionTransactionHook,
-  context = cleanupContext(directory, cleanupDirectory),
 ): void {
   canonicalCleanupSuffix(cleanupDirectory);
   const initial = assertPrivateDirectory(cleanupDirectory, 0o300n);
@@ -1520,55 +1422,51 @@ function recoverTransitionalPreparationCleanup(
   chmodSync(cleanupDirectory, 0o700);
   syncDirectory(cleanupDirectory);
   syncDirectory(directory);
-  hook?.("afterPreparationCleanupModeTransition", context);
 
   // Enumerate and validate the complete surface before marker repair can remove even a pending
   // artifact. If the pre-rename marker names were not durable, publish them in the now-syncable
   // cleanup namespace. This authority can mutate only this private directory.
   validateEnumerablePreparationArtifacts(cleanupDirectory, false);
-  publishMarker(cleanupDirectory, context, "cleanup", hook);
+  publishMarker(cleanupDirectory, "cleanup");
   const names = validateEnumerablePreparationArtifacts(cleanupDirectory);
   if (!names.includes(CLEANUP_NAME) || names.includes(CLEANUP_PENDING_NAME))
     throw new Error(`HTML cleanup marker is not fully published: ${cleanupDirectory}`);
   const after = lstatSync(cleanupDirectory, { bigint: true });
   if (!sameInode(after, identity(initial)))
     throw new Error("HTML cleanup directory identity changed during mode transition");
-  sweepCleanup(directory, cleanupDirectory, hook, context);
+  sweepCleanup(directory, cleanupDirectory);
 }
 
 function recoverPreparation(
   directory: string,
   preparationDirectory: string,
-  hook?: HtmlConversionTransactionHook,
 ): void {
   canonicalPreparationSuffix(preparationDirectory);
   const initial = lstatSync(preparationDirectory, { bigint: true });
   if (!initial.isDirectory() || initial.isSymbolicLink() || !ownedTransactionArtifact(initial)) {
     throw new Error(`Unsafe HTML preparation directory: ${preparationDirectory}`);
   }
-  const context = preparationCleanupContext(directory, preparationDirectory);
+  const cleanupDirectory = preparationCleanupDirectory(directory, preparationDirectory);
 
   if (strictMode(initial, 0o300n)) {
     // At mode 0300 only fixed known paths are accessible. Validate them and prepare the marker, but
     // do not chmod: its directory entry cannot portably be fsynced until after the canonical cleanup
     // rename has durably represented private cleanup authority in the parent.
     validateKnownPreparationArtifacts(preparationDirectory);
-    publishMarker(preparationDirectory, context, "cleanup", hook, false);
-    hook?.("afterCleanupMarker", context);
+    publishMarker(preparationDirectory, "cleanup", false);
     const beforeRename = lstatSync(preparationDirectory, { bigint: true });
     if (!sameInode(beforeRename, identity(initial)))
       throw new Error("HTML preparation directory identity changed before cleanup transition");
-    if (statMaybe(context.cleanupDirectory) !== null)
-      throw new Error(`HTML cleanup destination already exists: ${context.cleanupDirectory}`);
-    renameSync(preparationDirectory, context.cleanupDirectory);
-    const afterRename = lstatSync(context.cleanupDirectory, { bigint: true });
+    if (statMaybe(cleanupDirectory) !== null)
+      throw new Error(`HTML cleanup destination already exists: ${cleanupDirectory}`);
+    renameSync(preparationDirectory, cleanupDirectory);
+    const afterRename = lstatSync(cleanupDirectory, { bigint: true });
     if (!sameInode(afterRename, identity(initial)) || !strictMode(afterRename, 0o300n))
       throw new Error(
         "HTML preparation directory identity or mode changed during cleanup transition",
       );
     syncDirectory(directory);
-    hook?.("afterCleanupTransition", context);
-    recoverTransitionalPreparationCleanup(directory, context.cleanupDirectory, hook, context);
+    recoverTransitionalPreparationCleanup(directory, cleanupDirectory);
     return;
   }
   if (!strictMode(initial, 0o700n))
@@ -1578,7 +1476,7 @@ function recoverPreparation(
   if (names.includes(CLEANUP_NAME) || names.includes(CLEANUP_PENDING_NAME)) {
     const cleanupReady = repairMarker(preparationDirectory, "cleanup");
     if (cleanupReady) {
-      finishReadyPreparationCleanup(directory, preparationDirectory, initial, context, hook);
+      finishReadyPreparationCleanup(directory, preparationDirectory, initial, cleanupDirectory);
       return;
     }
     names = validateEnumerablePreparationArtifacts(preparationDirectory);
@@ -1593,30 +1491,29 @@ function recoverPreparation(
   validateOutput(join(preparationDirectory, OUTPUT_NAME), manifest);
   validateManifestSourceGeneration(source, manifest);
 
-  publishMarker(preparationDirectory, context, "cleanup", hook);
-  finishReadyPreparationCleanup(directory, preparationDirectory, initial, context, hook);
+  publishMarker(preparationDirectory, "cleanup");
+  finishReadyPreparationCleanup(directory, preparationDirectory, initial, cleanupDirectory);
 }
 
 function recoverTransaction(
   directory: string,
   transactionDirectory: string,
-  hook?: HtmlConversionTransactionHook,
 ): void {
   assertExpectedArtifacts(transactionDirectory, TRANSACTION_ARTIFACTS);
   const cleanupReady = repairMarker(transactionDirectory, "cleanup");
   if (cleanupReady) {
     const suffix = basename(transactionDirectory).slice(TRANSACTION_PREFIX.length);
     const context = cleanupContext(directory, join(directory, `${CLEANUP_PREFIX}${suffix}`));
-    transitionToCleanup(context, hook);
+    transitionToCleanup(context);
     return;
   }
   const committed = repairMarker(transactionDirectory, "commit");
   const { context, manifest } = contextFromManifestDirectory(directory, transactionDirectory);
   if (committed) {
-    finalizeCommitted(context, manifest, hook);
+    finalizeCommitted(context, manifest);
     return;
   }
-  rollbackUncommitted(context, manifest, true, "crash-recovery", hook);
+  rollbackUncommitted(context, manifest, true, "crash-recovery");
 }
 
 function prepareTransaction(
@@ -1625,7 +1522,6 @@ function prepareTransaction(
   destination: string,
   source: OpenSource,
   markdown: string,
-  hook?: HtmlConversionTransactionHook,
 ): { context: HtmlConversionTransactionContext; manifest: Manifest } {
   const context = transactionContext(directory, sourcePath, destination);
   const preparationManifest = join(context.preparationDirectory, MANIFEST_NAME);
@@ -1642,14 +1538,8 @@ function prepareTransaction(
   try {
     assertPrivateDirectory(context.preparationDirectory, 0o300n);
     syncDirectory(directory);
-    hook?.("afterPreparationDirectoryCreation", context);
     const outputBytes = Buffer.from(markdown);
-    const output = writeStrictFile(
-      preparationOutput,
-      outputBytes,
-      () => hook?.("afterPreparationOutputCreation", context),
-      () => hook?.("afterPreparationOutputWrite", context),
-    );
+    const output = writeStrictFile(preparationOutput, outputBytes);
     const manifest: Manifest = {
       version: 1,
       source: basename(sourcePath),
@@ -1661,12 +1551,7 @@ function prepareTransaction(
       outputSize: `${output.size}`,
       outputDigest: digest(outputBytes),
     };
-    writeStrictFile(
-      preparationManifest,
-      `${JSON.stringify(manifest)}\n`,
-      () => hook?.("afterPreparationManifestCreation", context),
-      () => hook?.("afterPreparationManifestWrite", context),
-    );
+    writeStrictFile(preparationManifest, `${JSON.stringify(manifest)}\n`);
     // Known-path validation is possible with write+execute mode and occurs before the authority
     // token's one-way transition. Both files have already been individually fsynced.
     const validatedManifest = readManifest(preparationManifest);
@@ -1678,12 +1563,10 @@ function prepareTransaction(
     }
     validateOutput(preparationOutput, validatedManifest);
     validatePublicSource(sourcePath, source);
-    hook?.("afterPreparationFilesSync", context);
 
     chmodSync(context.preparationDirectory, 0o700);
     syncDirectory(context.preparationDirectory);
     syncDirectory(directory);
-    hook?.("afterPreparationReadyModeTransition", context);
     const names = assertExpectedArtifacts(context.preparationDirectory, PREPARATION_ARTIFACTS);
     if (names.length !== 2 || !names.includes(MANIFEST_NAME) || !names.includes(OUTPUT_NAME))
       throw new Error("Incomplete HTML preparation transaction");
@@ -1719,7 +1602,6 @@ function publishConversion(
   sourcePath: string,
   destination: string,
   directory: string,
-  hook?: HtmlConversionTransactionHook,
 ): boolean {
   const source = openSource(sourcePath);
   let prepared: { context: HtmlConversionTransactionContext; manifest: Manifest } | null = null;
@@ -1728,17 +1610,14 @@ function publishConversion(
   try {
     // Conversion receives exactly the bytes read and hashed from the one no-follow descriptor.
     const markdown = convertHtml(source.bytes.toString("utf8"));
-    prepared = prepareTransaction(directory, sourcePath, destination, source, markdown, hook);
+    prepared = prepareTransaction(directory, sourcePath, destination, source, markdown);
     const { context, manifest } = prepared;
-    hook?.("afterPreparationTransition", context);
-    hook?.("transactionPrepared", context);
-    hook?.("beforeDestinationLink", context);
     validatePublicSource(sourcePath, source);
     try {
       linkSync(context.output, destination);
     } catch (error) {
       if (errorCode(error) === "EEXIST") {
-        transitionToCleanup(context, hook);
+        transitionToCleanup(context);
         prepared = null;
         return false;
       }
@@ -1746,19 +1625,13 @@ function publishConversion(
     }
     destinationMayBeOwned = true;
     syncDirectory(directory);
-    hook?.("afterDestinationLink", context);
     validatePublicSource(sourcePath, source);
 
-    hook?.("beforeSourceRetirement", context);
     validatePublicSource(sourcePath, source);
-    hook?.("beforeSourceRetirementRename", context);
     requirePrivateRenameTargetAbsent(context.retiredSource, "Retired HTML source destination");
     renameSync(sourcePath, context.retiredSource);
-    hook?.("afterSourceRetirementRename", context);
     syncDirectory(context.transactionDirectory);
-    hook?.("afterSourceRetirementTargetSync", context);
     syncDirectory(directory);
-    hook?.("afterSourceRetirement", context);
     validateRetiredSource(context.retiredSource, source);
 
     const destinationBeforeCapture = statMaybe(destination);
@@ -1773,14 +1646,10 @@ function publishConversion(
     }
     if (!regular(destinationBeforeCapture))
       throw new Error("Published destination output is not regular");
-    hook?.("beforeDestinationCaptureRename", context);
     requirePrivateRenameTargetAbsent(context.capturedDestination, "Captured HTML destination");
     renameSync(destination, context.capturedDestination);
-    hook?.("afterDestinationCaptureRename", context);
     syncDirectory(context.transactionDirectory);
-    hook?.("afterDestinationCaptureTargetSync", context);
     syncDirectory(directory);
-    hook?.("afterDestinationCapture", context);
     const captured = lstatSync(context.capturedDestination, { bigint: true });
     if (
       sameInode(captured, {
@@ -1804,7 +1673,6 @@ function publishConversion(
     unlinkSync(context.capturedDestination);
     syncDirectory(context.transactionDirectory);
 
-    hook?.("beforeCommit", context);
     if (statMaybe(sourcePath) !== null)
       throw new Error("A concurrent source generation prevents commit");
     validateRetiredSource(context.retiredSource, source);
@@ -1813,13 +1681,12 @@ function publishConversion(
     if (!regular(publicDestination) || !sameInode(publicDestination, identity(output)))
       throw new Error("Destination ownership changed before commit");
 
-    publishMarker(context.transactionDirectory, context, "commit", hook);
+    publishMarker(context.transactionDirectory, "commit");
     syncDirectory(directory);
     committed = true;
-    hook?.("afterDurableCommit", context);
 
     validateRetiredSource(context.retiredSource, source);
-    finalizeCommitted(context, manifest, hook);
+    finalizeCommitted(context, manifest);
     prepared = null;
     return true;
   } catch (primary) {
@@ -1829,14 +1696,13 @@ function publishConversion(
     try {
       commitAuthoritative =
         repairMarker(prepared.context.transactionDirectory, "commit") || commitAuthoritative;
-      if (commitAuthoritative) finalizeCommitted(prepared.context, prepared.manifest, hook);
+      if (commitAuthoritative) finalizeCommitted(prepared.context, prepared.manifest);
       else
         rollbackUncommitted(
           prepared.context,
           prepared.manifest,
           destinationMayBeOwned,
           "live-operation",
-          hook,
         );
     } catch (error) {
       secondary.push(error);
@@ -1851,10 +1717,7 @@ function publishConversion(
   }
 }
 
-function convertHtmlDirectoryInternal(
-  directory: string,
-  hook?: HtmlConversionTransactionHook,
-): number {
+function convertHtmlDirectoryInternal(directory: string): number {
   const requestedRoot = resolve(directory);
   const requestedRootInfo = lstatSync(requestedRoot, { bigint: true });
   if (!requestedRootInfo.isDirectory() || requestedRootInfo.isSymbolicLink())
@@ -1913,12 +1776,12 @@ function convertHtmlDirectoryInternal(
       });
     for (const name of reservedNames) {
       const path = join(current, name);
-      if (name.startsWith(PREPARATION_PREFIX)) recoverPreparation(current, path, hook);
-      else if (name.startsWith(TRANSACTION_PREFIX)) recoverTransaction(current, path, hook);
+      if (name.startsWith(PREPARATION_PREFIX)) recoverPreparation(current, path);
+      else if (name.startsWith(TRANSACTION_PREFIX)) recoverTransaction(current, path);
       else {
         const cleanup = lstatSync(path, { bigint: true });
-        if (strictMode(cleanup, 0o300n)) recoverTransitionalPreparationCleanup(current, path, hook);
-        else sweepCleanup(current, path, hook);
+        if (strictMode(cleanup, 0o300n)) recoverTransitionalPreparationCleanup(current, path);
+        else sweepCleanup(current, path);
       }
     }
 
@@ -1942,23 +1805,12 @@ function convertHtmlDirectoryInternal(
       }
       if (!entry.isFile() || ![".html", ".htm"].includes(extname(name).toLowerCase())) continue;
       const target = `${path.slice(0, -extname(path).length)}.md`;
-      if (publishConversion(path, target, current, hook)) count += 1;
+      if (publishConversion(path, target, current)) count += 1;
     }
   };
 
   walk(root);
   return count;
-}
-
-/**
- * Non-global callback seam for hermetic transaction race/crash tests. Production and CLI calls do
- * not accept or reach a hook.
- */
-export function convertHtmlDirectoryForTest(
-  directory: string,
-  hook: HtmlConversionTransactionHook,
-): number {
-  return convertHtmlDirectoryInternal(directory, hook);
 }
 
 /**
