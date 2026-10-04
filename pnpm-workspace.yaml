@@ -2,6 +2,12 @@ packages:
   - packages/*
 allowBuilds:
   '@modelcontextprotocol/inspector': false
+  # The pinned OpenCode Role host uses shipped prebuilds/optional fallbacks;
+  # do not compile native dependencies during Stack installation.
+  '@parcel/watcher': false
+  msgpackr-extract: false
+  tree-sitter-bash: false
+  tree-sitter-powershell: false
 overrides:
   # Effect prereleases are not runtime-compatible across the native host pin.
   '@effect/platform-node@4.0.0-rc.112>@effect/platform-node-shared': 4.0.0-rc.112
