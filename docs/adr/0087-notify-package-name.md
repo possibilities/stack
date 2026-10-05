@@ -10,7 +10,7 @@ lifecycle decisions were later superseded by
 The owner-managed Package API is `notify`, packaged as `@stack/notify`.
 Discovery, the owner child, socket, MCP and WebSocket addresses use `notify`.
 Its change Event is `notify_changed`. The operations remain `notification_*`:
-they act on a Notification, the domain term in [CONTEXT.md](../../CONTEXT.md),
+they act on a Notification, the domain term in [GLOSSARY.md](../../GLOSSARY.md),
 and their schemas and behavior do not change.
 
 On first startup with a previous store, move the whole `notifications` state

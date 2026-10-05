@@ -1,4 +1,4 @@
-# Context
+# stack glossary
 
 ## Notification
 
