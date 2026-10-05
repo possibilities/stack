@@ -25,14 +25,9 @@ exactly-once processing
 
 ## State maintenance
 
-Owner-specific inspection and exact cleanup of retained Stack state. An inventory
-reports coverage, ownership, retention and regeneration; a plan binds observed
-revisions and consequences; a request receipt records effects and uncertainty.
-Conversation reset, workspace clearing, payload clearing, work cancellation,
-settings reset and identity removal are distinct. A receipt never turns an unknown
-native outcome into a known one. See [ADR 0135](docs/adr/0135-owner-state-maintenance.md)
-and the [operation matrix](docs/state-control.md). _Avoid_: reset everything,
-clear means cancel, tombstone means erased, unmeasured means zero
+Owner-specific inspection and exact cleanup of retained Stack state. Its inventory, plan and receipt contract is in [State inspection and maintenance](docs/state-control.md) and [ADR 0135](docs/adr/0135-owner-state-maintenance.md).
+
+_Avoid_: reset everything, clear means cancel, tombstone means erased, unmeasured means zero
 
 ## Installation factory reset
 
@@ -47,13 +42,9 @@ _Avoid_: secure erase, device reset, automatic restart, resumed unknown generati
 
 ## Standalone operation
 
-An operation whose Package API explicitly supplies a scoped context factory for
-operator stdio execution when its private socket is definitely absent before
-dispatch. It reuses the owner's handler, schemas and MCP content projection,
-without the full Server context or background lifecycle. Discovery's `standalone`
-flag describes this capability, not live availability or permission for a managed
-caller. A read-only hint alone does not opt in. _Avoid_: offline server, implicit
-read-only fallback, replay after timeout
+A Package API operation explicitly permitted to execute with a scoped context when its private socket is definitely absent before dispatch. Its discovery and admission rules are in [ADR 0146](docs/adr/0146-server-independent-internal-mcp.md).
+
+_Avoid_: offline server, implicit read-only fallback, replay after timeout
 
 ## Access client
 
@@ -112,7 +103,7 @@ A durable request from a verified Bot Chat for human help with an entire Browser
 
 ## Transport
 
-A configured way to expose one Package API. `socket`, `mcp`, and `websocket` are the local control transports. Socket is the full internal superset. Each MCP and WebSocket declaration independently requires `operations` and `events`: `all`, a positive name list, or `[]` for none; an absent transport is disabled. MCP uses native stdio for Stack's Bot, Worker and injected Role launches, and authenticated loopback HTTP for external consumers. Internal stdio discovery uses installed typed declarations and current manifest exposure without a running Server or Package API context. Calls prefer the private socket owner; only definite pre-dispatch absence permits explicitly owner-supported standalone execution. Other calls return actionable dependency errors without closing the pipe or replaying an uncertain request. HTTP retains live socket validation. Generated Bot event tools route to the server's sole durable subscription owner. WebSocket forwards over one shared loopback listener and package-addressed connection, retaining its operation/topic selection from handshake; each subscription has its own identifier and optional scope. An optional `http` Transport declares explicit JSON or static routes on separate server-lifecycle listeners; it does not expose other Package API operations. See [ADR 0146](docs/adr/0146-server-independent-internal-mcp.md).
+A configured way to expose one Package API. The socket, MCP, WebSocket and HTTP exposure and admission contracts are in [Operations](docs/operations.md#agent-facing-event-subscriptions), [ADR 0078](docs/adr/0078-declared-http-surfaces-and-operation-selection.md), [ADR 0096](docs/adr/0096-explicit-transport-exposure.md) and [ADR 0146](docs/adr/0146-server-independent-internal-mcp.md).
 
 _Avoid_: protocol, binding
 
@@ -135,19 +126,13 @@ they have no socket operations or generated event subscriptions.
 
 ## MCP event subscription
 
-A durable, revisionless request by a verified Bot thread to watch one MCP-selected Package API topic and re-read one exposed read-only operation after each invalidation. The server records the request, reconnects and resnapshots after interruptions, suppresses unchanged values, and submits changed snapshots as standalone tool output through Codex `turn/start` on that same sanctioned thread. Codex wakes an idle loaded thread or queues input in an active regular turn; Stack waits only for admission acknowledgement, never idle or completion. Current exposure is checked around reads and immediately before submission, including after connection setup; removed or invalid configuration fences subsequent work. The initial value is returned to the subscribing tool call; event notices themselves carry no values. See [ADR 0120](docs/adr/0120-codex-native-input-admission.md).
+A durable request by a verified Bot thread to watch a selected Package API topic and re-read one exposed read-only operation after each invalidation. Its authorization, delivery and recovery behavior is in [Operations](docs/operations.md#agent-facing-event-subscriptions) and [ADR 0120](docs/adr/0120-codex-native-input-admission.md).
 
 ## Completion watch
 
-An operation-declared, one-shot MCP event subscription owned by the same Server service. Its intent and coordination capability are stored before a record mutation. A terminal-only watch wakes the invoking sanctioned Chat only for that record's terminal read; an already-terminal initial read is returned and retained as observed instead. Acknowledged native admission retires the watch and retains its receipt for ID retries. An uncertain admission stays inspectable and is never automatically replayed, even after restart. Installed stdio discovery declares this capability without creating watches; sends require the live owner. See [ADR 0154](docs/adr/0154-notification-send-and-watch.md). _Avoid_: approval, consumption acknowledgement, independent delivery loop
+An operation-declared, one-shot MCP event subscription owned by the Server's durable subscription service. Its admission, retirement and uncertain-outcome rules are in [ADR 0154](docs/adr/0154-notification-send-and-watch.md) and [ADR 0155](docs/adr/0155-correlated-admission-watches.md).
 
-Correlated admission watches can also deliver stable, changed attention facts for
-the exact admitted Worker turn without retiring it. Only terminal acknowledgement
-retires the watch. An ambiguous attention admission freezes later delivery too;
-`lastDeliveryKind` distinguishes attention from terminal attempts. Read arguments
-and scopes are resolved from bounded identifiers before admission, never from a
-latest-record lookup or the admission response. See
-[ADR 0155](docs/adr/0155-correlated-admission-watches.md).
+_Avoid_: approval, consumption acknowledgement, independent delivery loop
 
 ## Codex account
 
