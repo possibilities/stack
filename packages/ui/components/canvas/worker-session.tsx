@@ -925,10 +925,10 @@ function RoleSection({ worker }: { worker: WorkerSession }) {
               {role.state === "current" || role.state === "older" ? `r${role.currentRevision} · ${roleState[role.state]}` : roleState[role.state]}
             </Row>
             {role.roleId ? <Row label="Role ID" mono copy={role.roleId}>{shortId(role.roleId, 13)}</Row> : null}
-            {workerDefault ? <Row label="Worker default">{workerDefault.name}{role.workerDefault ? " · this Role" : ""}</Row> : null}
+            {workerDefault ? <Row label="Worker Role">{workerDefault.name}{role.workerDefault ? " · this Role" : ""}</Row> : null}
           </dl>
           <p className="px-0.5 text-[0.72rem] text-pretty text-muted-foreground">
-            {workerRoleHint(role, null)} Recovery reuses this snapshot, and follow-up turns cannot change it. The Worker default only decides what a new Worker gets when it selects no Role.
+            {workerRoleHint(role, null)} Recovery reuses this snapshot, and follow-up turns cannot change it. Every new Worker uses the fixed Worker Role.
           </p>
         </>
       ) : <p className="px-0.5 text-[0.72rem] text-pretty text-muted-foreground">No Role captured yet.</p>}

@@ -94,35 +94,30 @@ async function ensureRoleMcp(ctx: RolesContext, name?: string, definition?: z.in
 }
 
 export const rolesSnapshot = operation({
-  name: "roles_snapshot", description: "List Role metadata, per-role revisions, Bot and Worker default Role IDs, and the catalog revision. Every successful write advances the catalog revision.",
+  name: "roles_snapshot", description: "List Role metadata, per-role revisions, the Bot default Role ID and fixed Worker Role ID, and the catalog revision. workerDefaultRoleId names the fixed Worker Role for compatibility. Every successful write advances the catalog revision.",
   input: z.strictObject({}), output: catalog, annotations: { title: "List roles", readOnlyHint: true },
   standalone: standaloneReads,
   async call(ctx: RolesContext) { return ctx.store.catalog(); },
 });
 export const roleCreate = operation({
-  name: "role_create", description: "Create a named Role with no resources or fragments and a starter bot.md personality, without changing the Bot or Worker defaults. Supply botMarkdown to replace the starter; an empty string disables it. Pass the catalog revision from roles_snapshot. Names are unique case-insensitively.",
+  name: "role_create", description: "Create a named Role with no resources or fragments and a starter bot.md personality, without changing the Bot default or fixed Worker Role. Supply botMarkdown to replace the starter; an empty string disables it. Pass the catalog revision from roles_snapshot. Names are unique case-insensitively.",
   input: z.strictObject({ expectedRevision: catalogRevision, name: roleName, description: roleDescription.optional(), botMarkdown: botMarkdown.optional() }), output: catalog,
   annotations: { title: "Create role" },
   async call(ctx: RolesContext, { expectedRevision, name, description, botMarkdown }) { const result = ctx.store.createRole(expectedRevision, name, description, botMarkdown); ctx.changed?.(); return result; },
 });
 export const roleUpdate = operation({
-  name: "role_update", description: "Rename a Role, edit its human-only description, or replace its bot.md personality. Omission preserves bot.md; an empty string clears it. Bot personality edits apply on the next launch, not live, and never repeat orientation. Pass that Role's revision. Renaming does not change the default.",
+  name: "role_update", description: "Rename a Role other than the fixed Worker Role, edit its human-only description, or replace its bot.md personality. Omission preserves bot.md; an empty string clears it. Bot personality edits apply on the next launch, not live, and never repeat orientation. Pass that Role's revision. Renaming does not change the Bot default.",
   input: write.extend({ name: roleName.optional(), description: roleDescription.optional(), botMarkdown: botMarkdown.optional() }), output: receipt,
   annotations: { title: "Update role" },
   async call(ctx: RolesContext, { roleId, expectedRevision, ...fields }) { return changed(ctx, ctx.store.role(roleId).update(expectedRevision, fields)); },
 });
 export const roleSetDefault = operation({
-  name: "role_set_default", description: "Atomically mark an existing Role as the Bot default. Worker defaults are independent. Running sessions keep their launch snapshots. Pass the catalog revision from roles_snapshot.",
+  name: "role_set_default", description: "Atomically mark an existing Role as the Bot default. The fixed Worker Role is independent. Running sessions keep their launch snapshots. Pass the catalog revision from roles_snapshot.",
   input: selection.extend({ expectedRevision: catalogRevision }), output: catalog, annotations: { title: "Set default role" },
   async call(ctx: RolesContext, { roleId, expectedRevision }) { const result = ctx.store.setDefault(expectedRevision, roleId); ctx.changed?.(); return result; },
 });
-export const roleSetWorkerDefault = operation({
-  name: "role_set_worker_default", description: "Atomically mark an existing Role as the default for Workers started without roleId. Bot launches are unchanged. Running Workers keep their captured snapshots. Pass the catalog revision from roles_snapshot.",
-  input: selection.extend({ expectedRevision: catalogRevision }), output: catalog, annotations: { title: "Set Worker default role" },
-  async call(ctx: RolesContext, { roleId, expectedRevision }) { const result = ctx.store.setWorkerDefault(expectedRevision, roleId); ctx.changed?.(); return result; },
-});
 export const roleDelete = operation({
-  name: "role_delete", description: "Delete a Role that is neither the Bot nor Worker default and all its owned resources. Reassign either default before deleting its Role. Pass the catalog revision from roles_snapshot. Existing sessions keep private snapshots.",
+  name: "role_delete", description: "Delete a Role that is neither the Bot default nor the canonical Worker role and all its owned resources. Reassign the Bot default first if needed. Pass the catalog revision from roles_snapshot. Existing sessions keep private snapshots.",
   input: selection.extend({ expectedRevision: catalogRevision }), output: catalog, annotations: { title: "Delete role", destructiveHint: true },
   async call(ctx: RolesContext, { roleId, expectedRevision }) { const result = ctx.store.deleteRole(expectedRevision, roleId); ctx.changed?.(); return result; },
 });
@@ -154,8 +149,8 @@ export const roleSnapshot = operation({
   async call(ctx: RolesContext, { roleId }) { return summarize(ctx.store.role(roleId).snapshot()); },
 });
 export const roleLaunchSnapshot = operation({
-  name: "role_launch_snapshot", description: "Atomically read a selected Role or resolve the Bot or Worker default for a native launch. Includes credential-bearing MCP definitions; keep this private snapshot out of model transcripts. An unknown Role fails.",
-  input: z.strictObject({ roleId: roleId.optional().describe("Explicit Role; omit for the audience's default."), audience: z.enum(["bot", "worker"]).optional().describe("Audience whose default to use; bot when omitted.") }),
+  name: "role_launch_snapshot", description: "Atomically read a selected Bot Role, the Bot default, or the fixed Worker role for a native launch. A Worker audience rejects an explicit Role ID. Includes credential-bearing MCP definitions; keep this private snapshot out of model transcripts. An unknown Role fails.",
+  input: z.strictObject({ roleId: roleId.optional().describe("Explicit Bot Role; rejected for Worker launches."), audience: z.enum(["bot", "worker"]).optional().describe("Bot default or fixed Worker role; bot when omitted.") }),
   output: launchSnapshot, annotations: { title: "Read launch role", readOnlyHint: true },
   standalone: standaloneReads,
   async call(ctx: RolesContext, { roleId, audience }) { return ctx.store.launchSnapshot(roleId, audience); },
@@ -389,7 +384,7 @@ const packageApi: PackageApi<RolesContext, keyof typeof topics> = {
       input: stateApplyInput, output: stateReceipt, annotations: { destructiveHint: true, idempotentHint: true }, async call(ctx: RolesContext, input, invocation) { requireStateOperator(invocation); const result = await ctx.launches!.clear(input); ctx.changed?.(); return result; } }),
     operation({ name: "roles_state_receipt_get", description: "Read the durable receipt of exact retained Role launch cleanup, including partial or unknown outcomes. Local operator only.", input: z.strictObject({ requestId: z.uuid() }), output: z.strictObject({ receipt: stateReceipt.nullable() }), annotations: { readOnlyHint: true },
       async call(ctx: RolesContext, { requestId }, invocation) { requireStateOperator(invocation); return { receipt: ctx.launches!.journal.receipt(requestId) }; } }),
-    rolesSnapshot, roleCreate, roleUpdate, roleSetDefault, roleSetWorkerDefault, roleDelete, roleInternalMcpList, roleInternalMcpUpdate, roleSnapshot, roleLaunchSnapshot, roleEditorSnapshot, rolePreview, roleLaunchPreview,
+    rolesSnapshot, roleCreate, roleUpdate, roleSetDefault, roleDelete, roleInternalMcpList, roleInternalMcpUpdate, roleSnapshot, roleLaunchSnapshot, roleEditorSnapshot, rolePreview, roleLaunchPreview,
     roleShimList, roleShimCreate, roleShimUpdate, roleShimDelete, categoryCreate, categoryUpdate, categoryDelete, categoryReorder,
     fragmentCreate, fragmentUpdate, fragmentDelete, fragmentReorder, fragmentMove, skillCreate, skillUpdate, skillDelete, skillReorder,
     mcpServerCreate, mcpServerUpdate, mcpServerDelete, mcpServerReorder,

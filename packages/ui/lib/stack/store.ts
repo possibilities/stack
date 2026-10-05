@@ -304,7 +304,7 @@ const isRoleKey = (key: ResourceKey): key is RoleKey => (roleKeys as readonly st
 type PreviewKey = "rolePreview" | "roleLaunch";
 const isPreviewKey = (key: ResourceKey): key is PreviewKey => key === "rolePreview" || key === "roleLaunch";
 /** Catalog operations answer with the whole catalog, which replaces the held one when it is not older. */
-const catalogReplies = new Set(["roles_snapshot", "role_create", "role_set_default", "role_set_worker_default", "role_delete"]);
+const catalogReplies = new Set(["roles_snapshot", "role_create", "role_set_default", "role_delete"]);
 
 const maxEvents = 250;
 /** The catalog-fence record's name in this destination's storage. */

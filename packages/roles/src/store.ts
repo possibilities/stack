@@ -141,6 +141,7 @@ export class RoleStore {
   /** Resolve an explicit Role or the audience's default in the same SQLite snapshot. */
   launchSnapshot(roleId?: string, audience: "bot" | "worker" = "bot"): RoleSnapshot {
     return transaction(this.db, false, () => {
+      if (audience === "worker" && roleId) throw new Error("Worker launches cannot select a Role");
       if (roleId) return this.role(roleId).readSnapshot();
       const catalog = this.readCatalog();
       const selected = audience === "worker" ? catalog.workerDefaultRoleId : catalog.defaultRoleId;
@@ -179,19 +180,12 @@ export class RoleStore {
     });
   }
 
-  setWorkerDefault(expectedRevision: number, roleId: string): RoleCatalog {
-    return this.changeCatalog(expectedRevision, () => {
-      this.role(roleId).metadata();
-      this.db.prepare("UPDATE role_catalog SET worker_default_role_id = ? WHERE singleton = 1").run(roleId);
-    });
-  }
-
   deleteRole(expectedRevision: number, roleId: string): RoleCatalog {
     return this.changeCatalog(expectedRevision, () => {
       this.role(roleId).metadata();
       const catalog = this.readCatalog();
       if (catalog.defaultRoleId === roleId) throw new Error("cannot delete the default role; mark another role as default first");
-      if (catalog.workerDefaultRoleId === roleId) throw new Error("cannot delete the Worker default role; select another Worker default first");
+      if (catalog.workerDefaultRoleId === roleId) throw new Error("cannot delete the canonical Worker role");
       for (const table of ["fragments", "categories", "skills", "role_mcp_servers", "trusted_projects", "disabled_internal_mcp", "internal_mcp_harnesses", "role_bot_markdown"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE role_id = ?`).run(roleId);
       }
@@ -213,11 +207,11 @@ export class RoleStore {
 }
 
 function readCatalog(db: DatabaseSync): RoleCatalog {
-  const row = db.prepare("SELECT revision, default_role_id, worker_default_role_id FROM role_catalog WHERE singleton = 1").get() as {
-    revision: number; default_role_id: string | null; worker_default_role_id: string | null;
+  const row = db.prepare("SELECT revision, default_role_id, worker_role_id FROM role_catalog WHERE singleton = 1").get() as {
+    revision: number; default_role_id: string | null; worker_role_id: string | null;
   };
   const roles = db.prepare("SELECT id, name, description, revision, created_at AS createdAt, updated_at AS updatedAt FROM roles ORDER BY rowid").all() as Role[];
-  return { revision: row.revision, defaultRoleId: row.default_role_id, workerDefaultRoleId: row.worker_default_role_id, roles };
+  return { revision: row.revision, defaultRoleId: row.default_role_id, workerDefaultRoleId: row.worker_role_id, roles };
 }
 
 function transaction<T>(db: DatabaseSync, write: boolean, action: () => T): T {
@@ -242,6 +236,8 @@ export class RoleContents {
   update(expectedRevision: number, fields: { name?: string; description?: string; botMarkdown?: string }): RoleSnapshot {
     return this.change(expectedRevision, () => {
       const current = this.metadata();
+      if (this.roleId === readCatalog(this.db).workerDefaultRoleId && fields.name !== undefined && fields.name !== current.name)
+        throw new Error("cannot rename the canonical Worker role");
       this.db.prepare("UPDATE roles SET name = ?, description = ? WHERE id = ?")
         .run(roleName.parse(fields.name ?? current.name), roleDescription.parse(fields.description ?? current.description), this.roleId);
       if (fields.botMarkdown !== undefined) this.db.prepare("UPDATE role_bot_markdown SET body=? WHERE role_id=?").run(botMarkdown.parse(fields.botMarkdown), this.roleId);

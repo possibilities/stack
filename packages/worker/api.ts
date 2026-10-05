@@ -111,9 +111,9 @@ export const workerAccountDrain = operation({
 });
 
 export const workerStart = operation({
-  name: "worker_start", description: "Start a Worker in an owned Git worktree and admit its first turn. Choose account/model/effort from worker_catalog; roleId defaults to the Worker Role, captured for recovery. subscribe defaults on for Bot MCP calls, false opts out. Inspect observation/subscription: the exact turn delivers needs-input updates and terminal outcome, not token progress. Native completion never completes Work.",
+  name: "worker_start", description: "Start a Worker in an owned Git worktree under the fixed Worker Role and admit its first turn. Choose account/model/effort from worker_catalog. subscribe defaults on for Bot MCP calls, false opts out. Inspect observation/subscription: the exact turn delivers needs-input updates and terminal outcome, not token progress. Native completion never completes Work.",
   input: z.strictObject({ accountId: id, model: z.string().min(1).max(200).optional().describe("Native model choice; omit to use the saved provider default. If neither exists, admission fails."), effort: z.string().min(1).max(64).optional(),
-    repo: z.string().min(1).max(4_096), baseRef: z.string().min(1).max(256).optional(), roleId: id.optional().describe("Role to capture at creation; omit for the current Worker default. Cannot change on an existing Worker."), task: z.string().min(1).max(65_536), requestId,
+    repo: z.string().min(1).max(4_096), baseRef: z.string().min(1).max(256).optional(), task: z.string().min(1).max(65_536), requestId,
      workItemId: id.nullable().optional().describe("Capture this open HUD work item and scope in the first turn. Omit to inherit verified Chat focus; null explicitly opts out. Focus lookup failure refuses admission, never silently drops association."), subscribe: z.boolean().optional() }),
   output: resultSchema, completionWatch: turnWatch, annotations: { title: "Start Worker" },
   async call(ctx: WorkersContext, input, invocation) { return { ...await ctx.manager.start(input, invocation), subscription: null, observation: null }; },

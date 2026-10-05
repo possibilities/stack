@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { configuredMcpServers, workspaceRoot, operation, parseMcpBinding, serveApi, serveSocket, socketCall, socketPath, type StatePlan, type StateReceipt } from "@stack/api";
 import { RoleStore, type RoleSnapshot } from "@stack/roles";
@@ -295,7 +296,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.equal(started.worker.roleId, roleId);
     assert.equal(started.worker.roleRevision, applied.revision);
     await assert.rejects(manager.start({ ...start, task: "Different task" }), /requestId was reused/);
-    await assert.rejects(manager.start({ ...start, roleId }), /requestId was reused/);
+    await assert.rejects(socketCall(socketPath("worker", env), "tools/call", { name: "worker_start", arguments: { ...start, roleId } }), /roleId|unrecognized/i);
     const fromApi = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_status", arguments: { id: started.worker.id } }) as { worker: { id: string } };
     assert.equal(fromApi.worker.id, started.worker.id);
     assert.equal((await manager.start(start)).worker.id, started.worker.id);
@@ -449,12 +450,14 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     await workerSocket.close(); workerSocket = undefined;
     await manager.close(); manager = undefined;
 
-    // Recovery must retain the captured Role and its MCP selection, even after default/content edits.
+    // Recovery retains its captured Role; a changed legacy default pointer cannot redirect new starts.
     const editedRole = contents.setInternalMcp(applied.revision, "roles", false);
     contents.setInternalMcp(editedRole.revision, "codex-computer-use", true, ["opencode"]);
     const roleCatalog = roleStore.createRole(roleStore.catalog().revision, "Next worker");
     const nextRoleId = roleCatalog.roles.at(-1)!.id;
-    roleStore.setWorkerDefault(roleCatalog.revision, nextRoleId);
+    const legacyCatalog = new DatabaseSync(join(root, "roles.sqlite"));
+    try { legacyCatalog.prepare("UPDATE role_catalog SET worker_default_role_id = ? WHERE singleton = 1").run(nextRoleId); }
+    finally { legacyCatalog.close(); }
 
     const reopenedSupervisor = new WorkerSupervisor(root, env);
     manager = new WorkerManager(root, reopenedSupervisor, env);
@@ -476,21 +479,14 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     manager.ledger.settings.patch("worker-defaults:codex", "opencode-codex", { expectedRevision: 1, requestId: randomUUID(), set: { effort: "low" } });
     assert.equal((await manager.start(withDefaults)).worker.id, next.worker.id, "retry uses the original admitted defaults");
     for (let i = 0; i < 100 && (await manager.status(next.worker.id)).worker.phase !== "idle"; i++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(next.worker.roleId, nextRoleId);
-    assert.equal(next.worker.roleRevision, 0);
-    assert.deepEqual(JSON.parse(await readFile(join(next.worker.cwd!, "mcp-names.json"), "utf8")), fleet);
+    assert.equal(next.worker.roleId, roleId, "the mutable legacy pointer cannot redirect new Workers");
+    assert.equal(next.worker.roleRevision, roleStore.role(roleId).snapshot().revision);
+    assert.deepEqual(JSON.parse(await readFile(join(next.worker.cwd!, "mcp-names.json"), "utf8")), [...fleet.filter(name => !["roles", "notify"].includes(name)), "fixture-mcp"]);
+    assert.match(await readFile(join(next.worker.cwd!, ".opencode", "skills", "review", "SKILL.md"), "utf8"), /Review the diff/);
+    assert.equal(await readFile(join(next.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n${start.task}`);
     await manager.closeWorker(next.worker.id);
     await manager.remove(next.worker.id, true);
-    const chosen = await manager.start({ ...start, roleId, requestId: randomUUID() });
-    for (let i = 0; i < 100 && (await manager.status(chosen.worker.id)).worker.phase !== "idle"; i++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(chosen.worker.roleId, roleId);
-    assert.equal(chosen.worker.roleRevision, roleStore.role(roleId).snapshot().revision);
-    assert.deepEqual(JSON.parse(await readFile(join(chosen.worker.cwd!, "mcp-names.json"), "utf8")), [...fleet.filter(name => !["roles", "notify"].includes(name)), "fixture-mcp"]);
-    assert.match(await readFile(join(chosen.worker.cwd!, ".opencode", "skills", "review", "SKILL.md"), "utf8"), /Review the diff/);
-    assert.equal(await readFile(join(chosen.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n${start.task}`);
-    await manager.closeWorker(chosen.worker.id);
-    await manager.remove(chosen.worker.id, true);
-    roleStore.role(nextRoleId).createMcpServer(0, "external-http", "Requires native HTTP support", { type: "http", url: "https://fixture.invalid/mcp" });
+    roleStore.role(roleId).createMcpServer(roleStore.role(roleId).snapshot().revision, "external-http", "Requires native HTTP support", { type: "http", url: "https://fixture.invalid/mcp" });
     const unsupported = await manager.start({ ...start, requestId: randomUUID() });
     assert.equal(unsupported.worker.phase, "failed", "additional HTTP Role servers still need the runtime's HTTP capability");
     await assert.rejects(stat(join(unsupported.worker.cwd!, "output.txt")), { code: "ENOENT" });

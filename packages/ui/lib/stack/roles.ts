@@ -347,7 +347,7 @@ export type WorkerRoleState =
 
 /**
  * `name` and `currentRevision` are the captured Role's while the catalog lists it. `workerDefault` says whether it
- * is the Worker default now, which is what an unselected new Worker would get, not how this one started.
+ * is the fixed Worker Role now, which may differ from a legacy Worker's captured Role.
  */
 export type WorkerRole = { state: WorkerRoleState; roleId: string | null; roleRevision: number; name: string | null; currentRevision: number | null; workerDefault: boolean };
 
@@ -369,8 +369,7 @@ export const workerRoleLabel = (role: WorkerRole): string =>
   `${role.name ?? { current: "Role", older: "Role", deleted: "Deleted role", unknown: "Unknown role", unavailable: "Role" }[role.state]} r${role.roleRevision}`;
 
 /**
- * Explains a Worker's captured Role without implying anything changes it. The Worker default is mentioned only as
- * what a new Worker without a selected Role would get.
+ * Explains a Worker's captured Role without implying anything changes it. New Workers use the fixed Worker Role.
  */
 export function workerRoleHint(role: WorkerRole, workerDefault: Pick<Role, "id" | "name"> | null): string {
   const label = workerRoleLabel(role);
@@ -382,7 +381,7 @@ export function workerRoleHint(role: WorkerRole, workerDefault: Pick<Role, "id" 
     unavailable: `Started with Role r${role.roleRevision}; the Roles catalog is unavailable to name it.`,
   }[role.state];
   const unselected = !workerDefault || role.state === "unknown" || role.state === "unavailable" ? ""
-    : role.workerDefault ? " It is also the current Worker default." : ` New Workers without a selected Role use “${workerDefault.name}”.`;
+    : role.workerDefault ? " It is the fixed Worker Role." : ` New Workers use the fixed Worker Role “${workerDefault.name}”.`;
   return `${captured}${unselected} Editing a Role never changes a running Worker.`;
 }
 
@@ -486,19 +485,19 @@ export function roleNameIssue(name: string, catalog: RoleCatalog | null, selfId?
 export const roleErrorText = (message: string): string =>
   /UNIQUE constraint failed: roles\.name/i.test(message) ? "Another Role already uses this name; letter case is ignored" : message;
 
-/** Which launch defaults a Role is: “Bot default”, “Worker default”, “Bot and Worker default”, or null. */
+/** Which launch identities a Role holds: Bot default, fixed Worker Role, both, or neither. */
 export const defaultsLabel = (bot: boolean, worker: boolean): string | null =>
-  bot && worker ? "Bot and Worker default" : bot ? "Bot default" : worker ? "Worker default" : null;
+  bot && worker ? "Bot default and Worker Role" : bot ? "Bot default" : worker ? "Worker Role" : null;
 
 /** Why a launch default cannot be deleted and how to free it. Null for a Role that is neither default. */
 export function defaultDeleteHint(bot: boolean, worker: boolean): string | null {
-  if (bot && worker) return "Make other Roles the Bot and Worker defaults first";
+  if (bot && worker) return "Make another Role the Bot default first; the Worker Role cannot be deleted";
   if (bot) return "Make another Role the Bot default first";
-  if (worker) return "Make another Role the Worker default first";
+  if (worker) return "The fixed Worker Role cannot be deleted";
   return null;
 }
 
-/** How a Role reads in a window subtitle: “Manager · Bot default”, “Worker · Worker default” or “Researcher”. */
+/** How a Role reads in a window subtitle: “Manager · Bot default”, “Worker · Worker Role” or “Researcher”. */
 export const roleLabel = (role: Pick<Role, "id" | "name"> | null, catalog: Pick<RoleCatalog, "defaultRoleId" | "workerDefaultRoleId"> | null): string | null =>
   role ? [role.name, defaultsLabel(catalog?.defaultRoleId === role.id, catalog?.workerDefaultRoleId === role.id)].filter(Boolean).join(" · ") : null;
 

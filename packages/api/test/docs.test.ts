@@ -296,7 +296,7 @@ test("the api package serves structured documents for every workspace package", 
     const roles = found.get("roles") as PackageDoc;
     assert.deepEqual(Object.keys(roles.events).sort(), ["role_changed", "role_shims_changed"]);
     assert.deepEqual(roles.operations.map((operation) => operation.name).filter(name => !stateOperation(name)).sort(), [
-      "roles_snapshot", "role_create", "role_update", "role_set_default", "role_set_worker_default", "role_delete", "role_internal_mcp_list", "role_internal_mcp_update",
+      "roles_snapshot", "role_create", "role_update", "role_set_default", "role_delete", "role_internal_mcp_list", "role_internal_mcp_update",
       "role_preview", "role_launch_preview", "role_snapshot", "role_editor_snapshot", "role_launch_snapshot", "role_shim_list", "role_shim_create", "role_shim_update", "role_shim_delete", "category_create", "category_delete", "category_reorder", "category_update",
       "fragment_create", "fragment_delete", "fragment_move", "fragment_reorder", "fragment_update",
       "skill_create", "skill_delete", "skill_reorder", "skill_update",
@@ -347,7 +347,7 @@ test("the api package serves structured documents for every workspace package", 
       assert.match(JSON.stringify(patch.inputSchema), /expectedRevision/);
       assert.equal(patch.annotations.idempotentHint, true);
     }
-    assert.ok(Object.hasOwn(workerStart.inputSchema.properties ?? {}, "roleId"));
+    assert.equal(Object.hasOwn(workerStart.inputSchema.properties ?? {}, "roleId"), false);
     assert.ok(Object.hasOwn(workerStart.inputSchema.properties ?? {}, "workItemId"));
     const hud = found.get("hud")!;
     assert.equal(existsSync(join(stateDir, "hud")), false, "discovery must not initialize the work store");

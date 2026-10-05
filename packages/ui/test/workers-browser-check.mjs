@@ -482,10 +482,10 @@ try {
   await worker.getByRole("tab", { name: "Session" }).click();
   await roleRows.getByText(`r${edited.revision} · current revision`, { exact: true }).waitFor();
 
-  // A Worker whose last turn is unknown says so; its Bot recovers it. It started with the Worker default.
+  // A Worker whose last turn is unknown says so; its Bot recovers it. It started with the fixed Worker Role.
   await row("stack · cccccc").click();
   await worker.getByText(/Turn outcome is unknown after server restart/).waitFor();
-  await worker.getByTitle(/It is also the current Worker default\./).getByText(`${workerDefault.name} r${workerDefault.revision}`, { exact: true }).waitFor();
+  await worker.getByTitle(/It is the fixed Worker Role\./).getByText(`${workerDefault.name} r${workerDefault.revision}`, { exact: true }).waitFor();
   await worker.getByRole("tab", { name: "Session" }).click();
   await roleRows.getByText(`${workerDefault.name} · this Role`, { exact: true }).waitFor();
   await page.screenshot({ path: join(evidence, "worker-role.png"), animations: "disabled" });

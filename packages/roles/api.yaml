@@ -9,7 +9,6 @@ mcp:
     - role_create
     - role_update
     - role_set_default
-    - role_set_worker_default
     - role_delete
     - role_internal_mcp_list
     - role_internal_mcp_update
@@ -53,7 +52,6 @@ websocket:
     - role_create
     - role_update
     - role_set_default
-    - role_set_worker_default
     - role_delete
     - role_internal_mcp_list
     - role_internal_mcp_update

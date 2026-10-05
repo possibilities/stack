@@ -185,7 +185,7 @@ _Avoid_: per-chat cost, unique RAM, complete accounting
 
 ## Worker
 
-An Stack-owned native session started by a Bot (or the local operator) under one enabled Worker account in an owned Git worktree. Its backend is ACP or the Claude Agent SDK. It retains its account, model/effort, selected Role ID and revision, transcript and origin across turns. A new Worker uses the Worker default Role unless creation selects another; it receives its enabled instructions, skills and MCP connections. The initial Worker Role has no instruction fragments, but later edits can add them. Closing a Worker retains the worktree and branch for review. _Avoid_: Bot, active account, disposable prompt
+An Stack-owned native session started by a Bot (or the local operator) under one enabled Worker account in an owned Git worktree. Its backend is ACP or the Claude Agent SDK. It retains its account, model/effort, captured Role ID and revision, transcript and origin across turns. Every new Worker uses the fixed Worker Role; it receives its enabled instructions, skills and MCP connections. The initial Worker Role has no instruction fragments, but later edits can add them. Closing a Worker retains the worktree and branch for review. _Avoid_: Bot, active account, disposable prompt
 
 ## Worker turn
 
@@ -285,7 +285,7 @@ update eligibility
 
 ## Role
 
-A named Stack-owned configuration with a stable ID and independent revision: ordered developer-instruction fragments, Bot-only `bot.md` personality, enabled skills, per-Role internal MCP enablement, additional MCP servers and trusted projects. Bot and Worker defaults are independent; any existing Role can be marked default. Every new Bot launch captures the Bot default; a new Worker captures the Worker default unless `worker_start` selects another Role. Bot launches receive a private snapshot through codexnk's required `--capabilities` directory; Workers receive instruction fragments, skills and MCP connections without `bot.md`. Worker recovery retains its saved snapshot. Edits and default changes affect later launches, not a running process. _Avoid_: singleton Role, capability profile, system-prompt flag, live prompt file
+A named Stack-owned configuration with a stable ID and independent revision: ordered developer-instruction fragments, Bot-only `bot.md` personality, enabled skills, per-Role internal MCP enablement, additional MCP servers and trusted projects. Any existing Role can become the Bot default; every new Worker uses the fixed Worker Role identity. Bot launches receive a private snapshot through codexnk's required `--capabilities` directory; Workers receive instruction fragments, skills and MCP connections without `bot.md`. Worker recovery retains its saved snapshot. Edits and Bot-default changes affect later launches, not a running process. _Avoid_: singleton Role, capability profile, system-prompt flag, live prompt file
 
 ## Role injection
 
@@ -297,7 +297,7 @@ An explicitly installed, Stack-owned executable in Stack's command directory (by
 
 ## Default Role
 
-The Role selected in the Role catalog for every later Bot launch and for new Workers that omit `roleId`. Selecting a Role for editing does not make it default. A fresh catalog has no Role until its first creation; afterward exactly one is default. The default cannot be deleted until another Role is selected. A session's `roleId` and `roleRevision` record the applied snapshot, not a mutable assignment.
+The Role selected in the Role catalog for every later Bot launch. Selecting a Role for editing does not make it default. A fresh catalog provisions Manager as its Bot default and a separate, fixed Worker Role for every new Worker. The Bot default cannot be deleted until another Role is selected; the canonical Worker Role cannot be renamed, deleted, or selected by a caller at Worker start. A session's `roleId` and `roleRevision` record the applied snapshot, not a mutable assignment.
 
 ## Internal Role MCP enablement
 

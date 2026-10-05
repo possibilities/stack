@@ -103,14 +103,12 @@ type RoleActions = {
   /** Create a Role with the catalog revision, then select it. */
   createRole(name: string, description: string): Promise<Role>;
   confirmDelete(target: RoleRecord): void;
-  /** Ask to make a Role the Bot default or the Worker default; each changes only its own audience's later launches. */
-  confirmDefault(roleId: string, audience?: Audience): void;
+  /** Ask to make a Role the Bot default. The Worker Role is fixed. */
+  confirmDefault(roleId: string): void;
   confirmDeleteRole(roleId: string): void;
 };
 
-/** Which launches a default applies to: Bots, or Workers started without a selected Role. */
-export type Audience = "bot" | "worker";
-const defaultKey = (id: string, audience: Audience) => `${audience === "worker" ? "worker-default" : "default"}:${id}`;
+const defaultKey = (id: string) => `default:${id}`;
 
 const RoleActionsContext = createContext<RoleActions | null>(null);
 
@@ -130,7 +128,7 @@ export type RoleView = {
   /** The Bot default, which Make default changes. */
   defaultRole: Role | null;
   isDefault: boolean;
-  /** The default for Workers started without a Role; set only through the Roles API. */
+  /** The fixed Worker Role. */
   workerDefaultRole: Role | null;
   isWorkerDefault: boolean;
   /** “Manager · Bot default”, for window subtitles. */
@@ -171,7 +169,7 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<{ roleId: string; record: RoleRecord } | null>(null);
-  const [defaulting, setDefaulting] = useState<{ id: string; audience: Audience } | null>(null);
+  const [defaulting, setDefaulting] = useState<{ id: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const draftsRef = useRef(drafts);
   useEffect(() => { draftsRef.current = drafts; }, [drafts]);
@@ -269,7 +267,7 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
   }, [write]);
 
   /** A catalog write carries the catalog revision, which is not any Role's; its reply is the new catalog. */
-  const catalogWrite = useCallback((name: "role_create" | "role_set_default" | "role_set_worker_default" | "role_delete", build: CatalogWrite, key: string): Promise<RoleCatalog> => {
+  const catalogWrite = useCallback((name: "role_create" | "role_set_default" | "role_delete", build: CatalogWrite, key: string): Promise<RoleCatalog> => {
     const attempt = async (held: RoleCatalog) => {
       const args = build(held);
       if (typeof args === "string") throw new Error(args);
@@ -345,11 +343,10 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
 
   const makeDefault = () => {
     if (!defaulting) return;
-    const { id, audience } = defaulting;
+    const { id } = defaulting;
     const label = names.current.get(id) ?? "The Role";
-    const [name, field] = audience === "worker" ? ["role_set_worker_default", "workerDefaultRoleId"] as const : ["role_set_default", "defaultRoleId"] as const;
-    catalogWrite(name, (held) => !held.roles.some((item) => item.id === id) ? "That Role was deleted." : held[field] === id ? null : { roleId: id }, defaultKey(id, audience))
-      .then(() => { setDefaulting(null); toast.success(`“${label}” is now the ${audience === "worker" ? "Worker" : "Bot"} default`); }, (error) => toast.error(errorMessage(error)));
+    catalogWrite("role_set_default", (held) => !held.roles.some((item) => item.id === id) ? "That Role was deleted." : held.defaultRoleId === id ? null : { roleId: id }, defaultKey(id))
+      .then(() => { setDefaulting(null); toast.success(`“${label}” is now the Bot default`); }, (error) => toast.error(errorMessage(error)));
   };
 
   const removeRole = () => {
@@ -358,7 +355,7 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
     const label = names.current.get(id) ?? "The Role";
     quiet.current.add(id);
     catalogWrite("role_delete", (held) => !held.roles.some((item) => item.id === id) ? null
-      : held.defaultRoleId === id || held.workerDefaultRoleId === id ? "This Role is a launch default. Reassign that default before deleting it." : { roleId: id }, `delete-role:${id}`)
+      : held.defaultRoleId === id || held.workerDefaultRoleId === id ? "The Bot default must be reassigned; the fixed Worker Role cannot be deleted." : { roleId: id }, `delete-role:${id}`)
       .then(() => { setRemoving(null); discardDrafts(id); toast.success(`Deleted “${label}”`); }, (error) => { quiet.current.delete(id); toast.error(errorMessage(error)); });
   };
 
@@ -395,7 +392,7 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
   const value = useMemo<RoleActions>(() => ({
     roleId, target, open, openIn, select, drafts: scopedDrafts, draftedRoles: drafted, setDraft, discardDrafts, knownName: (id) => names.current.get(id) ?? null,
     pending: pendingView, write, act, setInternalMcp, createRole, confirmDelete: (record) => { if (roleId) setDeleting({ roleId, record }); },
-    confirmDefault: (id, audience = "bot") => setDefaulting({ id, audience }), confirmDeleteRole: setRemoving,
+    confirmDefault: (id) => setDefaulting({ id }), confirmDeleteRole: setRemoving,
   }), [roleId, target, open, openIn, select, scopedDrafts, drafted, setDraft, discardDrafts, pendingView, write, act, setInternalMcp, createRole]);
 
   const defaultTarget = catalog?.roles.find((item) => item.id === defaulting?.id);
@@ -424,9 +421,9 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <DefaultDialog role={defaultTarget ?? null} audience={defaulting?.audience ?? "bot"}
+      <DefaultDialog role={defaultTarget ?? null}
         botDefault={catalog?.roles.find((item) => item.id === catalog.defaultRoleId) ?? null} workerDefault={catalog?.roles.find((item) => item.id === catalog.workerDefaultRoleId) ?? null}
-        pending={defaulting !== null && pending.has(`${catalogScope}:${defaultKey(defaulting.id, defaulting.audience)}`)} onConfirm={makeDefault} onClose={() => setDefaulting(null)} />
+        pending={defaulting !== null && pending.has(`${catalogScope}:${defaultKey(defaulting.id)}`)} onConfirm={makeDefault} onClose={() => setDefaulting(null)} />
       <DeleteRoleDialog role={removeTarget ?? null} defaults={{ bot: Boolean(removeTarget && removeTarget.id === catalog?.defaultRoleId), worker: Boolean(removeTarget && removeTarget.id === catalog?.workerDefaultRoleId) }}
         edits={removing !== null && drafted.has(removing)}
         pending={removing !== null && pending.has(`${catalogScope}:delete-role:${removing}`)} onConfirm={removeRole} onClose={() => setRemoving(null)} />

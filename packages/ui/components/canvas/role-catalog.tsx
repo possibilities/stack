@@ -22,8 +22,7 @@ import { footerButton, Window } from "./window";
 const chip = "shrink-0 rounded px-1.5 py-px text-[0.64rem] font-medium";
 
 /**
- * Every named Role, in creation order, with both launch defaults. Clicking one selects it for editing; Make Bot
- * default and Make Worker default each change only their own audience's later launches.
+ * Every named Role, in creation order, with the Bot default and fixed Worker Role.
  */
 export function RoleCatalogWindow() {
   const { roleCatalog, status, endpoints, remote } = useStack();
@@ -60,7 +59,7 @@ export function RoleCatalogWindow() {
             </Alert>
           ))}
           <p className="px-0.5 text-[0.66rem] text-pretty text-muted-foreground">
-            New Bots use the Bot default{view.defaultRole ? ` “${view.defaultRole.name}”` : ""}. A Worker uses the Role it selects, or the Worker default{view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""} when it selects none. Each Make default changes only its own audience. Editing a Role changes neither default, and running Bots and Workers keep their launch snapshots.
+            New Bots use the Bot default{view.defaultRole ? ` “${view.defaultRole.name}”` : ""}. New Workers always use the fixed Worker Role{view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""}. Editing a Role changes later launches only; running sessions keep their snapshots.
           </p>
         </>
       ) : catalog ? (
@@ -97,7 +96,7 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[0.82rem] font-semibold tracking-tight">{role.name}</span>
           {isDefault ? <span className={cn(chip, "bg-success/15 text-success")} title="Later Bot launches use this Role">Bot default</span> : null}
-          {isWorkerDefault ? <span className={cn(chip, "bg-success/15 text-success")} title="Workers started without a selected Role use this Role">Worker default</span> : null}
+          {isWorkerDefault ? <span className={cn(chip, "bg-success/15 text-success")} title="Every new Worker uses this fixed Role">Worker Role</span> : null}
           {selected ? <span className={cn(chip, "bg-pkg-roles/15 text-pkg-roles")} title="The Roles windows show and edit this Role">Editing</span> : null}
           {dirty ? <span role="img" aria-label="Unsaved changes" className="size-1.5 shrink-0 rounded-full bg-pkg-roles" /> : null}
         </span>
@@ -111,8 +110,7 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
         <DropdownMenuContent align="end" className="min-w-48">
           <DropdownMenuGroup>
             <DropdownMenuItem disabled={!connected} onClick={() => actions.openIn(role.id, { kind: "role", id: role.id })}><PencilIcon />Edit details</DropdownMenuItem>
-            <DropdownMenuItem disabled={!connected || isDefault} onClick={() => actions.confirmDefault(role.id, "bot")}><StarIcon />{isDefault ? "Bot default" : "Make Bot default…"}</DropdownMenuItem>
-            <DropdownMenuItem disabled={!connected || isWorkerDefault} onClick={() => actions.confirmDefault(role.id, "worker")}><StarIcon />{isWorkerDefault ? "Worker default" : "Make Worker default…"}</DropdownMenuItem>
+            <DropdownMenuItem disabled={!connected || isDefault} onClick={() => actions.confirmDefault(role.id)}><StarIcon />{isDefault ? "Bot default" : "Make Bot default…"}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => select(node)}><ScanSearchIcon />Inspect record</DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
@@ -130,9 +128,7 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
 }
 
 /**
- * Explains who receives the selected Role and offers to make it whichever launch default it is not. Each default
- * changes only its own audience. Nothing is shown for a Role that is both, for an empty catalog, or before the
- * catalog has loaded.
+ * Explains who receives the selected Role and offers to make it the Bot default.
  */
 export function DefaultNote() {
   const { status, remote } = useStack();
@@ -142,8 +138,8 @@ export function DefaultNote() {
   const connected = status.roles === "open" && remote?.scope !== "view";
   const bots = view.isDefault ? "New Bots use this Role." : view.defaultRole ? `New Bots use “${view.defaultRole.name}”, not this Role.` : "No Bot default is set.";
   const workers = view.isWorkerDefault
-    ? "It is the Worker default: Workers started without a selected Role use it."
-    : `Workers use it only when they select it${view.workerDefaultRole ? `; the rest use “${view.workerDefaultRole.name}”` : ""}.`;
+    ? "It is the fixed Worker Role used by every new Worker."
+    : `New Workers use the fixed Worker Role${view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""}.`;
   const id = view.role.id;
   return (
     <Alert className="border-pkg-roles/30 bg-pkg-roles/5">
@@ -152,13 +148,8 @@ export function DefaultNote() {
         <span>{bots} {workers} Edits reach later launches only; running sessions keep their snapshot.</span>
         <span className="flex flex-wrap gap-1.5">
           {view.isDefault ? null : (
-            <Button size="xs" variant="outline" disabled={!connected} onClick={() => actions.confirmDefault(id, "bot")}>
+            <Button size="xs" variant="outline" disabled={!connected} onClick={() => actions.confirmDefault(id)}>
               <StarIcon data-icon="inline-start" />Make Bot default
-            </Button>
-          )}
-          {view.isWorkerDefault ? null : (
-            <Button size="xs" variant="outline" disabled={!connected} onClick={() => actions.confirmDefault(id, "worker")}>
-              <StarIcon data-icon="inline-start" />Make Worker default
             </Button>
           )}
         </span>

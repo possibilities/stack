@@ -19,7 +19,7 @@ import type { WorkerEventInput } from "./event-inbox.js";
 /** worker_list's compact most recent turn; worker_status and worker_turn_list carry the rest. */
 export type ListedTurn = Pick<TurnSummary, "id" | "phase" | "stopReason" | "issue" | "dispatchedAt" | "createdAt" | "updatedAt" | "workContext">;
 
-export type StartInput = { accountId: string; model?: string; effort?: string; repo: string; baseRef?: string; roleId?: string; task: string; requestId: string; workItemId?: string | null; subscribe?: boolean };
+export type StartInput = { accountId: string; model?: string; effort?: string; repo: string; baseRef?: string; task: string; requestId: string; workItemId?: string | null; subscribe?: boolean };
 export type SendInput = { id: string; message: string; requestId: string; model?: string; effort?: string; workItemId?: string | null; subscribe?: boolean };
 
 export class WorkerManager {
@@ -465,7 +465,7 @@ export class WorkerManager {
     const owner = await this.owner(invocation).catch(error => { throw new OperationRejected(String(error), { cause: error }); });
     const intent = { requestId: input.requestId, botId: owner.botId, threadId: owner.threadId, accountId: input.accountId,
       provider: "" as WorkerRecord["provider"], model: input.model, effort: input.effort ?? null, repo: input.repo,
-      baseRef: input.baseRef ?? null, task: input.task, ...(input.roleId ? { roleId: input.roleId } : {}), ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}) };
+      baseRef: input.baseRef ?? null, task: input.task, ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}) };
     const existing = this.ledger.startByRequestId(input.requestId);
     if (existing) {
       ownsWorker(owner, existing);
@@ -493,7 +493,7 @@ export class WorkerManager {
     const selection = this.ledger.settings.seed(`worker:${id}`, { model, ...(effort ? { effort } : {}) }, "Worker admission selection", defaults.revision);
     let stage = "Role snapshot";
     try {
-      const snapshot = await roleSnapshot(this.env, input.roleId);
+      const snapshot = await roleSnapshot(this.env);
       const capabilities = selectRoleCapabilities(snapshot, account.provider === "codex" ? "opencode" : account.provider);
       stage = "worktree";
       const claim = await claimWorktree(this.stateDir, id, input.repo, input.baseRef, capabilities);

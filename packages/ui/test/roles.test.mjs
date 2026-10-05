@@ -239,9 +239,9 @@ test("a Worker is compared with the Role it captured, never with either default"
   const workerDefault = cat.roles[1];
   const hints = { selected: roles.workerRoleHint(at("R", 5), workerDefault), older: roles.workerRoleHint(at("R", 2), workerDefault),
     isDefault: roles.workerRoleHint(at("W", 2), workerDefault), deleted: roles.workerRoleHint(at("Z", 3), workerDefault), legacy: roles.workerRoleHint(at(null, 3), workerDefault) };
-  assert.equal(hints.selected, "Started with Researcher r5, that Role's current revision. New Workers without a selected Role use “Worker”. Editing a Role never changes a running Worker.");
-  assert.equal(hints.older, "Started with Researcher r2; Researcher is now r5. This Worker keeps its r2 snapshot, including through recovery. New Workers without a selected Role use “Worker”. Editing a Role never changes a running Worker.");
-  assert.match(hints.isDefault, /It is also the current Worker default\./);
+  assert.equal(hints.selected, "Started with Researcher r5, that Role's current revision. New Workers use the fixed Worker Role “Worker”. Editing a Role never changes a running Worker.");
+  assert.equal(hints.older, "Started with Researcher r2; Researcher is now r5. This Worker keeps its r2 snapshot, including through recovery. New Workers use the fixed Worker Role “Worker”. Editing a Role never changes a running Worker.");
+  assert.match(hints.isDefault, /It is the fixed Worker Role\./);
   assert.match(hints.deleted, /^Started with a Role deleted since, at r3\./);
   assert.doesNotMatch(hints.legacy, /Worker”/, "a legacy record says nothing about defaults");
   for (const hint of Object.values(hints)) assert.doesNotMatch(hint, /restart|not default|error/i);
@@ -262,12 +262,12 @@ test("Launched compares running Bots with the Bot default and open Workers with 
 
 test("launch default labels name which audience each default serves", () => {
   assert.equal(roles.defaultsLabel(true, false), "Bot default");
-  assert.equal(roles.defaultsLabel(false, true), "Worker default");
-  assert.equal(roles.defaultsLabel(true, true), "Bot and Worker default");
+  assert.equal(roles.defaultsLabel(false, true), "Worker Role");
+  assert.equal(roles.defaultsLabel(true, true), "Bot default and Worker Role");
   assert.equal(roles.defaultsLabel(false, false), null);
   assert.equal(roles.defaultDeleteHint(true, false), "Make another Role the Bot default first");
-  assert.equal(roles.defaultDeleteHint(false, true), "Make another Role the Worker default first");
-  assert.equal(roles.defaultDeleteHint(true, true), "Make other Roles the Bot and Worker defaults first");
+  assert.equal(roles.defaultDeleteHint(false, true), "The fixed Worker Role cannot be deleted");
+  assert.equal(roles.defaultDeleteHint(true, true), "Make another Role the Bot default first; the Worker Role cannot be deleted");
   assert.equal(roles.defaultDeleteHint(false, false), null);
 });
 
@@ -331,8 +331,8 @@ test("the selection follows the default until a Role is chosen, and a deleted Ro
   assert.deepEqual(roles.resolveSelection("Z", catalog(null, []), none), { roleId: null, deleted: false, fellBack: "Z" });
   const split = catalog("A", [role("A", "Manager"), role("B", "Researcher"), role("W", "Worker")], 1, "W");
   assert.equal(roles.roleLabel(role("A", "Manager"), split), "Manager · Bot default");
-  assert.equal(roles.roleLabel(role("W", "Worker"), split), "Worker · Worker default");
-  assert.equal(roles.roleLabel(role("A", "Default"), catalog("A", [])), "Default · Bot and Worker default");
+  assert.equal(roles.roleLabel(role("W", "Worker"), split), "Worker · Worker Role");
+  assert.equal(roles.roleLabel(role("A", "Default"), catalog("A", [])), "Default · Bot default and Worker Role");
   assert.equal(roles.roleLabel(role("B", "Researcher"), split), "Researcher");
   assert.equal(roles.roleLabel(null, split), null);
 });

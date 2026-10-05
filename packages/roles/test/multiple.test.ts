@@ -54,7 +54,7 @@ test("concurrent owner and injection initialization share one complete pair of d
   }
 });
 
-test("fresh Roles start with independent Manager and instruction-free Worker defaults", async () => {
+test("fresh Roles start with a Manager default and fixed instruction-free Worker role", async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-role-pair-"));
   const store = new RoleStore(root);
   try {
@@ -74,6 +74,30 @@ test("fresh Roles start with independent Manager and instruction-free Worker def
     try { assert.equal(reopened.catalog().workerDefaultRoleId, catalog.workerDefaultRoleId); }
     finally { reopened.close(); }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a compatible catalog adopts its original Worker identity instead of a changed legacy default", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-fixed-worker-upgrade-"));
+  const path = join(root, "roles.sqlite");
+  const store = new RoleStore(root);
+  const original = store.catalog().workerDefaultRoleId!;
+  const botDefault = store.catalog().defaultRoleId;
+  const alternate = store.createRole(store.catalog().revision, "Alternate").roles.at(-1)!.id;
+  store.close();
+  const legacy = new DatabaseSync(path);
+  try {
+    legacy.exec("ALTER TABLE role_catalog DROP COLUMN worker_role_id");
+    legacy.prepare("UPDATE role_catalog SET worker_default_role_id = ? WHERE singleton = 1").run(alternate);
+  } finally { legacy.close(); }
+  try {
+    const upgraded = new RoleStore(root);
+    try {
+      assert.equal(upgraded.catalog().workerDefaultRoleId, original);
+      assert.equal(upgraded.launchSnapshot(undefined, "worker").id, original);
+      assert.equal(upgraded.catalog().defaultRoleId, botDefault);
+      assert.throws(() => upgraded.launchSnapshot(alternate, "worker"), /cannot select a Role/);
+    } finally { upgraded.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("existing Roles gain empty bot.md without changing instructions or revisions, and later edits survive reopening", async () => {
@@ -189,9 +213,10 @@ test("catalog revisions fence creation, default changes and deletion without inv
     assert.throws(() => store.deleteRole(catalog.revision, first), /cannot delete the default/);
     catalog = other.setDefault(catalog.revision, second);
     assert.equal(store.launchSnapshot(undefined, "worker").id, workerDefault);
-    assert.throws(() => store.deleteRole(catalog.revision, workerDefault), /Worker default/);
-    catalog = store.setWorkerDefault(catalog.revision, second);
-    assert.equal(store.launchSnapshot(undefined, "worker").id, second);
+    assert.throws(() => store.deleteRole(catalog.revision, workerDefault), /canonical Worker role/);
+    assert.throws(() => store.launchSnapshot(second, "worker"), /cannot select a Role/);
+    assert.throws(() => store.role(workerDefault).update(0, { name: "Alternate" }), /cannot rename the canonical Worker role/);
+    assert.equal(store.launchSnapshot(undefined, "worker").id, workerDefault);
     assert.equal(store.defaultSnapshot().id, second);
     assert.equal(firstContents.snapshot().revision, before.revision);
     // A default switch does not retarget an editor or consume its role revision.
@@ -289,8 +314,9 @@ test("socket clients select Roles explicitly and configure internal MCP enableme
     catalog = await call<RoleCatalog>("role_set_default", { expectedRevision: catalog.revision, roleId: second });
     assert.equal((await call<RoleSnapshot>("role_launch_snapshot")).id, second);
     assert.equal((await call<RoleSnapshot>("role_launch_snapshot", { audience: "worker" })).id, catalog.workerDefaultRoleId);
-    catalog = await call<RoleCatalog>("role_set_worker_default", { expectedRevision: catalog.revision, roleId: second });
-    assert.equal((await call<RoleSnapshot>("role_launch_snapshot", { audience: "worker" })).id, second);
+    await assert.rejects(call("role_set_worker_default", { expectedRevision: catalog.revision, roleId: second }), /unknown operation|not found/i);
+    await assert.rejects(call("role_launch_snapshot", { roleId: second, audience: "worker" }), /cannot select a Role/);
+    assert.equal((await call<RoleSnapshot>("role_launch_snapshot", { audience: "worker" })).id, catalog.workerDefaultRoleId);
     const selected = await call<RoleSnapshot>("role_launch_snapshot", { roleId: first });
     assert.equal(selected.id, first);
     assert.deepEqual(selected.disabledInternalMcpServers, ["roles"]);
@@ -307,7 +333,7 @@ test("socket clients select Roles explicitly and configure internal MCP enableme
       const disabled = await call<{ revision: number }>("role_internal_mcp_update", { roleId: second, expectedRevision: revision, name, enabled: false });
       revision = disabled.revision;
     }
-    for (const audience of ["bot", "worker"]) assert.deepEqual((await call<RoleSnapshot>("role_launch_snapshot", { roleId: second, audience })).disabledInternalMcpServers.slice().sort(), bridges.slice().sort());
+    assert.deepEqual((await call<RoleSnapshot>("role_launch_snapshot", { roleId: second, audience: "bot" })).disabledInternalMcpServers.slice().sort(), bridges.slice().sort());
     catalog = await call<RoleCatalog>("roles_snapshot");
     const deleted = await call<RoleCatalog>("role_delete", { roleId: first, expectedRevision: catalog.revision });
     assert.equal(deleted.defaultRoleId, second);
