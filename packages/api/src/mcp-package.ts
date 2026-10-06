@@ -6,7 +6,7 @@ import { pollInput, pollOutput } from "./occurrence.js";
 import { socketPath } from "./workspace.js";
 import { currentMcpCatalog, installedMcpCatalog, type SocketCatalog } from "./exposure.js";
 import { mcpInvocation, packageRole, type McpIdentity } from "./mcp-authority.js";
-import { packageToolAllowed } from "./role-grants.js";
+import { completionWatchAllowed, packageToolAllowed } from "./role-grants.js";
 import { subscriptionTools, type McpEventCall } from "./mcp-events.js";
 import { socketCall, SocketCallError } from "./socket.js";
 import { forwardTimeout } from "./forward-timeout.js";
@@ -100,7 +100,7 @@ export function packageMcpServer(name: string, description: string, root: string
       await checkAuthority();
       assertInstallationOpen(env);
       const watch = catalog.tools.find(tool => tool.name === params.name)?.completionWatch;
-      if (role === "admin" && watch && wantsCompletion(watch, params.arguments ?? {}, invocation)) {
+      if (completionWatchAllowed(role, name, params.name) && watch && wantsCompletion(watch, params.arguments ?? {}, invocation)) {
         if (!identity || !("botId" in identity)) throw new Error("subscribe:true requires a verified Bot MCP call and sanctioned Chat; nothing was sent");
         if (!events) throw new Error("completion subscription owner is unavailable; nothing was sent");
         // Allocate the ID at ingress so a lost owner response still names a safe retry key.

@@ -143,16 +143,24 @@ export class HudService {
     const item = this.requireVisible(caller, id);
     const focuses = caller.actor.kind === "bot" && caller.role === "manager"
       ? this.store.focusesForBot(id, caller.actor.botId, caller.actor.mainThreadId) : this.store.focuses(id);
+    // Admin's all-scope read is mediated here after live Role verification;
+    // forwarding its Bot invocation would make Worker return only that Bot's rows.
+    const workerInvocation = caller.role === "admin" ? undefined : invocation;
+    let workers = null;
+    let available = false;
     try {
-      const workers = workAdmissionPage.parse(await socketCall(socketPath("worker", this.env), "tools/call", {
-        name: "worker_work_list", arguments: { workItemId: id, after, limit }, ...(invocation ? { invocation } : {}),
+      workers = workAdmissionPage.parse(await socketCall(socketPath("worker", this.env), "tools/call", {
+        name: "worker_work_list", arguments: { workItemId: id, after, limit }, ...(workerInvocation ? { invocation: workerInvocation } : {}),
       }, { timeoutMs: 20_000 }));
-      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses, workers,
-        observation: { state: "available" as const, at: Date.now(), issue: null, visibility: caller.role === "manager" ? "own_bot" as const : "all" as const } };
-    } catch {
-      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses, workers: null,
-        observation: { state: "unavailable" as const, at: Date.now(), issue: "Worker associations unavailable; retained work remains authoritative", visibility: caller.role === "manager" ? "own_bot" as const : "all" as const } };
-    }
+      available = true;
+    } catch { /* Worker observations can be unavailable while HUD Work remains readable. */ }
+    if (caller.actor.kind === "bot" && caller.role === "admin" &&
+      await packageRole({ botId: caller.actor.botId, instance: invocation!.instance! }, this.env) !== "admin")
+      throw new Error("Admin Work read role grant changed during the operation");
+    return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses, workers,
+      observation: { state: available ? "available" as const : "unavailable" as const, at: Date.now(),
+        issue: available ? null : "Worker associations unavailable; retained work remains authoritative",
+        visibility: caller.role === "manager" ? "own_bot" as const : "all" as const } };
   }
 
   private async historyDependencies(selection: HistorySelection) {

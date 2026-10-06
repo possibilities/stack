@@ -19,6 +19,9 @@ import { mcpPort, socketPath } from "../src/workspace.js";
 import { botMcpUrl, workerMcpUrl, parseWorkerMcpIdentity } from "../src/bot-mcp-identity.js";
 import type { InvocationContext } from "../src/operation.js";
 import { McpEventSubscriptions, type EventValue } from "../src/mcp-subscriptions.js";
+import { requireCompletionCoordination } from "../src/completion-watch.js";
+import { relayMcpEvent } from "../src/mcp-events.js";
+import type { CompletionWatch } from "../src/operation.js";
 
 test("one HTTP process exposes each configured Package API and forwards operations to socket servers", { timeout: 30_000 }, async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-mcp-"));
@@ -389,6 +392,90 @@ test("a bot-bound MCP URL forwards verified bot and Codex thread context without
     await sample.close();
     await bots.close();
     await roles.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Manager Worker turns coordinate default and explicit completion without event-tool grants", { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-manager-watch-"));
+  const env = { ...process.env, STACK_STATE_DIR: root, STACK_MCP_PORT: "0" };
+  const dir = join(root, "packages", "worker"); await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Workers.\nmcp:\n  description: Workers.\n  operations: all\n  events: all\n");
+  const endpoint = "unix:///fixture/manager-watch.sock";
+  const managerRoleId = randomUUID();
+  const watch: CompletionWatch = { topic: "worker_turn_changed", readOperation: "worker_turn_observation", idArgument: "requestId",
+    terminalField: "result", defaultWhen: [], defaultOnForBot: true, updateField: "update", initialValueField: "observation",
+    scope: { input: "requestId", prefix: "request:" }, readArguments: { requestId: { input: "requestId" },
+      botId: { invocation: "botId" }, threadId: { invocation: "threadId" } } };
+  const admitted: string[] = [];
+  const bots = await serveSocket({ info: { name: "bots", description: "Fixture", transportDescription: "Socket", path: socketPath("bots", env) }, context: {}, operations: [
+    operation({ name: "bot_list", description: "Live Manager", input: z.strictObject({}), output: z.any(), async call() {
+      return { bots: [{ id: "bot-1", state: "running", url: endpoint, roleId: managerRoleId, recoveryIssue: null }] };
+    } }),
+  ] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Fixture", transportDescription: "Socket", path: socketPath("roles", env) }, context: {}, operations: [
+    operation({ name: "role_access_ids", description: "Canonical Roles", input: z.strictObject({}), output: z.any(), async call() {
+      return { managerRoleId, adminRoleId: randomUUID() };
+    } }),
+  ] });
+  const turnInput = z.strictObject({ requestId: z.uuid(), subscribe: z.boolean().optional() });
+  const worker = await serveSocket({ info: { name: "worker", description: "Fixture", transportDescription: "Socket", path: socketPath("worker", env) },
+    context: {}, operations: [
+      ...["worker_start", "worker_send"].map(name => operation({ name, description: "Admit a Worker turn", input: turnInput,
+        output: z.strictObject({ requestId: z.uuid(), subscription: z.unknown().nullable(), observation: z.unknown().nullable() }),
+        completionWatch: watch, async call(_ctx, input, invocation) {
+          await requireCompletionCoordination(env, "worker", name, watch, input, invocation);
+          admitted.push(input.requestId);
+          return { requestId: input.requestId, subscription: null, observation: null };
+        } })),
+      operation({ name: "worker_turn_observation", description: "Exact turn observation", input: z.strictObject({ requestId: z.uuid(), botId: z.string(), threadId: z.string() }),
+        output: z.strictObject({ result: z.unknown().nullable(), update: z.unknown().nullable() }),
+        annotations: { readOnlyHint: true }, async call(_ctx, input: { requestId: string }) {
+          return { result: null, update: admitted.includes(input.requestId) ? { phase: "running" } : null };
+        } }),
+      operation({ name: "worker_close", description: "No watch grant", input: z.strictObject({}), output: z.strictObject({}), async call() { return {}; } }),
+    ], events: { topics: { worker_turn_changed: "Turn changed" },
+      scope: { description: "Exact request", example: "request:UUID", required: true,
+        valid: (_ctx, scope) => /^request:[0-9a-f-]{36}$/.test(scope) } } });
+  const owner = new McpEventSubscriptions(env, async target => { assert.equal(target.botId, "bot-1"); }, async () => undefined,
+    undefined, undefined, root);
+  const serve = await serveSocket({ info: { name: "serve", description: "Fixture", transportDescription: "Socket", path: socketPath("serve", env) }, context: {}, operations: [
+    operation({ name: "serve_completion_check", description: "Completion capability",
+      input: z.object({ id: z.uuid(), package: z.string(), operation: z.string(), recordId: z.string(), caller: z.any() }),
+      output: z.strictObject({ verified: z.boolean() }), async call(_ctx, input) {
+      await owner.verifyCompletion(input.id, input.package, input.operation, input.recordId, input.caller);
+      return { verified: true };
+    } }),
+  ] });
+  const mcp = await serveMcp({ root, env, subscriptions: owner });
+  const url = botMcpUrl(mcp.urls.worker!, "bot-1", endpoint, env);
+  const client = new Client({ name: "manager-watch", version: "1" });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(url)));
+    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["worker_start", "worker_send", "worker_close"]);
+    for (const [operationName, subscribe, expectedWatch] of [
+      ["worker_start", undefined, true], ["worker_send", undefined, true], ["worker_send", false, false], ["worker_start", true, true],
+    ] as const) {
+      const requestId = randomUUID();
+      const result = await client.callTool({ name: operationName, arguments: { requestId, ...(subscribe === undefined ? {} : { subscribe }) },
+        _meta: { threadId: "main" } });
+      assert.equal(result.isError, undefined, JSON.stringify(result.content));
+      assert.equal((result.structuredContent as { subscription: { state: string } | null }).subscription?.state ?? null,
+        expectedWatch ? "pending" : null);
+      assert.ok(admitted.includes(requestId), `${operationName} admitted the exact request`);
+    }
+    assert.equal((await client.callTool({ name: "events_status", arguments: {}, _meta: { threadId: "main" } })).isError, true);
+    assert.equal((await client.callTool({ name: "worker_turn_observation", arguments: {}, _meta: { threadId: "main" } })).isError, true);
+    const binding = new URL(url).search.slice(1);
+    const relay = await relayMcpEvent(owner, { binding, pkg: "worker", tool: "operation_watch",
+      arguments: { operation: "worker_send", input: { requestId: randomUUID() } }, threadId: "main", sessionId: null }, root, env);
+    assert.ok((relay as { subscription?: unknown }).subscription, "private stdio relay coordinates the same Manager Worker watch");
+    await assert.rejects(relayMcpEvent(owner, { binding, pkg: "worker", tool: "events_catalog", arguments: {},
+      threadId: "main", sessionId: null }, root, env), /not granted/);
+    await assert.rejects(relayMcpEvent(owner, { binding, pkg: "worker", tool: "operation_watch",
+      arguments: { operation: "worker_close", input: {} }, threadId: "main", sessionId: null }, root, env), /not granted/);
+  } finally {
+    await client.close(); await mcp.close(); await serve.close(); await owner.close(); await worker.close(); await roles.close(); await bots.close();
     await rm(root, { recursive: true, force: true });
   }
 });

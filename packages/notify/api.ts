@@ -36,8 +36,6 @@ const packageApi: PackageApi<Context, "notify_changed"> = {
       completionWatch, annotations: { idempotentHint: false },
       async call(ctx, input, invocation) {
         const authority = await caller(ctx, invocation);
-        if (authority.role === "manager" && input.subscribe !== false && (input.actions.length || input.reply !== null))
-          throw new Error("Manager notifications require subscribe:false; read the owned response with notification_get");
         if (wantsCompletion(completionWatch, input, invocation)) {
           if (!(invocation?.transport === "mcp" && invocation.botId && invocation.instance && invocation.threadId && invocation.completionWatchId && input.id))
             throw new Error("subscribe requires owner-coordinated Bot MCP delivery to a verified sanctioned Chat; nothing was sent");

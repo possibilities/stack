@@ -12,7 +12,7 @@ import { bindMainThread, findEligibleMainThread, watchThreadEvents } from "./thr
 import { orientationSettled, pendingOrientation, orientationPrompt, readOrientationTurn, type Orientation } from "./orientation.js";
 import { chatRpc, observeThreadState, type ThreadStateObservation } from "./chats.js";
 import { RoleStore, materializeRole, removeRole, renderBotInstructions } from "@stack/roles";
-import type { McpStdioLaunch } from "@stack/api";
+import { rolePolicyVersion, type McpStdioLaunch } from "@stack/api";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DEFAULT_GRACE_MS = 10_000;
@@ -496,6 +496,7 @@ export class Supervisor {
         id, pid: child.pid, cwd, url, state: "running", codexBin, account: account?.id ?? null, launchedAccount: account?.id ?? null, authVersion: account?.version ?? null, runtimeRoot,
         mainThreadId: current?.mainThreadId ?? null, threadStarting: current?.threadStarting ?? false, args: [...userArgs], settings,
         roleRoot: rolePath, roleRevision: snapshot.revision, roleId: snapshot.id, adminReason: input.adminReason ?? null,
+        adminPolicyVersion: input.adminReason ? rolePolicyVersion : null,
         roleInstructionsHash: current?.mainThreadId ? current.roleInstructionsHash ?? null : instructionsHash,
         orientation,
       };

@@ -38,6 +38,16 @@ test("verified Chat focus inherits only sanctioned ancestry and captures explici
   const roles = await serveSocket({ info: { name: "roles", description: "Fixture", transportDescription: "Socket", path: socketPath("roles", env) }, context: {},
     operations: [operation({ name: "role_access_ids", description: "Canonical access identities", input: z.object({}), output: z.any(),
       async call() { return { managerRoleId, adminRoleId }; } })] });
+  const foreign = randomUUID();
+  const workerId = randomUUID(), turnId = randomUUID(), accountId = randomUUID();
+  const worker = await serveSocket({ info: { name: "worker", description: "Fixture", transportDescription: "Socket", path: socketPath("worker", env) }, context: {},
+    operations: [operation({ name: "worker_work_list", description: "Scoped Worker associations", input: z.any(), output: z.any(),
+      async call(_ctx, input: { workItemId: string }, caller) {
+        const entry = { sequence: 1, workerId, turnId, context: { workItemId: foreign, scopeRevision: 1, source: "explicit" },
+          botId: "bot-2", threadId: secondMain, accountId, provider: "codex", model: null, effort: null,
+          workerPhase: "idle", turnPhase: "completed", current: true, createdAt: 1, updatedAt: 1 };
+        return { entries: input.workItemId === foreign && (!caller?.botId || caller.botId === "bot-2") ? [entry] : [], nextCursor: null };
+      } })] });
   const hud = await serveApi({ name: "hud", transport: "socket", env });
   const invocation: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(url), threadId: main, sessionId: null };
   const call = <T>(name: string, args: object, caller: InvocationContext = invocation) => socketCall(hud.socketPath!, "tools/call", { name, arguments: args, invocation: caller }) as Promise<T>;
@@ -45,11 +55,15 @@ test("verified Chat focus inherits only sanctioned ancestry and captures explici
   try {
     await call("work_create", { requestId: randomUUID(), id, title: "Current work", objective: "Follow exact context", state: "active" });
     await call("work_create", { requestId: randomUUID(), id: other, title: "Other work", objective: "An independent objective" });
-    const foreign = randomUUID();
     const secondBot = { ...invocation, botId: "bot-2", threadId: secondMain };
     await call("work_create", { requestId: randomUUID(), id: foreign, title: "Second Manager work", objective: "Private objective" }, secondBot);
     assert.equal((await call<WorkItem>("work_get", { id: foreign }, { ...invocation, botId: "bot-3", threadId: adminMain })).id, foreign,
       "Admin can inspect work outside a Manager assignment");
+    const resources = await call<{ workers: { entries: Array<{ botId: string }> }; observation: { visibility: string } }>(
+      "work_resources", { id: foreign }, { ...invocation, botId: "bot-3", threadId: adminMain });
+    assert.deepEqual(resources.workers.entries.map(entry => entry.botId), ["bot-2"]);
+    assert.equal(resources.observation.visibility, "all", "Admin sees foreign Manager Worker associations in the all-scope read");
+    await assert.rejects(call("work_resources", { id: foreign }), /another Manager assignment/);
     await assert.rejects(call("work_update", { requestId: randomUUID(), id, expectedRevision: 1, patch: { parentId: foreign } }), /visible scope|another Manager assignment/);
     await assert.rejects(call("work_update", { requestId: randomUUID(), id, expectedRevision: 1, patch: { dependencies: [foreign] } }), /visible scope|another Manager assignment/);
     const batchParent = randomUUID(), batchChild = randomUUID();
@@ -101,7 +115,7 @@ test("verified Chat focus inherits only sanctioned ancestry and captures explici
     await assert.rejects(call("work_get", { id: other }, replacement), /another Manager assignment/);
     await assert.rejects(call("work_get", { id }, { ...replacement, instance: "retired-launch" }), /launch changed/);
   } finally {
-    await hud.close(); await bots.close(); await roles.close();
+    await hud.close(); await worker.close(); await bots.close(); await roles.close();
     for (const socket of native.clients) socket.terminate();
     await new Promise<void>(resolve => native.close(() => resolve()));
     await rm(root, { recursive: true, force: true });

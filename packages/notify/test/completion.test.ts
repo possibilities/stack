@@ -39,9 +39,11 @@ async function adminBotFixture(env: NodeJS.ProcessEnv, endpoint: string) {
   return { bots, roles, close: async () => { await roles.close(); await bots.close(); } };
 }
 
-test("Manager notifications remain owned by their Bot without completion watches", async () => {
+test("Manager notifications remain owned by their Bot", async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-notify-manager-"));
   const env = { ...process.env, STACK_STATE_DIR: root };
+  const dir = join(root, "packages", "notify"); await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "api.yaml"), "name: notify\ndescription: Notifications.\nmcp:\n  description: Notifications.\n  operations: all\n  events: all\n");
   const managerRoleId = randomUUID();
   const firstUrl = "unix:///fixture/manager-one.sock";
   const secondUrl = "unix:///fixture/manager-two.sock";
@@ -57,12 +59,28 @@ test("Manager notifications remain owned by their Bot without completion watches
     } }),
   ] });
   const notifications = await serveApi({ name: "notify", transport: "socket", env });
+  const owner = new McpEventSubscriptions(env, async target => { assert.equal(target.botId, "bot-1"); }, async () => undefined,
+    undefined, undefined, root);
+  const capability = await capabilitySocket(env, () => owner);
+  const mcp = await serveMcp({ root, env, port: 0, subscriptions: owner });
   const first: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(firstUrl), threadId: "main", sessionId: null };
   const second: InvocationContext = { transport: "mcp", botId: "bot-2", instance: botInstance(secondUrl), threadId: "main", sessionId: null };
   const callAs = (invocation: InvocationContext | null, name: string, input: Record<string, unknown>) =>
     socketCall(notifications.socketPath!, "tools/call", { name, arguments: input, ...(invocation ? { invocation } : {}) });
   try {
-    await assert.rejects(callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"] }), /subscribe:false/);
+    await assert.rejects(callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"] }), /owner-coordinated/);
+    const url = botMcpUrl(mcp.urls.notify!, "bot-1", firstUrl, env);
+    const mcpCall = async (name: string, input: Record<string, unknown>) => {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: input, _meta: { threadId: "main" } } }) });
+      assert.equal(response.status, 200);
+      return (await response.json() as { result: { isError?: boolean; structuredContent?: unknown } }).result;
+    };
+    const watched = await mcpCall("notification_send", { title: "Watched", message: "Choose", actions: ["Yes"] });
+    assert.equal(watched.isError, undefined);
+    assert.equal((watched.structuredContent as Send).subscription?.state, "pending",
+      "Manager's normal Bot prompt default installs a coordinated completion watch");
+    assert.equal((await mcpCall("events_status", {})).isError, true, "the watch does not grant Manager event tools");
     const sent = await callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"], group: "assignment", subscribe: false }) as Send;
     assert.equal(sent.subscription, null);
     assert.equal((await callAs(first, "notification_get", { id: sent.id }) as Notification).id, sent.id);
@@ -73,6 +91,7 @@ test("Manager notifications remain owned by their Bot without completion watches
       "a second Manager's group does not replace the first Manager's notification");
     assert.equal((await callAs(null, "notification_get", { id: sibling.id }) as Notification).id, sibling.id);
   } finally {
+    await mcp.close(); await capability.close(); await owner.close();
     await notifications.close(); await roles.close(); await bots.close();
     await rm(root, { recursive: true, force: true });
   }

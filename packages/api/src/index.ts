@@ -62,6 +62,7 @@ export { runMcpStdio } from "./stdio.js";
 export { internalMcpLaunches, type McpStdioLaunch, type McpLaunchAuthority } from "./mcp-launch.js";
 export { canonicalMcpName } from "./codex-mcp/catalog.js";
 export { parseMcpBinding, verifyMcpIdentity, packageRole } from "./mcp-authority.js";
+export { rolePolicyVersion } from "./role-grants.js";
 export { mcpEventRelayInput, relayMcpEvent } from "./mcp-events.js";
 export { runWebSocket } from "./run-websocket.js";
 export { serveApi, type ServedApi } from "./serve.js";

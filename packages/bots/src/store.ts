@@ -49,6 +49,7 @@ export type StoredServer = {
   roleRevision?: number | null;
   roleId?: string | null;
   adminReason?: string | null;
+  adminPolicyVersion?: string | null;
   roleInstructionsHash?: string | null;
   orientation?: Orientation | null;
 };
@@ -91,6 +92,7 @@ export class StateStore extends AuthStore {
     const serverColumns = this.db.prepare("PRAGMA table_info(servers)").all() as Array<{ name: string }>;
     if (!serverColumns.some(({ name }) => name === "role_id")) this.db.exec("ALTER TABLE servers ADD COLUMN role_id TEXT");
     if (!serverColumns.some(({ name }) => name === "admin_reason")) this.db.exec("ALTER TABLE servers ADD COLUMN admin_reason TEXT");
+    if (!serverColumns.some(({ name }) => name === "admin_policy_version")) this.db.exec("ALTER TABLE servers ADD COLUMN admin_policy_version TEXT");
     if (!serverColumns.some(({ name }) => name === "orientation_json")) this.db.exec("ALTER TABLE servers ADD COLUMN orientation_json TEXT");
     if (!serverColumns.some(({ name }) => name === "role_instructions_hash")) this.db.exec("ALTER TABLE servers ADD COLUMN role_instructions_hash TEXT");
     if (!serverColumns.some(({ name }) => name === "auth_version")) this.db.exec("ALTER TABLE servers ADD COLUMN auth_version INTEGER");
@@ -122,15 +124,16 @@ export class StateStore extends AuthStore {
   }
 
   servers(): StoredServer[] {
-    return (this.db.prepare("SELECT servers.id, pid, cwd, url, state, codex_bin, account, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, role_instructions_hash, orientation_json, args_json, bot_settings.settings_json FROM servers LEFT JOIN secrets.server_args AS launch_args ON launch_args.id = servers.id LEFT JOIN bot_settings ON bot_settings.id = servers.id").all() as Array<{
+    return (this.db.prepare("SELECT servers.id, pid, cwd, url, state, codex_bin, account, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, admin_policy_version, role_instructions_hash, orientation_json, args_json, bot_settings.settings_json FROM servers LEFT JOIN secrets.server_args AS launch_args ON launch_args.id = servers.id LEFT JOIN bot_settings ON bot_settings.id = servers.id").all() as Array<{
       id: string; pid: number | null; cwd: string; url: string | null; state: StoredServer["state"]; codex_bin: string; account: string | null; launched_account: string | null; auth_version: number | null; runtime_root: string | null; main_thread_id: string | null; thread_starting: number; role_root: string | null; role_revision: number | null; role_id: string | null; args_json: string | null; settings_json: string | null;
-      orientation_json: string | null; role_instructions_hash: string | null; admin_reason: string | null;
-    }>).map(({ codex_bin, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, role_instructions_hash, orientation_json, args_json, settings_json, ...row }) => ({
+      orientation_json: string | null; role_instructions_hash: string | null; admin_reason: string | null; admin_policy_version: string | null;
+    }>).map(({ codex_bin, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, admin_policy_version, role_instructions_hash, orientation_json, args_json, settings_json, ...row }) => ({
       ...row, codexBin: codex_bin, launchedAccount: launched_account, authVersion: auth_version, runtimeRoot: runtime_root,
       mainThreadId: main_thread_id, threadStarting: Boolean(thread_starting), roleRoot: role_root,
       orientation: orientation_json === null ? null : orientationState.parse(JSON.parse(orientation_json)),
       roleInstructionsHash: role_instructions_hash,
-      roleRevision: role_revision, roleId: role_id, adminReason: admin_reason, args: parseArgs(args_json), settings: this.managed.get(`bot:${row.id}`)
+      roleRevision: role_revision, roleId: role_id, adminReason: admin_reason, adminPolicyVersion: admin_policy_version,
+      args: parseArgs(args_json), settings: this.managed.get(`bot:${row.id}`)
         ? legacySettings(this.managed.get(`bot:${row.id}`)!.values) : settings_json === null ? null : parseSettings(settings_json),
     }));
   }
@@ -151,14 +154,15 @@ export class StateStore extends AuthStore {
     const settings = server.settings == null ? null : parseSettings(JSON.stringify(server.settings));
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.prepare(`INSERT INTO servers (id, pid, cwd, url, state, codex_bin, account, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, orientation_json, role_instructions_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      this.db.prepare(`INSERT INTO servers (id, pid, cwd, url, state, codex_bin, account, launched_account, auth_version, runtime_root, main_thread_id, thread_starting, role_root, role_revision, role_id, admin_reason, admin_policy_version, orientation_json, role_instructions_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET pid=excluded.pid, cwd=excluded.cwd, url=excluded.url,
         state=excluded.state, codex_bin=excluded.codex_bin, account=excluded.account, launched_account=excluded.launched_account,
         auth_version=excluded.auth_version, runtime_root=excluded.runtime_root,
         main_thread_id=excluded.main_thread_id, thread_starting=excluded.thread_starting,
-        role_root=excluded.role_root, role_revision=excluded.role_revision, role_id=excluded.role_id, admin_reason=excluded.admin_reason, orientation_json=excluded.orientation_json, role_instructions_hash=excluded.role_instructions_hash`).run(
+        role_root=excluded.role_root, role_revision=excluded.role_revision, role_id=excluded.role_id, admin_reason=excluded.admin_reason,
+        admin_policy_version=excluded.admin_policy_version, orientation_json=excluded.orientation_json, role_instructions_hash=excluded.role_instructions_hash`).run(
         server.id, server.pid, server.cwd, server.url, server.state, server.codexBin, server.account, server.launchedAccount ?? null, server.authVersion ?? null, server.runtimeRoot ?? null,
-        server.mainThreadId ?? null, server.threadStarting ? 1 : 0, server.roleRoot ?? null, server.roleRevision ?? null, server.roleId ?? null, server.adminReason ?? null,
+        server.mainThreadId ?? null, server.threadStarting ? 1 : 0, server.roleRoot ?? null, server.roleRevision ?? null, server.roleId ?? null, server.adminReason ?? null, server.adminPolicyVersion ?? null,
         server.orientation ? JSON.stringify(orientationState.parse(server.orientation)) : null,
         server.roleInstructionsHash ?? null,
       );

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /** Reviewed positive grants from the internal MCP role access proposal. Unknown tools are denied to restricted roles. */
 export const roleGrants = {
   manager: {
@@ -12,10 +14,22 @@ export const roleGrants = {
     worker: ["worker_status", "worker_read"],
   },
 } as const;
+const managerCompletion = { worker: ["worker_start", "worker_send"], notify: ["notification_send"] } as const;
+/** Stable digest of the static grant rules; live bridge and installed Admin catalogs are separate observations. */
+export const rolePolicyVersion = createHash("sha256").update(JSON.stringify({
+  admin: "all installed package and generated event tools", bridges: "five shared connections",
+  roleGrants, managerCompletion,
+})).digest("hex");
 export type PackageRole = "admin" | "manager" | "worker" | "unassigned";
 export function packageToolAllowed(role: PackageRole, pkg: string, operation: string): boolean {
   if (role === "admin") return true;
   if (role === "unassigned") return false;
   const selected = roleGrants[role] as Record<string, readonly string[]>;
   return selected[pkg]?.includes(operation) ?? false;
+}
+
+/** Completion coordination for granted Worker turns is internal, not an event-tool grant. */
+export function completionWatchAllowed(role: PackageRole, pkg: string, operation: string): boolean {
+  return role === "admin" || role === "manager" &&
+    ((managerCompletion as Record<string, readonly string[]>)[pkg]?.includes(operation) ?? false);
 }
