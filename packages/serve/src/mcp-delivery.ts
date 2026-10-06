@@ -1,4 +1,4 @@
-import { McpDeliveryRejected, McpEventSubscriptions, OperationRejected, SocketCallError, botInstance, socketCall, socketPath, verifyMcpIdentity, type OccurrenceTarget, type OccurrenceRuntime, type EventSubscription, type EventTarget, type EventValue } from "@stack/api";
+import { McpDeliveryRejected, McpEventSubscriptions, OperationRejected, SocketCallError, botInstance, completionWatchAllowed, packageRole, packageToolAllowed, socketCall, socketPath, verifyMcpIdentity, type OccurrenceTarget, type OccurrenceRuntime, type EventSubscription, type EventTarget, type EventValue } from "@stack/api";
 import { appServerSocket, listActiveThreads, type ActiveThread } from "@stack/bots";
 
 type RunningBot = { id: string; url: string | null; state: string; recoveryIssue: string | null; mainThreadId: string | null };
@@ -60,6 +60,18 @@ export async function authorizeWorkerRead(subscription: EventSubscription, env: 
   }, { timeoutMs: 2_000 }) as { worker: { botId: string; threadId: string } };
   if (result.worker.botId !== subscription.botId || result.worker.threadId !== subscription.threadId)
     throw new Error("worker wakeup is not owned by this Bot thread");
+}
+
+/** Retained subscriptions have no permanent authority across Bot launches. */
+export async function authorizeRoleRead(subscription: EventSubscription, env: NodeJS.ProcessEnv): Promise<void> {
+  const role = await packageRole({ botId: subscription.botId, instance: subscription.instance }, env);
+  if (subscription.completion) {
+    const operation = subscription.completion.operation;
+    if (!packageToolAllowed(role, subscription.pkg, operation) || !completionWatchAllowed(role, subscription.pkg, operation))
+      throw new Error("completion subscription is not granted to the current Bot Role");
+  } else if (role !== "admin" || !packageToolAllowed(role, subscription.pkg, subscription.readOperation)) {
+    throw new Error("event subscription is not granted to the current Bot Role");
+  }
 }
 
 function eventMessage({ subscription, reason, value, truncated }: EventValue): string {
@@ -188,5 +200,9 @@ export function createMcpEventSubscriptions(env: NodeJS.ProcessEnv, root?: strin
       await verifiedTarget(target, env);
       await authorize();
     }, submitting);
-  }, (botId, threadId) => rebindTarget(botId, threadId, env), (subscription) => authorizeWorkerRead(subscription, env), root, occurrences);
+  }, (botId, threadId) => rebindTarget(botId, threadId, env), async (subscription) => {
+    await authorizeRoleRead(subscription, env);
+    await authorizeWorkerRead(subscription, env);
+    await authorizeRoleRead(subscription, env);
+  }, root, occurrences);
 }

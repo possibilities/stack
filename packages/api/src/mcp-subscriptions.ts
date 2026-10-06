@@ -617,7 +617,7 @@ export class McpEventSubscriptions {
     };
     await check();
     if (state.completion) { await this.validate(state); await check(); }
-    if (this.authorizeRead) { await this.authorizeRead(state); await check(); }
+    if (this.authorizeRead) { await this.authorizeRead(state); await check(); await this.authorizeRead(state); }
   }
 
   private read(state: RecordState): Promise<unknown> {

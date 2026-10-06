@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { z } from "zod";
 import { botInstance, McpEventSubscriptions, operation, operatorHeaders, packageEventTopics, pollEvent, serveApi, serveMcp, serveSocket, serveWebSocket, socketCall, socketPath, type CompletionReceipt, type CompletionWatch, type EventTarget, type InvocationContext, type Occurrence } from "@stack/api";
 import { api, serverCompletionCheck, type ServerContext } from "../api.js";
 import { StatusSource } from "../src/status.js";
-import { authorizeWorkerRead, createMcpEventSubscriptions, verifiedTarget } from "../src/mcp-delivery.js";
+import { authorizeRoleRead, authorizeWorkerRead, createMcpEventSubscriptions, verifiedTarget } from "../src/mcp-delivery.js";
 import { serverStateOperations } from "../src/state.js";
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +36,109 @@ test("Worker UI progress and rich reads cannot become originating-Bot wakeups", 
   await authorizeWorkerRead(turn, {});
   for (const invalid of [{ ...turn, scope: "worker" }, { ...turn, readOperation: "worker_detail" }, { ...turn, readArguments: { ...turn.readArguments, threadId: "main" } }])
     await assert.rejects(authorizeWorkerRead(invalid, {}), /exact request-scoped observation/);
+});
+
+test("retained Bot and Worker event subscriptions cannot bypass current Role grants", { timeout: 10_000 }, async () => {
+  const root = await mkdtemp(join("/tmp", "stack-role-rebind-"));
+  const env = { ...process.env, STACK_STATE_DIR: root };
+  const dir = join(root, "packages", "bots"); await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "api.yaml"), "name: bots\ndescription: Bots.\nmcp:\n  description: Bots.\n  operations: all\n  events: all\n");
+  const sourceDir = join(root, "packages", "source"); await mkdir(sourceDir, { recursive: true });
+  await writeFile(join(sourceDir, "api.yaml"), "name: source\ndescription: Source.\nmcp:\n  description: Source.\n  operations: all\n  events: all\n  workerEvents: [github_delivery]\n");
+  const adminRoleId = randomUUID(), managerRoleId = randomUUID();
+  const http = createServer();
+  const wss = new WebSocketServer({ server: http });
+  let turns = 0;
+  wss.on("connection", peer => peer.on("message", raw => {
+    const frame = JSON.parse(String(raw)) as { id?: number; method?: string; params?: { threadId?: string } };
+    if (!frame.id) return;
+    if (frame.method === "turn/start") turns++;
+    const result = frame.method === "thread/loaded/list" ? { data: ["main"] }
+      : frame.method === "thread/read" ? { thread: { id: frame.params?.threadId, parentThreadId: null, status: { type: "idle" } } }
+      : frame.method === "turn/start" ? { turn: { id: "turn" } } : {};
+    peer.send(JSON.stringify({ id: frame.id, result }));
+  }));
+  await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
+  const address = http.address();
+  assert.ok(address && typeof address !== "string");
+  let roleId = adminRoleId, endpoint = `ws://127.0.0.1:${address.port}/admin`, reads = 0, polls = 0, workerInputs = 0;
+  const occurrences: Occurrence[] = [];
+  const bots = await serveSocket({ info: { name: "bots", description: "Bots", transportDescription: "Socket", path: socketPath("bots", env) }, context: {},
+    operations: [operation({ name: "bot_list", description: "Bot inventory", input: z.strictObject({}), output: z.object({ bots: z.array(z.unknown()) }),
+      annotations: { readOnlyHint: true }, async call(_ctx, _input, invocation) {
+        if (invocation) reads++;
+        return { bots: [{ id: "bot-1", state: "running", url: endpoint, roleId, mainThreadId: "main", recoveryIssue: null }] };
+      } })], events: { topics: { bots_changed: "Bot inventory changed" } } });
+  const roles = await serveSocket({ info: { name: "roles", description: "Roles", transportDescription: "Socket", path: socketPath("roles", env) }, context: {},
+    operations: [operation({ name: "role_access_ids", description: "Access Roles", input: z.strictObject({}), output: z.any(),
+      async call() { return { adminRoleId, managerRoleId }; } })] });
+  const source = await serveSocket({ info: { name: "source", description: "Source", transportDescription: "Socket", path: socketPath("source", env) }, context: {},
+    operations: [pollEvent({ name: "github_delivery", operation: "github_delivery_poll", description: "GitHub deliveries", input: z.strictObject({}),
+      payload: z.strictObject({ value: z.number() }), async poll(_ctx, _args, request) {
+        polls++;
+        return { events: occurrences.slice(request.cursor === null ? occurrences.length : Number(request.cursor)), cursor: String(occurrences.length),
+          truncated: false, hasMore: false, nextPollMs: 1000 };
+      } })] });
+  const worker = await serveSocket({ info: { name: "worker", description: "Worker", transportDescription: "Socket", path: socketPath("worker", env) }, context: {},
+    operations: [operation({ name: "worker_status", description: "Worker status", input: z.strictObject({ id: z.string() }), output: z.any(),
+      async call() { return { worker: { accountId: "account-1", phase: "idle", sessionId: "session-1", runtimeInstance: "worker-instance" } }; } }),
+    operation({ name: "worker_runtime_list", description: "Runtimes", input: z.strictObject({}), output: z.any(),
+      async call() { return { runtimes: [{ id: "account-1", state: "running", instance: "worker-instance" }] }; } }),
+    operation({ name: "worker_event_receive", description: "Worker intake", input: z.record(z.string(), z.unknown()), output: z.any(),
+      async call(_ctx, args) { workerInputs++; return { deliveryId: args.deliveryId }; } })] });
+  const invocation = () => ({ transport: "mcp" as const, botId: "bot-1", instance: botInstance(endpoint), threadId: "main", sessionId: null });
+  const make = () => createMcpEventSubscriptions(env, root);
+  let subscriptions = make();
+  try {
+    const admitted = await subscriptions.subscribe("bots", { topic: "bots_changed", readOperation: "bot_list" }, invocation());
+    assert.equal(reads, 1);
+    const listener = await subscriptions.occurrences!.subscribe("source", { name: "github_delivery" }, invocation());
+    assert.equal(polls, 1);
+    await subscriptions.close();
+    // A listener retained by a pre-policy server must not gain authority from
+    // the old Worker event selection when this owner resumes.
+    const db = new DatabaseSync(join(root, "event-subscriptions.sqlite"));
+    const workerId = randomUUID();
+    const workerListener = { id: randomUUID(), target: { kind: "worker", workerId, sessionId: "session-1", instance: "worker-instance" },
+      pkg: "source", name: "github_delivery", arguments: {}, policy: "native", cursor: "0", truncated: false, lastError: null };
+    db.prepare("INSERT INTO occurrence_subscriptions VALUES (?,?,?,?)").run(workerListener.id,
+      JSON.stringify(["worker", workerId, "session-1"]), "retained-worker-listener", JSON.stringify(workerListener));
+    db.close();
+    roleId = managerRoleId;
+    endpoint = `ws://127.0.0.1:${address.port}/manager`;
+    occurrences.push({ name: "github_delivery", eventId: "delivery-1", timestamp: new Date().toISOString(), data: { value: 42 } });
+    subscriptions = make();
+    subscriptions.resume();
+    for (let i = 0; i < 100 && subscriptions.status(invocation()).subscriptions[0]?.state !== "error"; i++)
+      await pause(10);
+    const retained = subscriptions.status(invocation()).subscriptions[0]!;
+    assert.equal(retained.id, admitted.subscription.id);
+    assert.equal(retained.state, "error", "the retained Admin subscription is suspended on Manager restart");
+    assert.match(retained.lastError ?? "", /not granted/);
+    bots.publish?.("bots_changed");
+    await pause(30);
+    assert.equal(reads, 1, "the Manager Role cannot read the Admin-only snapshot");
+    for (let i = 0; i < 100 && subscriptions.occurrences!.operatorList().some(row => !row.lastError) && polls === 1; i++) await pause(10);
+    const retainedListener = subscriptions.occurrences!.operatorList().find(row => row.id === listener.id)!;
+    assert.equal(retainedListener.id, listener.id);
+    assert.match(retainedListener.lastError ?? "", /Forbidden/);
+    assert.match(subscriptions.occurrences!.operatorList().find(row => row.id === workerListener.id)?.lastError ?? "", /Forbidden/);
+    assert.equal(polls, 1, "the Manager Role cannot poll an Admin-only occurrence source");
+    assert.equal(workerInputs, 0, "the retained Worker listener cannot enter the Worker inbox");
+    assert.equal(turns, 0, "neither retained Bot subscription can deliver to the Manager launch");
+    const allowed = { ...retained, pkg: "worker", topic: "worker_turn_changed", readOperation: "worker_turn_observation",
+      completion: { operation: "worker_start", terminalField: "result" } };
+    await authorizeRoleRead(allowed, env);
+    await authorizeRoleRead({ ...allowed, completion: { operation: "worker_send", terminalField: "result" } }, env);
+    await authorizeRoleRead({ ...allowed, pkg: "notify", completion: { operation: "notification_send", terminalField: "dismissedAt" } }, env);
+    await assert.rejects(authorizeRoleRead({ ...allowed, completion: { operation: "worker_close", terminalField: "result" } }, env), /not granted/);
+  } finally {
+    await subscriptions.close(); await worker.close(); await source.close(); await roles.close(); await bots.close();
+    for (const peer of wss.clients) peer.terminate();
+    await new Promise<void>(resolve => wss.close(() => resolve()));
+    await new Promise<void>(resolve => http.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("event values are admitted on idle and working sanctioned threads without waiting for completion", { timeout: 30_000 }, async () => {
@@ -84,14 +188,18 @@ test("event values are admitted on idle and working sanctioned threads without w
   const address = http.address();
   assert.ok(address && typeof address !== "string");
   const endpoint = `ws://127.0.0.1:${address.port}`;
+  const adminRoleId = randomUUID();
   const bots = await serveSocket({
     info: { name: "bots", description: "Bots.", transportDescription: "Socket.", path: socketPath("bots", env) }, context: {},
     operations: [operation({ name: "bot_list", description: "List bots.", input: z.strictObject({}), output: z.object({ bots: z.array(z.unknown()) }),
       async call() {
         if (holdAuthorization && postInit) await new Promise<void>(resolve => { releaseAuthorization = resolve; });
-        return { bots: [{ id: "bot-1", state: "running", url: endpoint, mainThreadId: "main", recoveryIssue: null }] };
+        return { bots: [{ id: "bot-1", state: "running", url: endpoint, roleId: adminRoleId, mainThreadId: "main", recoveryIssue: null }] };
       } })],
   });
+  const roles = await serveSocket({ info: { name: "roles", description: "Roles", transportDescription: "Socket", path: socketPath("roles", env) },
+    context: {}, operations: [operation({ name: "role_access_ids", description: "Access Roles", input: z.strictObject({}), output: z.any(),
+      async call() { return { managerRoleId: randomUUID(), adminRoleId }; } })] });
   let value = 0;
   const occurrences: Occurrence[] = [];
   const poll = pollEvent({ name: "arrived", operation: "read_events", description: "Fixture occurrences.", input: z.strictObject({}), payload: z.strictObject({ value: z.number() }),
@@ -257,33 +365,31 @@ test("event values are admitted on idle and working sanctioned threads without w
     await subscriptions.occurrences!.subscribe("sample", { name: "arrived" }, invocation);
     workerPhase = "idle";
     const workerInvocation: InvocationContext = { transport: "mcp", botId: null, threadId: "untrusted-other-session", instance: null, sessionId: "untrusted-other-session", workerId, workerInstance };
-    await subscriptions.occurrences!.subscribe("sample", { name: "arrived" }, workerInvocation);
+    await assert.rejects(subscriptions.occurrences!.subscribe("sample", { name: "arrived" }, workerInvocation), /Forbidden/);
     const beforeOccurrence = turns.length;
     occurrences.push({ name: "arrived", eventId: "source-event", timestamp: new Date().toISOString(), data: { value: 42 } });
-    await until(() => turns.length === beforeOccurrence + 1 && workerInputs.length === 1);
+    await until(() => turns.length === beforeOccurrence + 1);
     const nativeEvent = turns.at(-1)!;
     assert.equal(nativeEvent.threadId, "child"); assert.deepEqual(nativeEvent.input, []);
     assert.match(nativeEvent.toolOutput.output, /source-event/);
     assert.match(nativeEvent.toolOutput.output, /not a new human instruction/);
-    assert.equal(workerInputs[0]!.sessionId, "exact-session", "resolve session from the signed Worker's owner, not caller metadata");
-    assert.equal(workerInputs[0]!.instance, workerInstance); assert.equal(workerInputs[0]!.policy, "native");
+    assert.equal(workerInputs.length, 0, "a denied Worker occurrence cannot enter its inbox");
     const botReceipts = (await subscriptions.occurrences!.status(invocation))[0]!.deliveries;
-    const workerReceipts = (await subscriptions.occurrences!.status(workerInvocation))[0]!.deliveries;
-    assert.equal(botReceipts[0]!.boundary, "native_admission"); assert.equal(workerReceipts[0]!.boundary, "worker_inbox");
+    assert.equal(botReceipts[0]!.boundary, "native_admission");
     const operator = (name: string, args: Record<string, unknown>, caller?: InvocationContext) => socketCall(owner.path, "tools/call", { name, arguments: args, ...(caller ? { invocation: caller } : {}) });
-    const inventory = await operator("serve_occurrence_list", { workerId }) as { subscriptions: Array<{ id: string; revision: string }> };
+    const inventory = await operator("serve_occurrence_list", { botId: "bot-1" }) as { subscriptions: Array<{ id: string; revision: string }> };
     assert.equal(inventory.subscriptions.length, 1);
     assert.equal(Object.hasOwn(inventory.subscriptions[0]!, "deliveries"), false, "inventories omit potentially large receipt bodies");
     assert.equal(Object.hasOwn(inventory.subscriptions[0]!, "arguments"), false);
     const inspected = await operator("serve_occurrence_get", { id: inventory.subscriptions[0]!.id }) as { subscription: { deliveries: Array<{ boundary: string }> } };
-    assert.equal(inspected.subscription.deliveries[0]!.boundary, "worker_inbox");
+    assert.equal(inspected.subscription.deliveries[0]!.boundary, "native_admission");
     await assert.rejects(operator("serve_occurrence_list", {}, invocation), /operator/);
     const dependencies = await operator("serve_bot_dependencies", { botId: "bot-1", cwd: root }) as { relationships: Array<{ id: string }> };
     const botOccurrence = (await subscriptions.occurrences!.status(invocation))[0]!;
     assert.ok(dependencies.relationships.some(row => row.id === botOccurrence.id), "Bot maintenance must include occurrence input, not just snapshots");
     await assert.rejects(operator("serve_subscription_remove", { id: inventory.subscriptions[0]!.id, expectedRevision: "stale" }), /revision/);
     assert.deepEqual(await operator("serve_subscription_remove", { id: inventory.subscriptions[0]!.id, expectedRevision: inventory.subscriptions[0]!.revision }), { id: inventory.subscriptions[0]!.id, removed: true });
-    assert.deepEqual(await subscriptions.occurrences!.status(workerInvocation), []);
+    assert.deepEqual(await subscriptions.occurrences!.status(invocation), []);
   } finally {
     holdAuthorization = false; releaseAuthorization?.();
     await subscriptions.close();
@@ -292,6 +398,7 @@ test("event values are admitted on idle and working sanctioned threads without w
     await workers.close();
     await sample.close();
     await bots.close();
+    await roles.close();
     for (const peer of wss.clients) peer.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
     await new Promise<void>((resolve) => http.close(() => resolve()));

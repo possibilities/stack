@@ -9,7 +9,9 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { packageMcpServer } from "../src/mcp-package.js";
+import { botInstance } from "../src/bot-mcp-identity.js";
 import { pollEvent, pollOutput, type Occurrence } from "../src/occurrence.js";
+import { operation } from "../src/operation.js";
 import { McpEventSubscriptions } from "../src/mcp-subscriptions.js";
 import { subscriptionService } from "../src/mcp-events.js";
 import { serveSocket } from "../src/socket.js";
@@ -23,7 +25,18 @@ async function until(check: () => Promise<boolean>) {
   assert.ok(await check(), "expected occurrence state did not arrive");
 }
 
-test("draft poll requests and durable Worker intake remain distinct from snapshot watches and uncertain native delivery", { timeout: 20_000 }, async () => {
+async function adminBot(env: NodeJS.ProcessEnv) {
+  const endpoint = "unix:///fixture/admin-occurrence.sock", adminRoleId = randomUUID();
+  const bots = await serveSocket({ info: { name: "bots", description: "Bots", transportDescription: "Socket", path: socketPath("bots", env) }, context: {},
+    operations: [operation({ name: "bot_list", description: "Bots", input: z.strictObject({}), output: z.any(),
+      async call() { return { bots: [{ id: "bot-1", roleId: adminRoleId, state: "running", url: endpoint, recoveryIssue: null }] }; } })] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Roles", transportDescription: "Socket", path: socketPath("roles", env) }, context: {},
+    operations: [operation({ name: "role_access_ids", description: "Role identities", input: z.strictObject({}), output: z.any(),
+      async call() { return { adminRoleId, managerRoleId: randomUUID() }; } })] });
+  return { instance: botInstance(endpoint), close: async () => { await roles.close(); await bots.close(); } };
+}
+
+test("draft poll requests and durable Bot intake remain distinct from snapshot watches and uncertain native delivery", { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-occurrence-")), env = { STACK_STATE_DIR: root };
   const dir = join(root, "packages", "sample"); await mkdir(dir, { recursive: true });
   const manifest = (selection: string) => writeFile(join(dir, "api.yaml"), `name: sample\ndescription: Fixture.\nmcp:\n  description: Fixture.\n  operations: all\n  events: ${selection}\n  workerEvents: [arrived]\n`);
@@ -42,22 +55,23 @@ test("draft poll requests and durable Worker intake remain distinct from snapsho
       return { events: history.slice(position).filter(event => event.data.value === args.filter).slice(0, request.maxEvents), cursor: String(history.length), truncated: false, hasMore: false, nextPollMs: 1000 };
     } });
   const socket = await serveSocket({ info: { name: "sample", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("sample", env) }, context: {}, operations: [source] });
-  const invocation: InvocationContext = { transport: "mcp", botId: null, instance: null, threadId: null, sessionId: null, workerId: "worker", workerInstance: "instance" };
+  const authority = await adminBot(env);
+  const invocation: InvocationContext = { transport: "mcp", botId: "bot-1", instance: authority.instance, threadId: "main", sessionId: null };
   let attempts = 0;
   const delivered: Occurrence[] = [];
   let releaseSecond!: () => void;
   const secondDispatch = new Promise<void>(resolve => { releaseSecond = resolve; });
   const runtime: OccurrenceRuntime = {
-    async resolve(input) { assert.equal(input.workerId, "worker"); return { kind: "worker", workerId: "worker", instance: "instance", sessionId: "session" }; },
+    async resolve(input) { assert.equal(input.botId, "bot-1"); return { kind: "bot", botId: "bot-1", instance: authority.instance, threadId: "main" }; },
     async verify(target) { return target; },
     async deliver(_target, event, _id, _policy, _signal, authorize) {
       if (event.eventId === "second") await secondDispatch;
       await authorize(); attempts++;
       if (event.eventId === "second") throw new Error("input response lost after dispatch");
-      delivered.push(event); return { boundary: "worker_inbox" };
+      delivered.push(event); return { boundary: "native_admission" };
     },
   };
-  const owner = () => new McpEventSubscriptions(env, async () => { throw new Error("Worker must not acquire Bot lineage"); }, async () => { throw new Error("not a snapshot"); }, undefined, undefined, root, runtime);
+  const owner = () => new McpEventSubscriptions(env, async () => {}, async () => { throw new Error("not a snapshot"); }, undefined, undefined, root, runtime);
   let service = owner();
   const server = packageMcpServer("sample", "Fixture.", root, env, null, async () => {}, subscriptionService(service, root, env));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -79,7 +93,7 @@ test("draft poll requests and durable Worker intake remain distinct from snapsho
     const add = (eventId: string) => history.push({ eventId, name: "arrived", timestamp: new Date().toISOString(), data: { value: "match" } });
     add("first");
     await until(async () => (await service.occurrences!.status(invocation))[0]!.deliveries.some(row => row.eventId === "first" && row.state === "admitted"));
-    assert.equal((await service.occurrences!.status(invocation))[0]!.deliveries[0]!.boundary, "worker_inbox");
+    assert.equal((await service.occurrences!.status(invocation))[0]!.deliveries[0]!.boundary, "native_admission");
     add("second");
     // The owner persists unknown before dispatch as a crash fence, not a result.
     await until(async () => (await service.occurrences!.status(invocation))[0]!.deliveries.some(row => row.eventId === "second" && row.state === "unknown" && row.error === null));
@@ -103,7 +117,7 @@ test("draft poll requests and durable Worker intake remain distinct from snapsho
     await service.occurrences!.subscribe("sample", { name: "arrived", arguments: { filter: "ephemeral" } }, invocation);
     await until(async () => (await service.occurrences!.status(invocation))[0]!.deliveries.some(row => row.eventId === "ephemeral" && row.state === "admitted"));
     assert.equal(delivered.filter(event => event.eventId === "ephemeral").length, 1, "a cursor-less occurrence in the first response must not be discarded by bootstrap");
-  } finally { releaseSecond(); await client.close(); await server.close(); await service.close(); await socket.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { releaseSecond(); await client.close(); await server.close(); await service.close(); await authority.close(); await socket.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("competing occurrence polls enforce the shared retained-receipt cap without advancing a refused cursor", { timeout: 20_000 }, async () => {
@@ -121,12 +135,13 @@ test("competing occurrence polls enforce the shared retained-receipt cap without
         cursor: "1", truncated: false, hasMore: false, nextPollMs: 1000 };
     } });
   const socket = await serveSocket({ info: { name: "sample", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("sample", env) }, context: {}, operations: [source] });
-  const invocation: InvocationContext = { transport: "mcp", botId: null, instance: null, threadId: null, sessionId: null, workerId: "worker", workerInstance: "instance" };
+  const authority = await adminBot(env);
+  const invocation: InvocationContext = { transport: "mcp", botId: "bot-1", instance: authority.instance, threadId: "main", sessionId: null };
   let attempts = 0;
   const runtime: OccurrenceRuntime = {
-    async resolve() { return { kind: "worker", workerId: "worker", sessionId: "session", instance: "instance" }; },
+    async resolve() { return { kind: "bot", botId: "bot-1", threadId: "main", instance: authority.instance }; },
     async verify(target) { return target; },
-    async deliver(_target, _event, _id, _policy, _signal, authorize) { await authorize(); attempts++; return { boundary: "worker_inbox" }; },
+    async deliver(_target, _event, _id, _policy, _signal, authorize) { await authorize(); attempts++; return { boundary: "native_admission" }; },
   };
   const service = new McpEventSubscriptions(env, async () => {}, async () => {}, undefined, undefined, root, runtime);
   try {
@@ -137,7 +152,7 @@ test("competing occurrence polls enforce the shared retained-receipt cap without
     // This is a durable recovery fixture, not a configurable production limit.
     const db = new DatabaseSync(join(root, "event-subscriptions.sqlite"));
     db.exec("BEGIN IMMEDIATE");
-    const insert = db.prepare("INSERT INTO occurrence_deliveries VALUES(?,?,?,?,'admitted','worker_inbox',NULL)");
+    const insert = db.prepare("INSERT INTO occurrence_deliveries VALUES(?,?,?,?,'admitted','native_admission',NULL)");
     for (let n = 0; n < 9999; n++) insert.run(randomUUID(), first.id, `retained-${n}`, "{}");
     db.exec("COMMIT"); db.close(); release();
     await until(async () => attempts >= 1 && (await service.occurrences!.status(invocation)).some(row => row.lastError?.includes("ResourceExhausted")));
@@ -147,5 +162,5 @@ test("competing occurrence polls enforce the shared retained-receipt cap without
     assert.equal(rows.find(row => row.lastError?.includes("ResourceExhausted"))!.cursor, "0", "a refused batch must remain replayable from its previous cursor");
     assert.equal(rows.reduce((sum, row) => sum + row.deliveries.length, 0), 128, "conversation receipt output remains bounded across subscriptions");
     assert.ok(rows.some(row => row.receiptsTruncated));
-  } finally { release(); await service.close(); await socket.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { release(); await service.close(); await authority.close(); await socket.close(); await rm(root, { recursive: true, force: true }); }
 });

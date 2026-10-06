@@ -8,6 +8,7 @@ import { socketPath } from "./workspace.js";
 import { stateHash } from "./state.js";
 import { pollInput, pollOutput, type Occurrence } from "./occurrence.js";
 import { McpDeliveryRejected } from "./completion-watch.js";
+import { packageRole } from "./mcp-authority.js";
 import type { InvocationContext } from "./operation.js";
 
 export type OccurrenceTarget = { kind: "bot"; botId: string; threadId: string; instance: string }
@@ -66,6 +67,8 @@ export class OccurrenceSubscriptions {
     const catalog = await this.catalog(subscription.pkg, subscription.target);
     const source = catalog.tools.find(tool => tool.eventSource?.name === subscription.name);
     if (!source || source.annotations?.readOnlyHint !== true) throw new McpError(-32012, "Forbidden", { kind: "event" });
+    if (await packageRole(subscription.target, this.env) !== "admin")
+      throw new McpError(-32012, "Forbidden", { kind: "event" });
     return source;
   }
   private persist(subscription: Subscription) { this.db.prepare("UPDATE occurrence_subscriptions SET value=? WHERE id=?").run(JSON.stringify(subscription), subscription.id); }
@@ -95,7 +98,7 @@ export class OccurrenceSubscriptions {
       const old = this.db.prepare("SELECT value FROM occurrence_subscriptions WHERE key=?").get(key) as { value: string } | undefined;
       if (old) {
         const existing = JSON.parse(old.value) as Subscription;
-        await this.source(existing); await this.runtime.verify(existing.target);
+        existing.target = await this.runtime.verify(existing.target); await this.source(existing);
         return existing;
       }
       if (this.capacity() >= 128) throw new McpError(-32013, "ResourceExhausted", { limit: "subscriptions", max: 128 });
@@ -106,7 +109,7 @@ export class OccurrenceSubscriptions {
       const initial = pollOutput.parse(await socketCall(socketPath(pkg, this.env), "tools/call", { name: source.name,
         arguments: pollInput.parse({ name: input.name, arguments: input.arguments, cursor: input.cursor, maxAgeMs: input.maxAgeMs, maxEvents: 1 }), invocation: invocationOf(target) }));
       if (this.closed) throw new Error("subscription owner is closing");
-      await this.source(subscription); await this.runtime.verify(target);
+      await this.source(subscription); subscription.target = await this.runtime.verify(target); await this.source(subscription);
       subscription.cursor = initial.cursor;
       subscription.truncated = initial.truncated;
       if (this.closed) throw new Error("subscription owner is closing");
@@ -175,7 +178,7 @@ export class OccurrenceSubscriptions {
       const result = count >= 10_000 ? { events: [], cursor: sub.cursor, truncated: false, hasMore: false, nextPollMs: 1000 } : pollOutput.parse(await socketCall(socketPath(sub.pkg, this.env), "tools/call", { name: source.name,
         arguments: { name: sub.name, arguments: sub.arguments, cursor: sub.cursor, maxAgeMs: sub.maxAgeMs, maxEvents: Math.min(25, 10_000 - count) },
         invocation: invocationOf(sub.target) }, { signal: live.abort.signal }));
-      await this.source(sub); sub.target = await this.runtime.verify(sub.target);
+      await this.source(sub); sub.target = await this.runtime.verify(sub.target); await this.source(sub);
       live.abort.signal.throwIfAborted(); if (this.closed) return;
       this.db.exec("BEGIN IMMEDIATE");
       try {
@@ -193,7 +196,8 @@ export class OccurrenceSubscriptions {
       } catch (error) { this.db.exec("ROLLBACK"); throw error; }
       const pending = this.db.prepare("SELECT id,value FROM occurrence_deliveries WHERE subscription_id=? AND state='pending' ORDER BY rowid LIMIT 25").all(sub.id) as { id: string; value: string }[];
       for (const row of pending) {
-        const authorize = async () => { await this.source(sub); sub.target = await this.runtime.verify(sub.target); live.abort.signal.throwIfAborted(); if (this.closed) throw new Error("subscription owner closing"); };
+        const authorize = async () => { await this.source(sub); sub.target = await this.runtime.verify(sub.target); await this.source(sub);
+          live.abort.signal.throwIfAborted(); if (this.closed) throw new Error("subscription owner closing"); };
         await authorize();
         // Fenced before crossing any native/owner input boundary, including crashes.
         this.db.prepare("UPDATE occurrence_deliveries SET state='unknown' WHERE id=?").run(row.id);
