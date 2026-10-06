@@ -53,12 +53,13 @@ test("stdio children use private sockets, refresh policy, fence identities and l
   let value = 1, botLive = true, workerLive = true, mutations = 0;
   const records = new Map<string, { id: string; done: string | null; answer: string | null }>();
   const recordSchema = z.object({ id: z.uuid(), done: z.string().nullable(), answer: z.string().nullable() });
-  const workerId = randomUUID(), instance = randomUUID(), endpoint = "unix:///fixture/bot.sock";
+  const workerId = randomUUID(), instance = randomUUID(), adminRoleId = randomUUID(), endpoint = "unix:///fixture/bot.sock";
   const socket = async (name: string, responses: Record<string, () => unknown>) => serveSocket({
     info: { name, description: "Fixture", transportDescription: "Fixture", path: socketPath(name, env) }, context: {},
     operations: Object.entries(responses).map(([name, call]) => operation({ name, description: "Fixture", input: z.any(), output: z.any(), async call() { return call(); } })),
   });
-  const bots = await socket("bots", { bot_list: () => ({ bots: [{ id: "bot-1", url: endpoint, state: botLive ? "running" : "stopped", recoveryIssue: null }] }) });
+  const bots = await socket("bots", { bot_list: () => ({ bots: [{ id: "bot-1", url: endpoint, roleId: adminRoleId, state: botLive ? "running" : "stopped", recoveryIssue: null }] }) });
+  const roles = await socket("roles", { role_access_ids: () => ({ managerRoleId: randomUUID(), adminRoleId }) });
   const workers = await socket("worker", {
     worker_status: () => ({ worker: { accountId: "account", phase: workerLive ? "running" : "closed", runtimeInstance: instance } }),
     worker_runtime_list: () => ({ runtimes: [{ id: "account", state: "running", instance }] }),
@@ -133,22 +134,15 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     assert.equal((deliveries[0]!.value as { value: number }).value, 2);
     assert.ok((await readFile(join(env.STACK_STATE_DIR, "event-subscriptions.sqlite"))).length);
     const worker = await connect({ kind: "worker", workerId, instance });
-    assert.deepEqual((await worker.client.listTools()).tools.map(tool => tool.name), ["read"]);
-    assert.equal(CallToolResultSchema.parse(await worker.client.callTool({ name: "read" })).structuredContent?.worker, workerId);
+    assert.deepEqual((await worker.client.listTools()).tools, [], "ungranted fixture tools stay hidden from Worker");
+    assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
     assert.equal((await worker.client.callTool({ name: "mutate" })).isError, true);
     assert.equal((await worker.client.callTool({ name: "events_subscribe", arguments: { topic: "changed", readOperation: "read" } })).isError, true);
     await assert.rejects(connect({ kind: "worker", workerId, instance }, { STACK_MCP_BINDING: worker.launch.env.STACK_MCP_BINDING!.replace(/proof=./, "proof=z") }), /closed/);
-    await assert.rejects(socketCall(serve.path, "tools/call", { name: "serve_mcp_event", arguments: { binding: worker.launch.env.STACK_MCP_BINDING, pkg: "demo", tool: "events_status", arguments: {}, threadId: "child", sessionId: null } }), /event subscriptions are unavailable over mcp/);
+    await assert.rejects(socketCall(serve.path, "tools/call", { name: "serve_mcp_event", arguments: { binding: worker.launch.env.STACK_MCP_BINDING, pkg: "demo", tool: "events_status", arguments: {}, threadId: "child", sessionId: null } }), /event relay is not granted/);
     await manifest(undefined, undefined, "[arrived]");
-    assert.ok((await worker.client.listTools()).tools.some(tool => tool.name === "events_listen"), "live explicit Worker event selection refreshes the same pipe");
-    const listening = CallToolResultSchema.parse(await worker.client.callTool({ name: "events_listen", arguments: { name: "arrived" }, _meta: { threadId: "foreign-root", sessionId: "forged-session" } }));
-    assert.notEqual(listening.isError, true);
-    const occurrence = (listening.structuredContent as { subscription: { id: string; target: { sessionId: string } } }).subscription;
-    assert.equal(occurrence.target.sessionId, "owner-session");
-    assert.equal(owner.occurrences!.operatorList().length, 1);
-    assert.equal((await worker.client.callTool({ name: "events_subscribe", arguments: { topic: "changed", readOperation: "read" } })).isError, true, "occurrence authority must not admit Bot snapshot watches");
-    const removed = CallToolResultSchema.parse(await worker.client.callTool({ name: "events_unsubscribe", arguments: { id: occurrence.id } }));
-    assert.deepEqual(removed.structuredContent, { id: occurrence.id, removed: true });
+    assert.deepEqual((await worker.client.listTools()).tools, [], "Worker event selections do not bypass role grants");
+    assert.equal((await worker.client.callTool({ name: "events_listen", arguments: { name: "arrived" } })).isError, true);
     await manifest();
     const completion = await connect({ kind: "bot", botId: "bot-1", endpoint });
     const request = { actions: ["Yes"] };
@@ -193,7 +187,7 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
     await manifest();
     workerLive = false;
-    assert.deepEqual((await worker.client.listTools()).tools.map(tool => tool.name), ["read"], "catalog admission conveys no live identity authority");
+    assert.deepEqual((await worker.client.listTools()).tools, [], "catalog admission conveys no live identity authority");
     assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
     const stale = await connect({ kind: "bot", botId: "bot-1", endpoint });
     botLive = false;
@@ -203,7 +197,7 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     await assert.rejects(connect({ kind: "operator" }, { STACK_MCP_OPERATOR: operatorHeaders(env).authorization }), /closed/);
   } finally {
     await Promise.all(clients.map(client => client.close()));
-    await owner.close(); await Promise.all([serve.close(), pkg.close(), bots.close(), workers.close()]);
+    await owner.close(); await Promise.all([serve.close(), pkg.close(), bots.close(), roles.close(), workers.close()]);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -282,10 +276,11 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
       const client = new Client({ name: "offline-managed", version: "1" });
       try {
         await client.connect(new StdioClientTransport({ ...managed, stderr: "pipe" }));
-        assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), authority.kind === "worker" ? ["read"] : ["read", "mutate"]);
+        if (authority.kind === "bot") await assert.rejects(client.listTools(), /bots.sock/, "Bot grants require a live identity owner");
+        else assert.deepEqual((await client.listTools()).tools, [], "ungranted fixture tools are hidden from Worker");
         const result = await client.callTool({ name: "read", _meta: { threadId: "root" } });
         assert.equal(result.isError, true);
-        assert.match(JSON.stringify(result.content), /stack_service_unavailable.*live managed identity owner.*not executed/);
+        assert.match(JSON.stringify(result.content), /live managed identity owner|bots.sock/);
       } finally { await client.close(); }
     }
     await manifest("[missing]");

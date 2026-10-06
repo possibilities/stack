@@ -6,13 +6,14 @@ import { OperationRejected, StateJournal, stateHash, type StateApplyInput } from
 import type { Content, Notification, Outcome } from "./schema.js";
 
 type Row = { id: string; sequence: number; title: string; message: string; subtitle: string | null; source: string | null;
+  owner_bot_id: string | null;
   group_key: string | null; open_url: string | null; actions: string; reply: string | null; initial_digest: string;
   created_at: string; dismissed_at: string | null; outcome: Outcome | null; response: string | null; content_cleared_at: string | null; dismissal_digest: string | null };
 
 const schemaVersion = 2;
 const table = (name: string) => `CREATE TABLE ${name} (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-  title TEXT NOT NULL, message TEXT NOT NULL, subtitle TEXT, source TEXT,
+  title TEXT NOT NULL, message TEXT NOT NULL, subtitle TEXT, source TEXT, owner_bot_id TEXT,
   group_key TEXT, open_url TEXT, actions TEXT NOT NULL DEFAULT '[]', reply TEXT,
   initial_digest TEXT NOT NULL, created_at TEXT NOT NULL,
   dismissed_at TEXT, outcome TEXT, response TEXT
@@ -55,6 +56,8 @@ export class NotificationStore {
     this.migrate();
     if (!(this.db.prepare("PRAGMA table_info(notifications)").all() as { name: string }[]).some(row => row.name === "content_cleared_at"))
       this.db.exec("ALTER TABLE notifications ADD COLUMN content_cleared_at TEXT; ALTER TABLE notifications ADD COLUMN dismissal_digest TEXT");
+    if (!(this.db.prepare("PRAGMA table_info(notifications)").all() as { name: string }[]).some(row => row.name === "owner_bot_id"))
+      this.db.exec("ALTER TABLE notifications ADD COLUMN owner_bot_id TEXT");
     this.maintenance = new StateJournal(this.db, "notify");
   }
 
@@ -96,23 +99,29 @@ export class NotificationStore {
     if (!row) throw new Error("notification_not_found");
     return fromRow(row);
   }
+  owner(id: string): string | null {
+    const row = this.find(id);
+    if (!row) throw new Error("notification_not_found");
+    return row.owner_bot_id;
+  }
 
   /** Inserts, then dismisses any other open notification in the same group as "replaced". A retried ID replaces nothing. */
-  create(input: Content & { id?: string }): { record: Notification; created: boolean } {
+  create(input: Content & { id?: string }, ownerBotId: string | null = null): { record: Notification; created: boolean } {
     const id = input.id ?? randomUUID();
     const initial = digest(input);
     return this.transaction(() => {
       const existing = this.find(id);
       if (existing) {
+        if (existing.owner_bot_id !== ownerBotId) throw new OperationRejected("notification_owner_conflict");
         if (existing.initial_digest !== initial) throw new OperationRejected("notification_id_conflict");
         return { record: fromRow(existing), created: false };
       }
       const now = new Date().toISOString();
-      this.db.prepare(`INSERT INTO notifications (id, title, message, subtitle, source, group_key, open_url, actions, reply, initial_digest, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, input.title, input.message, input.subtitle, input.source,
+      this.db.prepare(`INSERT INTO notifications (id, title, message, subtitle, source, owner_bot_id, group_key, open_url, actions, reply, initial_digest, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, input.title, input.message, input.subtitle, input.source, ownerBotId,
         input.group, input.open, JSON.stringify(input.actions), input.reply, initial, now);
       if (input.group !== null) this.db.prepare(`UPDATE notifications SET dismissed_at = ?, outcome = 'replaced'
-        WHERE group_key = ? AND dismissed_at IS NULL AND id != ?`).run(now, input.group, id);
+        WHERE group_key = ? AND owner_bot_id IS ? AND dismissed_at IS NULL AND id != ?`).run(now, input.group, ownerBotId, id);
       return { record: this.get(id), created: true };
     });
   }

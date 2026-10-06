@@ -17,7 +17,7 @@ export type Category = { id: string; title: string; description: string; enabled
 export const roleName = z.string().trim().min(1).max(200).describe("Human-readable role name; unique case-insensitively.");
 export const roleDescription = z.string().max(4_000);
 export type Role = { id: string; name: string; description: string; revision: number } & Stamps;
-export type RoleCatalog = { revision: number; defaultRoleId: string | null; workerDefaultRoleId: string | null; roles: Role[] };
+export type RoleCatalog = { revision: number; defaultRoleId: string | null; workerDefaultRoleId: string | null; managerRoleId: string; adminRoleId: string; roles: Role[] };
 export type RoleSnapshot = Role & { botMarkdown?: string; categories: Category[]; skills: Skill[]; mcpServers: RoleMcpServer[]; trustedProjects: TrustedProject[]; disabledInternalMcpServers: string[];
   internalMcpHarnesses?: Record<string, CapabilityHarness[]> };
 
@@ -104,6 +104,9 @@ export class RoleStore {
         // Read every shape in one snapshot. This checks the current schema
         // without initializing, migrating, chmodding or creating directories.
         transaction(this.db, false, () => {
+          const columns = new Set((this.db.prepare("PRAGMA table_info(role_catalog)").all() as Array<{ name: string }>).map(({ name }) => name));
+          for (const column of ["worker_default_role_id", "worker_role_id", "manager_role_id", "admin_role_id"])
+            if (!columns.has(column)) throw new Error(`missing canonical Role catalog column: ${column}`);
           const catalog = this.readCatalog();
           for (const role of catalog.roles) this.role(role.id).readSnapshot();
           if (!catalog.defaultRoleId || !catalog.workerDefaultRoleId) throw new Error("missing catalog defaults");
@@ -152,6 +155,16 @@ export class RoleStore {
 
   defaultSnapshot(): RoleSnapshot { return this.launchSnapshot(); }
 
+  accessRoleIds(): { managerRoleId: string; workerRoleId: string; adminRoleId: string } {
+    const row = this.db.prepare("SELECT manager_role_id, worker_role_id, admin_role_id FROM role_catalog WHERE singleton = 1").get() as {
+      manager_role_id: string; worker_role_id: string; admin_role_id: string;
+    };
+    if (!row?.manager_role_id || !row.worker_role_id || !row.admin_role_id) throw new Error("canonical access roles are missing");
+    return { managerRoleId: row.manager_role_id, workerRoleId: row.worker_role_id, adminRoleId: row.admin_role_id };
+  }
+
+  adminSnapshot(): RoleSnapshot { return this.role(this.accessRoleIds().adminRoleId).snapshot(); }
+
   /** Injection resolves names and reads complete resources in one SQLite snapshot. */
   namedLaunchSnapshot(name: string): RoleSnapshot {
     return transaction(this.db, false, () => {
@@ -176,6 +189,7 @@ export class RoleStore {
   setDefault(expectedRevision: number, roleId: string): RoleCatalog {
     return this.changeCatalog(expectedRevision, () => {
       this.role(roleId).metadata();
+      if (roleId === this.accessRoleIds().adminRoleId) throw new Error("Admin cannot be the ordinary Bot default");
       this.db.prepare("UPDATE role_catalog SET default_role_id = ? WHERE singleton = 1").run(roleId);
     });
   }
@@ -186,6 +200,8 @@ export class RoleStore {
       const catalog = this.readCatalog();
       if (catalog.defaultRoleId === roleId) throw new Error("cannot delete the default role; mark another role as default first");
       if (catalog.workerDefaultRoleId === roleId) throw new Error("cannot delete the canonical Worker role");
+      const access = this.accessRoleIds();
+      if (roleId === access.managerRoleId || roleId === access.adminRoleId) throw new Error("cannot delete a canonical access role");
       for (const table of ["fragments", "categories", "skills", "role_mcp_servers", "trusted_projects", "disabled_internal_mcp", "internal_mcp_harnesses", "role_bot_markdown"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE role_id = ?`).run(roleId);
       }
@@ -207,11 +223,12 @@ export class RoleStore {
 }
 
 function readCatalog(db: DatabaseSync): RoleCatalog {
-  const row = db.prepare("SELECT revision, default_role_id, worker_role_id FROM role_catalog WHERE singleton = 1").get() as {
-    revision: number; default_role_id: string | null; worker_role_id: string | null;
+  const row = db.prepare("SELECT revision, default_role_id, worker_role_id, manager_role_id, admin_role_id FROM role_catalog WHERE singleton = 1").get() as {
+    revision: number; default_role_id: string | null; worker_role_id: string | null; manager_role_id: string; admin_role_id: string;
   };
   const roles = db.prepare("SELECT id, name, description, revision, created_at AS createdAt, updated_at AS updatedAt FROM roles ORDER BY rowid").all() as Role[];
-  return { revision: row.revision, defaultRoleId: row.default_role_id, workerDefaultRoleId: row.worker_role_id, roles };
+  return { revision: row.revision, defaultRoleId: row.default_role_id, workerDefaultRoleId: row.worker_role_id,
+    managerRoleId: row.manager_role_id, adminRoleId: row.admin_role_id, roles };
 }
 
 function transaction<T>(db: DatabaseSync, write: boolean, action: () => T): T {
@@ -238,6 +255,10 @@ export class RoleContents {
       const current = this.metadata();
       if (this.roleId === readCatalog(this.db).workerDefaultRoleId && fields.name !== undefined && fields.name !== current.name)
         throw new Error("cannot rename the canonical Worker role");
+      if (fields.name !== undefined && fields.name !== current.name) {
+        const ids = this.db.prepare("SELECT manager_role_id, admin_role_id FROM role_catalog WHERE singleton = 1").get() as { manager_role_id: string; admin_role_id: string };
+        if (this.roleId === ids.manager_role_id || this.roleId === ids.admin_role_id) throw new Error("cannot rename a canonical access role");
+      }
       this.db.prepare("UPDATE roles SET name = ?, description = ? WHERE id = ?")
         .run(roleName.parse(fields.name ?? current.name), roleDescription.parse(fields.description ?? current.description), this.roleId);
       if (fields.botMarkdown !== undefined) this.db.prepare("UPDATE role_bot_markdown SET body=? WHERE role_id=?").run(botMarkdown.parse(fields.botMarkdown), this.roleId);

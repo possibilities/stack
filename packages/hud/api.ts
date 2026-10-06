@@ -56,11 +56,11 @@ export const workBatch = operation({ name: "work_batch",
 });
 export const workGet = operation({ name: "work_get", description: "Read one shared work item and its semantic state, objective, next action, attention, revision, scope revision and typed links. Metadata and collaboration history have separate bounded reads. Bot readers share this work graph; Workers receive no HUD access by default.",
   input: id, output: s.workItem, annotations: read,
-  async call(ctx: HudContext, { id }, invocation) { await ctx.service.caller(invocation); return ctx.store.get(id); },
+  async call(ctx: HudContext, { id }, invocation) { return ctx.service.requireVisible(await ctx.service.caller(invocation), id); },
 });
 export const workList = operation({ name: "work_list", description: "Page work in creation order. Filter exact parent (null means roots), states, attention, text or an exact namespaced metadata key/value correlation. Results omit metadata. nextCursor is null at the end; restart on hud_changed to reconcile earlier rows. Both row count and response bytes are bounded.",
   input: s.listInput, output: z.strictObject({ items: z.array(s.workItem), nextCursor: z.number().int().nullable(), cursor: z.number().int() }), annotations: read,
-  async call(ctx: HudContext, input, invocation) { await ctx.service.caller(invocation); return ctx.store.list(input); },
+  async call(ctx: HudContext, input, invocation) { const caller = await ctx.service.caller(invocation); return ctx.store.list(input, item => ctx.service.visible(caller, item)); },
 });
 export const workTree = operation({ name: "work_tree", description: "Read an ordered, flat preorder tree with parent IDs, depth, direct child counts, open descendant counts and unmet dependency IDs. Optional rootId includes that root and all descendants. Pass snapshot on later pages; any intervening HUD journal change requires restarting pagination. No completion or activity is inferred from rollups.",
   input: z.strictObject({ rootId: z.uuid().optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(200).default(100), snapshot: z.number().int().nonnegative().optional() }),

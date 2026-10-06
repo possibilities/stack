@@ -24,6 +24,60 @@ function capabilitySocket(env: NodeJS.ProcessEnv, owner: () => McpEventSubscript
   ] });
 }
 
+async function adminBotFixture(env: NodeJS.ProcessEnv, endpoint: string) {
+  const adminRoleId = randomUUID();
+  const bots = await serveSocket({ info: { name: "bots", description: "Fixture", transportDescription: "Fixture", path: socketPath("bots", env) }, context: {}, operations: [
+    operation({ name: "bot_list", description: "Live launch", input: z.strictObject({}), output: z.any(), async call() {
+      return { bots: [{ id: "bot-1", state: "running", url: endpoint, roleId: adminRoleId, recoveryIssue: null }] };
+    } }),
+  ] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Fixture", transportDescription: "Fixture", path: socketPath("roles", env) }, context: {}, operations: [
+    operation({ name: "role_access_ids", description: "Canonical access identities", input: z.strictObject({}), output: z.any(), async call() {
+      return { managerRoleId: randomUUID(), adminRoleId };
+    } }),
+  ] });
+  return { bots, roles, close: async () => { await roles.close(); await bots.close(); } };
+}
+
+test("Manager notifications remain owned by their Bot without completion watches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-notify-manager-"));
+  const env = { ...process.env, STACK_STATE_DIR: root };
+  const managerRoleId = randomUUID();
+  const firstUrl = "unix:///fixture/manager-one.sock";
+  const secondUrl = "unix:///fixture/manager-two.sock";
+  const bots = await serveSocket({ info: { name: "bots", description: "Fixture", transportDescription: "Socket", path: socketPath("bots", env) }, context: {}, operations: [
+    operation({ name: "bot_list", description: "Live Managers", input: z.strictObject({}), output: z.any(), async call() {
+      return { bots: [{ id: "bot-1", state: "running", url: firstUrl, roleId: managerRoleId, recoveryIssue: null },
+        { id: "bot-2", state: "running", url: secondUrl, roleId: managerRoleId, recoveryIssue: null }] };
+    } }),
+  ] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Fixture", transportDescription: "Socket", path: socketPath("roles", env) }, context: {}, operations: [
+    operation({ name: "role_access_ids", description: "Canonical roles", input: z.strictObject({}), output: z.any(), async call() {
+      return { managerRoleId, adminRoleId: randomUUID() };
+    } }),
+  ] });
+  const notifications = await serveApi({ name: "notify", transport: "socket", env });
+  const first: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(firstUrl), threadId: "main", sessionId: null };
+  const second: InvocationContext = { transport: "mcp", botId: "bot-2", instance: botInstance(secondUrl), threadId: "main", sessionId: null };
+  const callAs = (invocation: InvocationContext | null, name: string, input: Record<string, unknown>) =>
+    socketCall(notifications.socketPath!, "tools/call", { name, arguments: input, ...(invocation ? { invocation } : {}) });
+  try {
+    await assert.rejects(callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"] }), /subscribe:false/);
+    const sent = await callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"], group: "assignment", subscribe: false }) as Send;
+    assert.equal(sent.subscription, null);
+    assert.equal((await callAs(first, "notification_get", { id: sent.id }) as Notification).id, sent.id);
+    await assert.rejects(callAs(second, "notification_get", { id: sent.id }), /another Manager/);
+    await assert.rejects(callAs(second, "notification_send", { id: sent.id, title: "Question", message: "Choose", actions: ["Yes"], group: "assignment", subscribe: false }), /owner_conflict/);
+    const sibling = await callAs(second, "notification_send", { title: "Other", message: "Separate", group: "assignment", subscribe: false }) as Send;
+    assert.equal((await callAs(null, "notification_get", { id: sent.id }) as Notification).dismissedAt, null,
+      "a second Manager's group does not replace the first Manager's notification");
+    assert.equal((await callAs(null, "notification_get", { id: sibling.id }) as Notification).id, sibling.id);
+  } finally {
+    await notifications.close(); await roles.close(); await bots.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function completionBoundary(run: (fixture: {
   owner: McpEventSubscriptions; caller: InvocationContext; deliveries: EventValue[];
   send(input: Record<string, unknown>): Promise<Send>; call(name: string, input?: Record<string, unknown>): Promise<any>;
@@ -34,7 +88,9 @@ async function completionBoundary(run: (fixture: {
   const env = { STACK_STATE_DIR: root };
   const dir = join(root, "packages", "notify"); await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "api.yaml"), "name: notify\ndescription: Notifications.\nmcp:\n  description: Notifications.\n  operations: all\n  events: all\n");
-  const caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: "launch-1", threadId: "child", sessionId: null };
+  const endpoint = "unix:///fixture/notification-refusal-bot.sock";
+  const caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(endpoint), threadId: "child", sessionId: null };
+  const bot = await adminBotFixture(env, endpoint);
   const deliveries: EventValue[] = [];
   const createOwner = () => new McpEventSubscriptions(env, validate, async (event, _signal, authorize, submitting) => {
     await authorize(); submitting?.(); deliveries.push(event);
@@ -56,7 +112,7 @@ async function completionBoundary(run: (fixture: {
   try {
     await run({ get owner() { return owner; }, caller, deliveries, call, send: input => owner.callAndWatch("notify", "notification_send", input, caller) as Promise<Send>,
       async restart() { await owner.close(); owner = createOwner(); owner.resume(); } });
-  } finally { await owner.close(); stopEvents?.(); await notifications.close(); await api.closeContext(context); await server.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await owner.close(); stopEvents?.(); await notifications.close(); await api.closeContext(context); await server.close(); await bot.close(); await rm(root, { recursive: true, force: true }); }
 }
 
 test("definite Notification send refusals retire only fresh intent, never watch another record or cancel an established watch", async () => {
@@ -167,11 +223,7 @@ test("send-and-watch defaults, terminal-only answers and durable one-shot receip
   const caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(endpoint), threadId: "child", sessionId: null };
   const notifications = await serveApi({ name: "notify", transport: "socket", env });
   const call = <T>(name: string, args: Record<string, unknown> = {}) => socketCall(notifications.socketPath!, "tools/call", { name, arguments: args }) as Promise<T>;
-  const bots = await serveSocket({ info: { name: "bots", description: "Fixture", transportDescription: "Fixture", path: socketPath("bots", env) }, context: {}, operations: [
-    operation({ name: "bot_list", description: "Live launch", input: z.strictObject({}), output: z.any(), async call() {
-      return { bots: [{ id: "bot-1", state: "running", url: endpoint, recoveryIssue: null }] };
-    } }),
-  ] });
+  const bot = await adminBotFixture(env, endpoint);
   const deliveries: EventValue[] = [];
   let release: (() => void) | undefined;
   let held: Promise<void> | undefined;
@@ -214,6 +266,7 @@ test("send-and-watch defaults, terminal-only answers and durable one-shot receip
     for (const thread of [null, "foreign-root"])
       assert.equal((await tool("notification_send", { title: "Denied", message: "No effect", subscribe: true }, thread)).isError, true);
     const operator = await tool("notification_send", { title: "Operator", message: "Prompt", actions: ["Yes"] }, null);
+    assert.equal(operator.isError, undefined, JSON.stringify(operator.content));
     assert.equal((operator.structuredContent as Send).subscription, null);
     await assert.rejects(socketCall(notifications.socketPath!, "tools/call", { name: "notification_send", arguments: { id: randomUUID(), title: "Forged", message: "No", subscribe: true },
       invocation: { ...caller, completionWatchId: randomUUID() } }), /capability is invalid/);
@@ -269,7 +322,7 @@ test("send-and-watch defaults, terminal-only answers and durable one-shot receip
     const exact = await tool("events_status", { completionId: a.subscription!.id });
     assert.deepEqual((exact.structuredContent as { completions: Array<{ id: string; state: string }> }).completions.map(row => [row.id, row.state]), [[a.subscription!.id, "delivered"]]);
   } finally {
-    release?.(); await mcp.close(); await owner.close(); await Promise.all([server.close(), bots.close(), notifications.close()]); await rm(root, { recursive: true, force: true });
+    release?.(); await mcp.close(); await owner.close(); await Promise.all([server.close(), bot.close(), notifications.close()]); await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -278,7 +331,9 @@ test("fast completion, lost send ACKs and failed reads retain durable intent; am
   const env = { ...process.env, STACK_STATE_DIR: root };
   const dir = join(root, "packages", "notify"); await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "api.yaml"), "name: notify\ndescription: Notifications.\nmcp:\n  description: Notifications.\n  operations: all\n  events: all\n");
-  const caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: "launch-1", threadId: "child", sessionId: null };
+  const endpoint = "unix:///fixture/notification-failure-bot.sock";
+  const caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(endpoint), threadId: "child", sessionId: null };
+  const bot = await adminBotFixture(env, endpoint);
   const context = await api.createContext(env);
   let sendMode: "normal" | "fast" | "lost" = "normal", readFails = false, available = true, valid = true;
   // Faults occur after the actual record owner executes, not in a mock store or receipt producer.
@@ -362,6 +417,6 @@ test("fast completion, lost send ACKs and failed reads retain durable intent; am
     await pause(100); assert.equal(deliveries.length, 6, "unknown native admission is not safe to replay after notices, restart or ID retry");
     assert.equal(owner.status(caller).subscriptions.length, 1, "an unknown delivery stays inspectable rather than falsely retiring as delivered");
   } finally {
-    await owner.close(); await server.close(); stopEvents?.(); await notifications.close(); await api.closeContext(context); await rm(root, { recursive: true, force: true });
+    await owner.close(); await server.close(); stopEvents?.(); await notifications.close(); await api.closeContext(context); await bot.close(); await rm(root, { recursive: true, force: true });
   }
 });

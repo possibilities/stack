@@ -59,7 +59,7 @@ test("draft poll requests and durable Worker intake remain distinct from snapsho
   };
   const owner = () => new McpEventSubscriptions(env, async () => { throw new Error("Worker must not acquire Bot lineage"); }, async () => { throw new Error("not a snapshot"); }, undefined, undefined, root, runtime);
   let service = owner();
-  const server = packageMcpServer("sample", "Fixture.", root, env, { workerId: "worker", instance: "instance" }, async () => {}, subscriptionService(service, root, env));
+  const server = packageMcpServer("sample", "Fixture.", root, env, null, async () => {}, subscriptionService(service, root, env));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "events-test", version: "1" });
   await server.connect(serverTransport); await client.connect(clientTransport);
@@ -74,10 +74,8 @@ test("draft poll requests and durable Worker intake remain distinct from snapsho
     await assert.rejects(client.request({ method: "events/poll", params: { ...request, name: "missing" } }, pollOutput), error => (error as { code: number }).code === -32011);
     await assert.rejects(client.request({ method: "events/subscribe", params: {} }, z.any()), error => (error as { code: number }).code === -32014);
     const tools = (await client.listTools()).tools.map(tool => tool.name);
-    assert.ok(tools.includes("events_listen") && !tools.includes("events_subscribe"));
-    const listening = await client.callTool({ name: "events_listen", arguments: { name: "arrived", arguments: { filter: "match" } } });
-    assert.notEqual(listening.isError, true);
-    const sub = (listening.structuredContent as { subscription: { id: string } }).subscription;
+    assert.ok(tools.includes("events_listen") && tools.includes("events_subscribe"));
+    const sub = await service.occurrences!.subscribe("sample", { name: "arrived", arguments: { filter: "match" } }, invocation);
     const add = (eventId: string) => history.push({ eventId, name: "arrived", timestamp: new Date().toISOString(), data: { value: "match" } });
     add("first");
     await until(async () => (await service.occurrences!.status(invocation))[0]!.deliveries.some(row => row.eventId === "first" && row.state === "admitted"));

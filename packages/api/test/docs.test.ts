@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { docsSnapshot, serveApi, socketCall } from "../src/index.js";
 import { forwardTimeouts } from "../src/forward-timeout.js";
+import { packageToolAllowed, roleGrants } from "../src/role-grants.js";
 import type { CompletionWatch } from "../src/operation.js";
 
 type TransportDoc = { type: string; description: string; supported: boolean; subscriptions: boolean; endpoint: string | null;
@@ -53,11 +54,21 @@ test("the api package serves structured documents for every workspace package", 
       found.set(doc.name, doc);
     }
     const snapshot = (await socketCall(served.socketPath, "tools/call", { name: "docs_snapshot", arguments: {} })) as { packages: PackageDoc[] };
+    const mcpByPackage = new Map([...found].map(([name, doc]) => [name, doc.transports.find(entry => entry.type === "mcp" && entry.supported)?.operations ?? []]));
+    assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 286);
+    for (const role of ["manager", "worker"] as const) {
+      const selected = roleGrants[role] as Record<string, readonly string[]>;
+      assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 18 : 29);
+      for (const [pkg, names] of Object.entries(selected)) for (const name of names)
+        assert.ok(mcpByPackage.get(pkg)?.includes(name), `stale ${role} grant: ${pkg}.${name}`);
+      assert.equal(packageToolAllowed(role, "roles", "role_set_default"), false);
+      assert.equal(packageToolAllowed(role, "worker", "worker_respond"), false);
+    }
     for (const key of forwardTimeouts.keys()) {
       const [pkg, operation] = key.split("/");
       assert.ok(found.get(pkg!)?.operations.some((op) => op.name === operation), `stale timeout: ${key}`);
     }
-    for (const [pkg, internal] of [["roles", ["role_launch_snapshot"]], ["brain", ["share_receive", "share_read_states", "egress_grant_create", "egress_grant_list", "egress_grant_revoke"]]] as const) {
+    for (const [pkg, internal] of [["roles", ["role_launch_snapshot", "role_access_ids"]], ["brain", ["share_receive", "share_read_states", "egress_grant_create", "egress_grant_list", "egress_grant_revoke"]]] as const) {
       const doc = found.get(pkg)!;
       for (const transport of doc.transports.filter((entry) => entry.type === "mcp" || entry.type === "websocket")) {
         const omitted = [...(transport.type === "mcp" ? [`${pkg}_state_read`] : []), ...internal.filter((name) => !(pkg === "brain" && transport.type === "websocket" && name === "share_read_states")),
@@ -242,12 +253,14 @@ test("the api package serves structured documents for every workspace package", 
     assert.equal(bots.eventScope?.required, false);
     assert.deepEqual(
       bots.operations.map((operation) => operation.name).filter(name => !stateOperation(name)).sort(),
-      ["bot_assign", "bot_defaults_get", "bot_defaults_set", "bot_list", "bot_remove", "bot_start", "bot_stop", "voice_dial", "voice_hangup", "voice_speak", "voice_status",
+      ["bot_admin_start", "bot_assign", "bot_defaults_get", "bot_defaults_set", "bot_list", "bot_remove", "bot_start", "bot_stop", "voice_dial", "voice_hangup", "voice_speak", "voice_status",
         "bot_settings_catalog", "bot_settings_read", "bot_settings_preview", "bot_settings_patch", "bot_settings_apply", "bot_settings_options", "bot_settings_native_schema",
         "chat_list", "chat_tree", "chat_tree_detail", "chat_search", "chat_records", "chat_record_chunk", "chat_message_changes", "chat_thread_read", "chat_turns", "chat_items", "chat_main_live", "chat_main_items", "chat_occurrences", "chat_open", "chat_send", "chat_steer", "chat_interrupt", "chat_enqueue", "chat_queue_list", "chat_queue_resolve",
         "chat_codex_queue_add", "chat_codex_queue_list", "chat_codex_queue_update", "chat_codex_queue_delete", "chat_codex_queue_reorder", "chat_codex_queue_start", "chat_upload_start", "chat_upload_status", "chat_upload_chunk", "chat_upload_finish", "chat_attachment_add", "chat_attachment_list", "chat_attachment_remove"].sort(),
     );
     const start = bots.operations.find((operation) => operation.name === "bot_start") as OperationDoc;
+    for (const transport of bots.transports.filter(entry => entry.type === "mcp" || entry.type === "websocket"))
+      assert.equal(transport.operations.includes("bot_admin_start"), false, "Admin launch must stay on the private operator socket");
     assert.ok(start.description.length > 0);
     assert.deepEqual(Object.keys((start.inputSchema.properties ?? {}) as object).sort(), ["account", "args", "cwd", "id", "settings"]);
     assert.deepEqual(start.inputSchema.required, ["account"]);
@@ -296,7 +309,7 @@ test("the api package serves structured documents for every workspace package", 
     const roles = found.get("roles") as PackageDoc;
     assert.deepEqual(Object.keys(roles.events).sort(), ["role_changed", "role_shims_changed"]);
     assert.deepEqual(roles.operations.map((operation) => operation.name).filter(name => !stateOperation(name)).sort(), [
-      "roles_snapshot", "role_create", "role_update", "role_set_default", "role_delete", "role_internal_mcp_list", "role_internal_mcp_update",
+      "roles_snapshot", "role_access_ids", "role_create", "role_update", "role_set_default", "role_delete", "role_internal_mcp_list", "role_internal_mcp_update",
       "role_preview", "role_launch_preview", "role_snapshot", "role_editor_snapshot", "role_launch_snapshot", "role_shim_list", "role_shim_create", "role_shim_update", "role_shim_delete", "category_create", "category_delete", "category_reorder", "category_update",
       "fragment_create", "fragment_delete", "fragment_move", "fragment_reorder", "fragment_update",
       "skill_create", "skill_delete", "skill_reorder", "skill_update",

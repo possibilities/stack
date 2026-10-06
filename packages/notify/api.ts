@@ -1,11 +1,19 @@
 import { z } from "zod";
-import { operation, socketCall, socketPath, stateDir, wantsCompletion, type CompletionWatch, type PackageApi } from "@stack/api";
+import { operation, operatorInvocation, socketCall, socketPath, stateDir, wantsCompletion, packageRole, type CompletionWatch, type PackageApi, type InvocationContext } from "@stack/api";
 import { notification, notificationSendInput, notificationSend, page } from "./src/schema.js";
 import { NotificationStore } from "./src/store.js";
 import { withStateInventory, requireStateOperator, statePlan, stateApplyInput, stateReceipt } from "@stack/api";
 import { notifyStateCategories } from "./src/state-categories.js";
 
 type Context = { store: NotificationStore; env: NodeJS.ProcessEnv; changed?: () => void };
+async function caller(ctx: Context, invocation?: InvocationContext): Promise<{ role: "admin" | "manager"; botId: string | null }> {
+  if (!invocation || operatorInvocation(invocation) || invocation.transport === "mcp" && !invocation.botId && !invocation.workerId)
+    return { role: "admin", botId: null };
+  if (!invocation.botId || !invocation.instance) throw new Error("notification caller is not a verified Bot");
+  const role = await packageRole({ botId: invocation.botId, instance: invocation.instance }, ctx.env);
+  if (role !== "admin" && role !== "manager") throw new Error("notification operation is not granted to this role");
+  return { role, botId: invocation.botId };
+}
 const id = z.strictObject({ id: z.uuid() });
 const read = { readOnlyHint: true } as const;
 const group = z.string().min(1).max(200);
@@ -27,6 +35,9 @@ const packageApi: PackageApi<Context, "notify_changed"> = {
       input: notificationSendInput, output: notificationSend,
       completionWatch, annotations: { idempotentHint: false },
       async call(ctx, input, invocation) {
+        const authority = await caller(ctx, invocation);
+        if (authority.role === "manager" && input.subscribe !== false && (input.actions.length || input.reply !== null))
+          throw new Error("Manager notifications require subscribe:false; read the owned response with notification_get");
         if (wantsCompletion(completionWatch, input, invocation)) {
           if (!(invocation?.transport === "mcp" && invocation.botId && invocation.instance && invocation.threadId && invocation.completionWatchId && input.id))
             throw new Error("subscribe requires owner-coordinated Bot MCP delivery to a verified sanctioned Chat; nothing was sent");
@@ -34,10 +45,14 @@ const packageApi: PackageApi<Context, "notify_changed"> = {
             id: invocation.completionWatchId, package: "notify", operation: "notification_send", recordId: input.id, caller: invocation,
           } }, { timeoutMs: 5_000 });
         }
-        const result = ctx.store.create(input); if (result.created) ctx.changed?.(); return { ...result.record, subscription: null };
+        const result = ctx.store.create(input, authority.role === "manager" ? authority.botId : null); if (result.created) ctx.changed?.(); return { ...result.record, subscription: null };
       } }),
     operation({ name: "notification_get", description: "Read one durable notification by ID, including whether and how it was dismissed and any response.",
-      input: id, output: notification, annotations: read, async call(ctx, { id }) { return ctx.store.get(id); } }),
+      input: id, output: notification, annotations: read, async call(ctx, { id }, invocation) {
+        const authority = await caller(ctx, invocation);
+        if (authority.role === "manager" && ctx.store.owner(id) !== authority.botId) throw new Error("notification belongs to another Manager");
+        return ctx.store.get(id);
+      } }),
     operation({ name: "notification_list", description: "Page newest-first durable notifications. Filter by dismissed, exact source and exact group; before is the exclusive sequence cursor. Null nextCursor ends the page sequence.",
       input: z.strictObject({ before: z.number().int().positive().optional(), limit: z.number().int().min(1).max(25).default(20),
         dismissed: z.boolean().optional(), source: z.string().min(1).max(200).optional(), group: group.optional() }),

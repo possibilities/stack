@@ -710,7 +710,8 @@ export type RoleTrustedProject = { id: string; path: string; description: string
 /** A named Role in `roles_snapshot`. `revision` is the Role's own; names are unique ignoring ASCII case. */
 export type Role = { id: string; name: string; description: string; revision: number; createdAt: number | null; updatedAt: number | null };
 /** `roles_snapshot`: Roles in creation order. `revision` is the catalog-wide edit fence, not any Role's. */
-export type RoleCatalog = { revision: number; defaultRoleId: string | null; workerDefaultRoleId: string | null; roles: Role[] };
+export type RoleCatalog = { revision: number; defaultRoleId: string | null; workerDefaultRoleId: string | null;
+  managerRoleId?: string; adminRoleId?: string; roles: Role[] };
 /** Local-only `role_shim_list`: installed executable wrappers, not Role records. */
 export type RoleShim = { name: string; args: string[]; path: string; revision: string };
 export type RoleShims = { binDir: string; shims: RoleShim[] };

@@ -505,13 +505,13 @@ function NewCategoryEditor() {
 
 /* ─── Roles ──────────────────────────────────────────────────────────── */
 
-function RoleFields({ id, value, set, issue, hint }: { id: string; value(field: string): string; set(field: string, value: string): void; issue: string | null; hint: string }) {
+function RoleFields({ id, value, set, issue, hint, lockedName = false }: { id: string; value(field: string): string; set(field: string, value: string): void; issue: string | null; hint: string; lockedName?: boolean }) {
   const name = value("name");
   return (
     <>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${id}-name`} className={labelClass}>Name</label>
-        <Input id={`${id}-name`} value={name} maxLength={titleLimit} placeholder="Researcher" autoComplete="off" spellCheck={false}
+        <Input id={`${id}-name`} value={name} maxLength={titleLimit} placeholder="Researcher" autoComplete="off" spellCheck={false} readOnly={lockedName}
           aria-invalid={issue && name ? true : undefined} aria-describedby={`${id}-name-hint`}
           onChange={(event) => set("name", event.target.value)} className="h-8" />
         <p id={`${id}-name-hint`} className={cn(hintClass, issue && name && "text-destructive")}>{issue && name ? issue : hint}</p>
@@ -538,6 +538,7 @@ function RoleDetailsEditor({ id }: { id: string }) {
   const formId = useId();
   const [error, setError] = useState<string | null>(null);
   const found = roleCatalog.data?.roles.find((item) => item.id === id) ?? null;
+  const canonical = id === roleCatalog.data?.managerRoleId || id === roleCatalog.data?.adminRoleId || id === roleCatalog.data?.workerDefaultRoleId;
   const key = `role:${id}`;
   const saved = found ? { ...roleText(found), botMarkdown: role.data?.id === id ? role.data.botMarkdown ?? "" : "" } : blankRoleText;
   const draft = useDraft(key, saved);
@@ -564,7 +565,7 @@ function RoleDetailsEditor({ id }: { id: string }) {
     <EditorFrame subtitle="details"
       footer={<SaveBar dirty={dirty} conflicts={draft.conflicts.length} pending={saving} invalid={issue} saveLabel="Save" onSave={save} onRevert={() => { draft.clear(); setError(null); }} />}
       actions={<RecordMenu label={found.name} onInspect={() => select({ kind: "role", id })} onDelete={() => actions.confirmDeleteRole(id)}
-        deleteBlocked={defaultDeleteHint(view.isDefault, view.isWorkerDefault) ?? undefined} />}>
+        deleteBlocked={canonical ? "Canonical Roles cannot be deleted" : defaultDeleteHint(view.isDefault, view.isWorkerDefault) ?? undefined} />}>
       <form className="flex flex-col gap-3" aria-label={`Edit Role ${found.name}`} onSubmit={(event) => { event.preventDefault(); save(); }} onKeyDown={saveKeys(save)}>
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={cn("rounded px-1.5 py-px text-[0.64rem] font-medium", view.isDefault || view.isWorkerDefault ? "bg-success/15 text-success" : "bg-muted text-muted-foreground")}>{defaultsLabel(view.isDefault, view.isWorkerDefault) ?? "Not a launch default"}</span>
@@ -572,7 +573,8 @@ function RoleDetailsEditor({ id }: { id: string }) {
           <span className="ml-auto"><Stamps record={found} /></span>
         </div>
         <ConflictNotice fields={draft.conflicts} onKeep={() => draft.replace(keepDraft(draft.draft, saved))} onYield={() => draft.replace(yieldDraft(draft.draft, saved))} />
-        <RoleFields id={formId} value={draft.value} set={draft.set} issue={roleNameIssue(draft.value("name"), roleCatalog.data, id)} hint={nameHint} />
+        <RoleFields id={formId} value={draft.value} set={draft.set} issue={roleNameIssue(draft.value("name"), roleCatalog.data, id)}
+          hint={canonical ? "The canonical Role name is fixed." : nameHint} lockedName={canonical} />
         <Field data-invalid={Boolean(personalityIssue)} className="gap-1.5">
           <FieldLabel htmlFor={`${formId}-bot-markdown`} className={labelClass}>bot.md · Bot personality</FieldLabel>
           <Textarea id={`${formId}-bot-markdown`} value={draft.value("botMarkdown")} maxLength={65_536} rows={12} spellCheck={false}

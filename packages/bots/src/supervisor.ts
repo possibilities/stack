@@ -45,6 +45,7 @@ export type StartInput = {
   account?: string;
   args?: string[];
   settings?: Partial<BotSettings>;
+  adminReason?: string;
 };
 
 export type LaunchSpec = {
@@ -400,6 +401,8 @@ export class Supervisor {
       catch (error) { this.noteRecoveryIssue(id, error); throw error; }
     }
     if (current && live) {
+      if (input.adminReason && current.roleId !== this.role.accessRoleIds().adminRoleId)
+        throw new Error("stop the ordinary Bot before starting it as Admin");
       if (current.codexBin !== codexBin) {
         throw new Error(`server ${id} uses a different Codex runtime; stop it before starting it with codexnk`);
       }
@@ -449,7 +452,7 @@ export class Supervisor {
     const account = selected ? this.store.accountCredentials(selected) : null;
     // The public API requires an account for new Bots; legacy/unbound records are never enrolled retroactively.
     const orientation = current ? current.orientation ?? null : account ? pendingOrientation() : null;
-    const snapshot = this.role.defaultSnapshot();
+    const snapshot = input.adminReason ? this.role.adminSnapshot() : this.role.defaultSnapshot();
     const instructions = renderBotInstructions(snapshot);
     const instructionsHash = createHash("sha256").update(instructions).digest("hex");
     const privateHistory = join(this.options.stateDir, "history", id);
@@ -492,7 +495,7 @@ export class Supervisor {
       const record: RecordFile = {
         id, pid: child.pid, cwd, url, state: "running", codexBin, account: account?.id ?? null, launchedAccount: account?.id ?? null, authVersion: account?.version ?? null, runtimeRoot,
         mainThreadId: current?.mainThreadId ?? null, threadStarting: current?.threadStarting ?? false, args: [...userArgs], settings,
-        roleRoot: rolePath, roleRevision: snapshot.revision, roleId: snapshot.id,
+        roleRoot: rolePath, roleRevision: snapshot.revision, roleId: snapshot.id, adminReason: input.adminReason ?? null,
         roleInstructionsHash: current?.mainThreadId ? current.roleInstructionsHash ?? null : instructionsHash,
         orientation,
       };

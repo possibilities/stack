@@ -44,7 +44,7 @@ test("concurrent owner and injection initialization share one complete pair of d
     await Promise.all(children.map(({ ready }) => ready));
     for (const { child } of children) child.send("initialize");
     const catalogs = await Promise.all(children.map(({ done }) => done));
-    assert.deepEqual(catalogs[0]!.roles.map(role => role.name), ["Manager", "Worker"]);
+    assert.deepEqual(catalogs[0]!.roles.map(role => role.name), ["Manager", "Worker", "Admin"]);
     assert.ok(catalogs[0]!.defaultRoleId && catalogs[0]!.workerDefaultRoleId);
     for (const catalog of catalogs.slice(1)) assert.deepEqual(catalog, catalogs[0]);
   } finally {
@@ -54,12 +54,17 @@ test("concurrent owner and injection initialization share one complete pair of d
   }
 });
 
-test("fresh Roles start with a Manager default and fixed instruction-free Worker role", async () => {
+test("fresh Roles provision canonical Manager, Worker and Admin identities", async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-role-pair-"));
   const store = new RoleStore(root);
   try {
     const catalog = store.catalog();
-    assert.equal(catalog.roles.length, 2);
+    assert.equal(catalog.roles.length, 3);
+    const access = store.accessRoleIds();
+    assert.equal(access.managerRoleId, catalog.defaultRoleId);
+    assert.equal(access.workerRoleId, catalog.workerDefaultRoleId);
+    assert.equal(store.adminSnapshot().id, access.adminRoleId);
+    assert.throws(() => store.setDefault(catalog.revision, access.adminRoleId), /Admin cannot be the ordinary Bot default/);
     assert.equal(store.defaultSnapshot().name, "Manager");
     assert.ok(store.defaultSnapshot().botMarkdown?.trim());
     assert.equal(store.launchSnapshot(undefined, "worker").botMarkdown, "");
@@ -71,7 +76,7 @@ test("fresh Roles start with a Manager default and fixed instruction-free Worker
     assert.deepEqual(store.launchSnapshot(undefined, "worker").categories, []);
     assert.deepEqual(store.launchSnapshot(undefined, "worker").skills, []);
     const reopened = new RoleStore(root);
-    try { assert.equal(reopened.catalog().workerDefaultRoleId, catalog.workerDefaultRoleId); }
+    try { assert.equal(reopened.catalog().workerDefaultRoleId, catalog.workerDefaultRoleId); assert.deepEqual(reopened.accessRoleIds(), access); }
     finally { reopened.close(); }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -96,6 +101,36 @@ test("a compatible catalog adopts its original Worker identity instead of a chan
       assert.equal(upgraded.launchSnapshot(undefined, "worker").id, original);
       assert.equal(upgraded.catalog().defaultRoleId, botDefault);
       assert.throws(() => upgraded.launchSnapshot(alternate, "worker"), /cannot select a Role/);
+    } finally { upgraded.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("migration never promotes a preexisting Admin-named ordinary Role", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-admin-role-upgrade-"));
+  const path = join(root, "roles.sqlite");
+  const store = new RoleStore(root);
+  const managerId = store.accessRoleIds().managerRoleId;
+  const oldAdminId = store.accessRoleIds().adminRoleId;
+  store.close();
+  const legacy = new DatabaseSync(path);
+  try {
+    // Model the prior schema with a user-created Admin Role selected as Bot default.
+    legacy.exec("ALTER TABLE role_catalog DROP COLUMN admin_role_id; ALTER TABLE role_catalog DROP COLUMN manager_role_id");
+    legacy.prepare("UPDATE role_catalog SET default_role_id = ? WHERE singleton = 1").run(oldAdminId);
+    legacy.prepare("UPDATE roles SET description = 'Keep this authored Role' WHERE id = ?").run(oldAdminId);
+  } finally { legacy.close(); }
+  try {
+    const upgraded = new RoleStore(root);
+    try {
+      const access = upgraded.accessRoleIds();
+      assert.equal(access.managerRoleId, managerId);
+      assert.notEqual(access.adminRoleId, oldAdminId, "an existing Bot's saved Role ID cannot gain Admin grants");
+      assert.equal(upgraded.catalog().defaultRoleId, managerId);
+      assert.equal(upgraded.adminSnapshot().name, "Admin");
+      const retained = upgraded.role(oldAdminId).snapshot();
+      assert.match(retained.name, /^Admin \(legacy /);
+      assert.equal(retained.description, "Keep this authored Role");
+      assert.throws(() => upgraded.setDefault(upgraded.catalog().revision, access.adminRoleId), /Admin cannot be the ordinary Bot default/);
     } finally { upgraded.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -220,16 +255,19 @@ test("catalog revisions fence creation, default changes and deletion without inv
     assert.equal(store.defaultSnapshot().id, second);
     assert.equal(firstContents.snapshot().revision, before.revision);
     // A default switch does not retarget an editor or consume its role revision.
-    const edited = firstContents.update(before.revision, { name: "Renamed", description: "Kept separate" });
+    assert.throws(() => firstContents.update(before.revision, { name: "Renamed" }), /cannot rename a canonical access role/);
+    const edited = firstContents.update(before.revision, { description: "Kept separate" });
     assert.equal(edited.id, first);
     assert.equal(store.defaultSnapshot().name, "Second");
     assert.throws(() => other.deleteRole(catalog.revision, first), /stale role catalog revision/);
     assert.throws(() => firstContents.update(before.revision, { name: "Lost" }), /stale role revision/);
-    const deleted = store.deleteRole(store.catalog().revision, first);
-    assert.deepEqual(deleted.roles.map(({ id }) => id), [workerDefault, second]);
-    assert.throws(() => firstContents.snapshot(), /unknown role/);
-    assert.throws(() => store.deleteRole(deleted.revision, second), /cannot delete the default/);
-    assert.equal(other.defaultSnapshot().id, second);
+    assert.throws(() => store.deleteRole(store.catalog().revision, first), /canonical access role/);
+    catalog = store.setDefault(store.catalog().revision, first);
+    const deleted = store.deleteRole(catalog.revision, second);
+    assert.deepEqual(deleted.roles.map(({ id }) => id), [first, workerDefault, store.accessRoleIds().adminRoleId]);
+    assert.throws(() => store.role(second).snapshot(), /unknown role/);
+    assert.throws(() => store.deleteRole(deleted.revision, first), /cannot delete the default/);
+    assert.equal(other.defaultSnapshot().id, first);
   } finally { store.close(); other.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -281,7 +319,7 @@ test("all Role resources are isolated, names and order are local, and deleting a
     store.deleteRole(store.catalog().revision, a.id);
     assert.deepEqual(store.defaultSnapshot(), b);
     const reopened = new RoleStore(root);
-    try { assert.deepEqual(reopened.defaultSnapshot(), b); assert.equal(reopened.catalog().roles.length, 3); }
+    try { assert.deepEqual(reopened.defaultSnapshot(), b); assert.equal(reopened.catalog().roles.length, 4); }
     finally { reopened.close(); }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -335,8 +373,10 @@ test("socket clients select Roles explicitly and configure internal MCP enableme
     }
     assert.deepEqual((await call<RoleSnapshot>("role_launch_snapshot", { roleId: second, audience: "bot" })).disabledInternalMcpServers.slice().sort(), bridges.slice().sort());
     catalog = await call<RoleCatalog>("roles_snapshot");
-    const deleted = await call<RoleCatalog>("role_delete", { roleId: first, expectedRevision: catalog.revision });
-    assert.equal(deleted.defaultRoleId, second);
-    assert.equal(deleted.roles.length, 2);
+    await assert.rejects(call("role_delete", { roleId: first, expectedRevision: catalog.revision }), /canonical access role/);
+    const access = await call<{ managerRoleId: string; workerRoleId: string; adminRoleId: string }>("role_access_ids");
+    assert.equal(access.managerRoleId, first);
+    assert.equal(access.workerRoleId, catalog.workerDefaultRoleId);
+    await assert.rejects(call("role_set_default", { roleId: access.adminRoleId, expectedRevision: catalog.revision }), /Admin cannot be the ordinary Bot default/);
   } finally { await served.close(); await rm(root, { recursive: true, force: true }); }
 });

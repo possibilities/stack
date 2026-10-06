@@ -46,10 +46,10 @@ export function DefaultDialog({ role, botDefault, workerDefault, pending, onConf
 
 /** Confirms deleting a Role and everything it owns; the Bot default and fixed Worker Role are not deletable. */
 export function DeleteRoleDialog({ role, defaults, edits, pending, onConfirm, onClose }: {
-  role: Role | null; defaults: { bot: boolean; worker: boolean }; edits: boolean; pending: boolean; onConfirm(): void; onClose(): void;
+  role: Role | null; defaults: { bot: boolean; worker: boolean; canonical: boolean }; edits: boolean; pending: boolean; onConfirm(): void; onClose(): void;
 }) {
   const which = defaultsLabel(defaults.bot, defaults.worker);
-  const blocked = defaultDeleteHint(defaults.bot, defaults.worker);
+  const blocked = defaults.canonical ? "Canonical Roles cannot be deleted" : defaultDeleteHint(defaults.bot, defaults.worker);
   return (
     <AlertDialog open={role !== null} onOpenChange={(open) => { if (!open && !pending) onClose(); }}>
       <AlertDialogContent size="sm">
@@ -58,7 +58,7 @@ export function DeleteRoleDialog({ role, defaults, edits, pending, onConfirm, on
           <AlertDialogTitle>{which ? `“${role?.name}” is the ${which}` : `Delete “${role?.name}”?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {blocked
-              ? `${blocked}. A launch default cannot be deleted.`
+              ? `${blocked}.`
               : <>This removes its instructions, skills, MCP servers and trusted projects{edits ? ", and discards its unsaved edits" : ""}. Bots and Workers that already launched keep their snapshots. This can’t be undone.</>}
           </AlertDialogDescription>
         </AlertDialogHeader>

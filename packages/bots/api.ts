@@ -86,18 +86,14 @@ async function claimNamedWorkspace(path: string): Promise<string> {
   }
 }
 
-export const botStart = operation({
-  name: "bot_start",
-  description: "Start a Bot under an explicit enabled Codex account. New Bots capture the default Role's bot.md and admit one orientation turn; returns on admission, not completion. Inspect bot_list for its outcome. Uncertainty never resends the introduction. Legacy Bots keep first-UI-turn behavior. Omit id for the next bot-N. Existing assignments change only through bot_assign, stop, then start.",
-  input: z.strictObject({
+const botStartInput = z.strictObject({
     id: botId.optional().describe("Existing or custom bot id. Omit to allocate the next bot-N."),
     account: z.uuid().describe("Required enabled Codex account ID from account_list. For an existing bot, must equal its assignment."),
     cwd: z.string().optional().describe("Existing working directory override. Omit for a new private workspace or to reuse an existing bot's workspace. A supplied directory is never deleted by bot_remove."),
     args: z.array(z.string()).optional().describe("Extra Codex arguments retained for future launches. Omit to reuse saved args; [] clears them while stopped. Stack owns --listen, --identity, --capabilities, and --history-dir."),
     settings: botSettings.partial().optional().describe("Override defaults for a new Bot, or update saved settings of a stopped Bot. Omit to reuse its saved settings."),
-  }),
-  output: botView, annotations: { title: "Start bot" },
-  async call(ctx: BotsContext, input) {
+  });
+async function startBot(ctx: BotsContext, input: z.infer<typeof botStartInput>, adminReason?: string) {
     const existing = input.id === undefined ? undefined : ctx.supervisor.list().find((bot) => bot.id === input.id);
     if (!ctx.store.codexAccounts().some((account) => account.id === input.account && account.enabled && !account.removing))
       throw new Error(`Codex account ${input.account} is unavailable or disabled`);
@@ -112,7 +108,22 @@ export const botStart = operation({
       cwd = await claimNamedWorkspace(workspacePath(ctx.root, id));
       ctx.ledger.ownWorkspace(id);
     }
-    return ctx.supervisor.start({ id, cwd, account: input.account, args: input.args, settings: input.settings });
+    return ctx.supervisor.start({ id, cwd, account: input.account, args: input.args, settings: input.settings, adminReason });
+}
+export const botStart = operation({
+  name: "bot_start",
+  description: "Start a Bot under an explicit enabled Codex account and the ordinary Bot default Role. Returns on admission, not completion. Inspect bot_list for its outcome. Uncertainty never resends the introduction. Omit id for the next bot-N. Existing assignments change only through bot_assign, stop, then start.",
+  input: botStartInput, output: botView, annotations: { title: "Start bot" },
+  async call(ctx: BotsContext, input) { return startBot(ctx, input); },
+});
+export const botAdminStart = operation({
+  name: "bot_admin_start",
+  description: "Private-socket-only, explicit local-operator launch of the canonical Admin Role for one Bot start. Supply a reason. An automatic recovery or later ordinary start returns to the Bot default; operator-only service checks remain in force.",
+  input: botStartInput.extend({ adminReason: z.string().trim().min(10).max(2_000) }),
+  output: botView, annotations: { title: "Start Admin bot" },
+  async call(ctx: BotsContext, input, invocation) {
+    if (invocation) throw new Error("Admin launch requires the private local operator socket");
+    return startBot(ctx, input, input.adminReason);
   },
 });
 export const botAssign = operation({
@@ -516,7 +527,7 @@ export const chatMessageChanges = operation({
   },
 });
 const packageApi: PackageApi<BotsContext, BotsTopic> = {
-  operations: [...botStateOperations, ...botSettingsOperations, botStart, botStop, botAssign, botRemove, botList, botDefaultsGet, botDefaultsSet, voiceStatus, voiceDial, voiceSpeak, voiceHangup, chatList, chatTree, chatTreeDetail, chatSearch, chatRecords, chatRecordChunk, chatMessageChanges, chatThreadRead, chatTurns, chatItems, chatMainLive, chatMainItems, chatOccurrences, chatOpen, chatSend, chatSteer, chatInterrupt, chatEnqueue, chatQueueList, chatQueueResolve, chatCodexQueueAdd, chatCodexQueueList, chatCodexQueueUpdate, chatCodexQueueDelete, chatCodexQueueReorder, chatCodexQueueStart, chatUploadStart, chatUploadStatus, chatUploadChunk, chatUploadFinish, chatAttachmentAdd, chatAttachmentList, chatAttachmentRemove],
+  operations: [...botStateOperations, ...botSettingsOperations, botStart, botAdminStart, botStop, botAssign, botRemove, botList, botDefaultsGet, botDefaultsSet, voiceStatus, voiceDial, voiceSpeak, voiceHangup, chatList, chatTree, chatTreeDetail, chatSearch, chatRecords, chatRecordChunk, chatMessageChanges, chatThreadRead, chatTurns, chatItems, chatMainLive, chatMainItems, chatOccurrences, chatOpen, chatSend, chatSteer, chatInterrupt, chatEnqueue, chatQueueList, chatQueueResolve, chatCodexQueueAdd, chatCodexQueueList, chatCodexQueueUpdate, chatCodexQueueDelete, chatCodexQueueReorder, chatCodexQueueStart, chatUploadStart, chatUploadStatus, chatUploadChunk, chatUploadFinish, chatAttachmentAdd, chatAttachmentList, chatAttachmentRemove],
   events: {
     topics,
     scope: {

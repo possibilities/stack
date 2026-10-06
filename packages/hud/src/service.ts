@@ -1,11 +1,11 @@
-import { botInstance, operatorInvocation, socketCall, socketPath, stateHash, type InvocationContext, type StateApplyInput } from "@stack/api";
+import { botInstance, operatorInvocation, packageRole, socketCall, socketPath, stateHash, type InvocationContext, type StateApplyInput } from "@stack/api";
 import { listActiveThreads, type ActiveThread } from "@stack/bots";
 import { workAdmissionPage } from "./client.js";
 import { canonical, HudStore } from "./store.js";
-import type { Actor, Change, ChatTarget, HistorySelection, Reference, WorkContext } from "./schema.js";
+import type { Actor, Change, ChatTarget, HistorySelection, Reference, WorkContext, WorkItem } from "./schema.js";
 
 type Bot = { id: string; state: string; url: string | null; mainThreadId: string | null; recoveryIssue: string | null };
-type Caller = { actor: Actor; lineage: string[] };
+type Caller = { actor: Actor; lineage: string[]; role: "admin" | "manager" };
 function path(threads: ActiveThread[], id: string): string[] | null {
   for (const thread of threads) {
     if (thread.id === id) return [id];
@@ -16,11 +16,26 @@ function path(threads: ActiveThread[], id: string): string[] | null {
 }
 export class HudService {
   constructor(readonly store: HudStore, private readonly env: NodeJS.ProcessEnv) {}
+  visible(caller: Caller, item: WorkItem): boolean {
+    if (caller.role === "admin" || caller.actor.kind === "operator") return true;
+    const { botId, mainThreadId } = caller.actor;
+    return item.createdBy.kind === "bot" && item.createdBy.botId === botId && item.createdBy.mainThreadId === mainThreadId
+      || item.links.some(link => ["lead", "contributor"].includes(link.relation)
+        && (link.target.kind === "bot" || link.target.kind === "chat")
+        && link.target.botId === botId && link.target.mainThreadId === mainThreadId)
+      || this.store.hasBotFocus(item.id, botId, mainThreadId);
+  }
+  requireVisible(caller: Caller, id: string): WorkItem {
+    const item = this.store.get(id);
+    if (!this.visible(caller, item)) throw new Error("work belongs to another Manager assignment");
+    return item;
+  }
   private async bots(): Promise<Bot[]> {
     return (await socketCall(socketPath("bots", this.env), "tools/call", { name: "bot_list", arguments: {} }, { timeoutMs: 2000 }) as { bots: Bot[] }).bots;
   }
   async caller(invocation?: InvocationContext): Promise<Caller> {
-    if (operatorInvocation(invocation)) return { actor: { kind: "operator" }, lineage: [] };
+    if (operatorInvocation(invocation) || invocation?.transport === "mcp" && !invocation.botId && !invocation.workerId)
+      return { actor: { kind: "operator" }, lineage: [], role: "admin" };
     if (!invocation?.botId || !invocation.instance || !invocation.threadId || invocation.workerId)
       throw new Error("hud_caller_unverified: work management requires a sanctioned Bot Chat or operator");
     const bot = (await this.bots()).find(bot => bot.id === invocation.botId);
@@ -33,7 +48,9 @@ export class HudService {
     const current = (await this.bots()).find(value => value.id === bot.id);
     if (current?.url !== bot.url || current.mainThreadId !== bot.mainThreadId || current.state !== "running" || current.recoveryIssue)
       throw new Error("hud_caller_unverified: Bot changed during verification");
-    return { actor: { kind: "bot", botId: bot.id, mainThreadId: bot.mainThreadId, threadId: invocation.threadId }, lineage: lineage.reverse() };
+    const role = await packageRole({ botId: bot.id, instance: invocation.instance }, this.env);
+    if (role !== "manager" && role !== "admin") throw new Error("hud_work_scope: Bot has no Work management grant");
+    return { actor: { kind: "bot", botId: bot.id, mainThreadId: bot.mainThreadId, threadId: invocation.threadId }, lineage: lineage.reverse(), role };
   }
   async target(caller: Caller, target?: ChatTarget): Promise<ChatTarget> {
     if (caller.actor.kind === "bot") {
@@ -67,6 +84,23 @@ export class HudService {
   }
   async apply(requestId: string, changes: Change[], invocation?: InvocationContext) {
     const caller = await this.caller(invocation);
+    const created = new Set(changes.filter(change => change.action === "create").map(change => change.id));
+    const requireReference = (id: string) => {
+      if (created.has(id) && !this.store.has(id)) return;
+      this.requireVisible(caller, id);
+    };
+    for (const change of changes) {
+      if (change.action === "create") {
+        if (change.parentId) requireReference(change.parentId);
+        for (const id of change.dependencies) requireReference(id);
+      } else {
+        requireReference(change.id);
+        if (change.action === "update") {
+          if (change.patch.parentId) requireReference(change.patch.parentId);
+          for (const id of change.patch.dependencies ?? []) requireReference(id);
+        }
+      }
+    }
     const prior = this.store.replay(requestId, changes, caller.actor);
     if (prior) return prior;
     for (const change of changes) {
@@ -75,7 +109,18 @@ export class HudService {
         : change.action === "update" ? change.patch.links?.map(link => link.target) ?? [] : change.action === "note" ? change.references : [];
       for (const ref of refs) if (!retained.has(canonical(ref))) await this.validateReference(ref, invocation);
     }
-    return this.store.apply(requestId, changes, caller.actor);
+    return this.store.apply(requestId, changes, caller.actor, after => {
+      if (caller.role === "admin") return;
+      const items = new Map(after.map(item => [item.id, item]));
+      for (const change of changes) {
+        const item = items.get(change.id)!;
+        for (const id of [item.parentId, ...item.dependencies]) {
+          if (!id) continue;
+          const referenced = items.get(id)!;
+          if (!this.visible(caller, referenced)) throw new Error(`hud_work_scope: Work item is outside this Bot's visible scope: ${id}`);
+        }
+      }
+    });
   }
   async resolve(workItemId: string | undefined, invocation?: InvocationContext): Promise<{ context: WorkContext | null }> {
     const caller = await this.caller(invocation);
@@ -88,23 +133,25 @@ export class HudService {
       }
     }
     if (!id) return { context: null };
-    const item = this.store.get(id);
+    const item = this.requireVisible(caller, id);
     if (item.contentClearedAt) throw new Error("work_content_cleared: choose new Work before dispatch");
     if (["completed", "cancelled"].includes(item.state)) throw new Error("work_closed: clear Chat focus, choose another item or reopen this work before dispatch");
     return { context: { workItemId: id, scopeRevision: item.scopeRevision, source: workItemId ? "explicit" : "focus" } };
   }
   async resources(id: string, after: number, limit: number, invocation?: InvocationContext) {
-    await this.caller(invocation);
-    const item = this.store.get(id);
+    const caller = await this.caller(invocation);
+    const item = this.requireVisible(caller, id);
+    const focuses = caller.actor.kind === "bot" && caller.role === "manager"
+      ? this.store.focusesForBot(id, caller.actor.botId, caller.actor.mainThreadId) : this.store.focuses(id);
     try {
       const workers = workAdmissionPage.parse(await socketCall(socketPath("worker", this.env), "tools/call", {
         name: "worker_work_list", arguments: { workItemId: id, after, limit }, ...(invocation ? { invocation } : {}),
       }, { timeoutMs: 20_000 }));
-      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses: this.store.focuses(id), workers,
-        observation: { state: "available" as const, at: Date.now(), issue: null, visibility: invocation?.botId ? "own_bot" as const : "all" as const } };
+      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses, workers,
+        observation: { state: "available" as const, at: Date.now(), issue: null, visibility: caller.role === "manager" ? "own_bot" as const : "all" as const } };
     } catch {
-      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses: this.store.focuses(id), workers: null,
-        observation: { state: "unavailable" as const, at: Date.now(), issue: "Worker associations unavailable; retained work remains authoritative", visibility: invocation?.botId ? "own_bot" as const : "all" as const } };
+      return { workItemId: id, scopeRevision: item.scopeRevision, links: item.links, focuses, workers: null,
+        observation: { state: "unavailable" as const, at: Date.now(), issue: "Worker associations unavailable; retained work remains authoritative", visibility: caller.role === "manager" ? "own_bot" as const : "all" as const } };
     }
   }
 

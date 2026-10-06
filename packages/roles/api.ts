@@ -28,7 +28,8 @@ const fragment = z.strictObject({ id, categoryId: id, title, description, body, 
 const category = z.strictObject({ id, title, description, enabled: z.boolean(), fragments: z.array(fragment), ...stamps });
 const index = z.number().int().nonnegative().describe("Zero-based position within the category.");
 const role = z.strictObject({ id: roleId, name: roleName, description: roleDescription, revision, ...stamps });
-const catalog = z.strictObject({ revision: catalogRevision, defaultRoleId: roleId.nullable(), workerDefaultRoleId: roleId.nullable(), roles: z.array(role) });
+const catalog = z.strictObject({ revision: catalogRevision, defaultRoleId: roleId.nullable(), workerDefaultRoleId: roleId.nullable(),
+  managerRoleId: roleId, adminRoleId: roleId, roles: z.array(role) });
 const launchSnapshot = role.extend({ botMarkdown: botMarkdown.optional().describe("Role-owned bot.md personality. Current reads always include it; absent on older snapshots means empty. Captured verbatim in each Bot launch; empty disables the personality. Never included in Worker or injected CLI instructions."), categories: z.array(category), skills: z.array(skillRecord), mcpServers: z.array(mcpRecord), trustedProjects: z.array(trustedProjectRecord),
   disabledInternalMcpServers: z.array(z.string()).describe("Internal MCP server names disabled for this Role. Other configured internal MCP servers are enabled, including newly added ones."),
   internalMcpHarnesses: internalMcpHarnesses.optional().describe("Explicit harness allowlists for internal connections. Missing names are unrestricted; older snapshots without this map are unrestricted.") });
@@ -94,10 +95,16 @@ async function ensureRoleMcp(ctx: RolesContext, name?: string, definition?: z.in
 }
 
 export const rolesSnapshot = operation({
-  name: "roles_snapshot", description: "List Role metadata, per-role revisions, the Bot default Role ID and fixed Worker Role ID, and the catalog revision. workerDefaultRoleId names the fixed Worker Role for compatibility. Every successful write advances the catalog revision.",
+  name: "roles_snapshot", description: "List Role metadata, per-role revisions, the Bot default and canonical Manager, Worker and Admin Role IDs, and the catalog revision. workerDefaultRoleId names the fixed Worker Role for compatibility. Every successful write advances the catalog revision.",
   input: z.strictObject({}), output: catalog, annotations: { title: "List roles", readOnlyHint: true },
   standalone: standaloneReads,
   async call(ctx: RolesContext) { return ctx.store.catalog(); },
+});
+export const roleAccessIds = operation({
+  name: "role_access_ids", description: "Private-socket identity of the canonical Manager, Worker and Admin Roles for MCP authorization. Never infer access from mutable Role names or a caller-supplied ID.",
+  input: z.strictObject({}), output: z.strictObject({ managerRoleId: roleId, workerRoleId: roleId, adminRoleId: roleId }),
+  annotations: { readOnlyHint: true },
+  async call(ctx: RolesContext) { return ctx.store.accessRoleIds(); },
 });
 export const roleCreate = operation({
   name: "role_create", description: "Create a named Role with no resources or fragments and a starter bot.md personality, without changing the Bot default or fixed Worker Role. Supply botMarkdown to replace the starter; an empty string disables it. Pass the catalog revision from roles_snapshot. Names are unique case-insensitively.",
@@ -384,7 +391,7 @@ const packageApi: PackageApi<RolesContext, keyof typeof topics> = {
       input: stateApplyInput, output: stateReceipt, annotations: { destructiveHint: true, idempotentHint: true }, async call(ctx: RolesContext, input, invocation) { requireStateOperator(invocation); const result = await ctx.launches!.clear(input); ctx.changed?.(); return result; } }),
     operation({ name: "roles_state_receipt_get", description: "Read the durable receipt of exact retained Role launch cleanup, including partial or unknown outcomes. Local operator only.", input: z.strictObject({ requestId: z.uuid() }), output: z.strictObject({ receipt: stateReceipt.nullable() }), annotations: { readOnlyHint: true },
       async call(ctx: RolesContext, { requestId }, invocation) { requireStateOperator(invocation); return { receipt: ctx.launches!.journal.receipt(requestId) }; } }),
-    rolesSnapshot, roleCreate, roleUpdate, roleSetDefault, roleDelete, roleInternalMcpList, roleInternalMcpUpdate, roleSnapshot, roleLaunchSnapshot, roleEditorSnapshot, rolePreview, roleLaunchPreview,
+    rolesSnapshot, roleAccessIds, roleCreate, roleUpdate, roleSetDefault, roleDelete, roleInternalMcpList, roleInternalMcpUpdate, roleSnapshot, roleLaunchSnapshot, roleEditorSnapshot, rolePreview, roleLaunchPreview,
     roleShimList, roleShimCreate, roleShimUpdate, roleShimDelete, categoryCreate, categoryUpdate, categoryDelete, categoryReorder,
     fragmentCreate, fragmentUpdate, fragmentDelete, fragmentReorder, fragmentMove, skillCreate, skillUpdate, skillDelete, skillReorder,
     mcpServerCreate, mcpServerUpdate, mcpServerDelete, mcpServerReorder,

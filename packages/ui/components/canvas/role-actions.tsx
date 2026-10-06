@@ -345,7 +345,8 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
     if (!defaulting) return;
     const { id } = defaulting;
     const label = names.current.get(id) ?? "The Role";
-    catalogWrite("role_set_default", (held) => !held.roles.some((item) => item.id === id) ? "That Role was deleted." : held.defaultRoleId === id ? null : { roleId: id }, defaultKey(id))
+    catalogWrite("role_set_default", (held) => !held.roles.some((item) => item.id === id) ? "That Role was deleted."
+      : held.adminRoleId === id ? "Admin cannot be the ordinary Bot default." : held.defaultRoleId === id ? null : { roleId: id }, defaultKey(id))
       .then(() => { setDefaulting(null); toast.success(`“${label}” is now the Bot default`); }, (error) => toast.error(errorMessage(error)));
   };
 
@@ -355,7 +356,8 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
     const label = names.current.get(id) ?? "The Role";
     quiet.current.add(id);
     catalogWrite("role_delete", (held) => !held.roles.some((item) => item.id === id) ? null
-      : held.defaultRoleId === id || held.workerDefaultRoleId === id ? "The Bot default must be reassigned; the fixed Worker Role cannot be deleted." : { roleId: id }, `delete-role:${id}`)
+      : held.defaultRoleId === id || held.workerDefaultRoleId === id || held.managerRoleId === id || held.adminRoleId === id
+        ? "Canonical Roles and launch defaults cannot be deleted." : { roleId: id }, `delete-role:${id}`)
       .then(() => { setRemoving(null); discardDrafts(id); toast.success(`Deleted “${label}”`); }, (error) => { quiet.current.delete(id); toast.error(errorMessage(error)); });
   };
 
@@ -424,7 +426,7 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
       <DefaultDialog role={defaultTarget ?? null}
         botDefault={catalog?.roles.find((item) => item.id === catalog.defaultRoleId) ?? null} workerDefault={catalog?.roles.find((item) => item.id === catalog.workerDefaultRoleId) ?? null}
         pending={defaulting !== null && pending.has(`${catalogScope}:${defaultKey(defaulting.id)}`)} onConfirm={makeDefault} onClose={() => setDefaulting(null)} />
-      <DeleteRoleDialog role={removeTarget ?? null} defaults={{ bot: Boolean(removeTarget && removeTarget.id === catalog?.defaultRoleId), worker: Boolean(removeTarget && removeTarget.id === catalog?.workerDefaultRoleId) }}
+      <DeleteRoleDialog role={removeTarget ?? null} defaults={{ bot: Boolean(removeTarget && removeTarget.id === catalog?.defaultRoleId), worker: Boolean(removeTarget && removeTarget.id === catalog?.workerDefaultRoleId), canonical: Boolean(removeTarget && (removeTarget.id === catalog?.managerRoleId || removeTarget.id === catalog?.adminRoleId)) }}
         edits={removing !== null && drafted.has(removing)}
         pending={removing !== null && pending.has(`${catalogScope}:delete-role:${removing}`)} onConfirm={removeRole} onClose={() => setRemoving(null)} />
     </RoleActionsContext>

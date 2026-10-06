@@ -208,8 +208,11 @@ test("an uncertain upload finish is recovered by status without re-finishing", a
 
 test("every Bots operation has dedicated controls or is exposed by the scoped workbench", async () => {
   const api = await readFile(new URL("../../bots/api.ts", import.meta.url), "utf8");
+  const manifest = await readFile(new URL("../../bots/api.yaml", import.meta.url), "utf8");
   const names = [...api.matchAll(/name: "((?:bot|chat|voice)_[a-z_]+)"/g)].map((match) => match[1]);
   assert.ok(names.length >= 40);
-  for (const name of names) assert.ok(botControlOperations.has(name) || name.startsWith("chat_") || name === "voice_speak", `${name} needs a deliberate UI home`);
+  assert.ok(names.includes("bot_admin_start"));
+  assert.ok(!manifest.includes("bot_admin_start"), "Admin launch remains private-socket-only and has no UI control");
+  for (const name of names) assert.ok(botControlOperations.has(name) || name.startsWith("chat_") || name === "voice_speak" || name === "bot_admin_start", `${name} needs a deliberate UI home`);
   for (const name of botControlOperations) assert.ok(names.includes(name), `${name} must still exist`);
 });

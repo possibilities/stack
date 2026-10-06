@@ -2,6 +2,7 @@ import { botInstance, parseBotMcpIdentity, parseWorkerMcpIdentity } from "./bot-
 import { socketCall } from "./socket.js";
 import { socketPath } from "./workspace.js";
 import type { InvocationContext } from "./operation.js";
+import type { PackageRole } from "./role-grants.js";
 
 export type McpIdentity = { botId: string; instance: string } | { workerId: string; instance: string } | null;
 
@@ -36,6 +37,26 @@ export async function verifyMcpIdentity(identity: Exclude<McpIdentity, null>, en
         !runtimes.runtimes.some(runtime => runtime.id === status.worker.accountId && runtime.state === "running" && runtime.instance === identity.instance))
       throw new Error("worker MCP connection is no longer bound to a live Worker session");
   }
+}
+
+/** Resolve only server-owned, immutable launch identities. A Role name or MCP metadata is never authority. */
+export async function packageRole(identity: McpIdentity, env: NodeJS.ProcessEnv): Promise<PackageRole> {
+  if (!identity) return "admin";
+  if ("workerId" in identity) return "worker";
+  const [listed, ids] = await Promise.all([
+    socketCall(socketPath("bots", env), "tools/call", { name: "bot_list", arguments: {} }, { timeoutMs: 2_000 }) as Promise<{
+      bots: Array<{ id: string; roleId: string | null; state: string; url: string | null; recoveryIssue: string | null }>;
+    }>,
+    socketCall(socketPath("roles", env), "tools/call", { name: "role_access_ids", arguments: {} }, { timeoutMs: 2_000 }) as Promise<{
+      managerRoleId: string; adminRoleId: string;
+    }>,
+  ]);
+  const bot = listed.bots.find(entry => entry.id === identity.botId);
+  if (!bot || bot.state !== "running" || bot.recoveryIssue || !bot.url || botInstance(bot.url) !== identity.instance)
+    throw new Error("Bot role authority is no longer bound to this live instance");
+  if (bot.roleId === ids.adminRoleId) return "admin";
+  if (bot.roleId === ids.managerRoleId) return "manager";
+  return "unassigned";
 }
 
 export function mcpInvocation(identity: McpIdentity, meta: unknown): InvocationContext {

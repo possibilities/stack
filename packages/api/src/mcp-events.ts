@@ -4,7 +4,7 @@ import type { InvocationContext } from "./operation.js";
 import type { McpEventSubscriptions } from "./mcp-subscriptions.js";
 import { currentMcpCatalog, currentWorkerCatalog, type SocketCatalog } from "./exposure.js";
 import { listenInput } from "./occurrence-subscriptions.js";
-import { mcpInvocation, parseMcpBinding, verifyMcpIdentity } from "./mcp-authority.js";
+import { mcpInvocation, packageRole, parseMcpBinding, verifyMcpIdentity } from "./mcp-authority.js";
 
 export const subscriptionTools: Tool[] = [
   { name: "events_listen", description: "Attach a typed occurrence source to this verified Bot Chat or Worker. Stack owns polling, durable intake and cursor recovery. native uses Codex start-or-steer, or a recorded Worker follow-up after its active prompt ends. interrupt explicitly cancels a Worker's active prompt first. Worker intake is not native acknowledgement or consumption. Repeating identical arguments preserves the existing cursor; unknown deliveries never replay automatically.", inputSchema: {
@@ -77,6 +77,7 @@ export const mcpEventRelayInput = z.strictObject({
 export async function relayMcpEvent(service: McpEventSubscriptions, input: z.infer<typeof mcpEventRelayInput>, root: string, env: NodeJS.ProcessEnv): Promise<object> {
   const identity = parseMcpBinding(input.binding, env);
   await verifyMcpIdentity(identity, env);
+  if (await packageRole(identity, env) !== "admin") throw new Error("event relay is not granted to this role");
   const invocation = mcpInvocation(identity, input);
   if ("botId" in identity) await service.validateInvocation(invocation);
   const result = await subscriptionService(service, root, env)(input.pkg, input.tool, input.arguments, invocation, new AbortController().signal);

@@ -12,7 +12,7 @@ import type { SettingsView } from "@stack/settings";
 import type { Orientation } from "../src/orientation.js";
 
 const fakeBin = fileURLToPath(new URL("../../test/fixtures/fake-app-server.mjs", import.meta.url));
-type View = { id: string; pid: number | null; cwd: string; url: string | null; state: string; account: string | null; runningAccount: string | null; mainThreadId: string | null; orientation: Orientation | null; settings: { model: string; reasoningEffort: string; sandboxMode: string; approvalPolicy: string } };
+type View = { id: string; pid: number | null; cwd: string; url: string | null; state: string; account: string | null; runningAccount: string | null; mainThreadId: string | null; roleId: string | null; orientation: Orientation | null; settings: { model: string; reasoningEffort: string; sandboxMode: string; approvalPolicy: string } };
 function call(socket: string, name: string, args: Record<string, unknown> = {}): Promise<unknown> {
   return socketCall(socket, "tools/call", { name, arguments: args }, { timeoutMs: 30_000 });
 }
@@ -31,7 +31,8 @@ test("bots own the complete app-server lifecycle on one socket", { timeout: 120_
   const otherAccount = store.addAccount(JSON.stringify({ tokens: { refresh_token: "other", access_token: "access", id_token: "fixture.jwt.signature" } })).id;
   store.close();
   const roles = new RoleStore(stateDir);
-  roles.role(roles.catalog().defaultRoleId!).update(0, { name: "Fixture" });
+  const fixture = roles.createRole(roles.catalog().revision, "Fixture");
+  roles.setDefault(fixture.revision, fixture.roles.at(-1)!.id);
   roles.close();
   const env = { ...process.env, STACK_STATE_DIR: stateDir };
   const auth = await serveApi({ name: "auth", transport: "socket", env });
@@ -266,6 +267,22 @@ test("bots own the complete app-server lifecycle on one socket", { timeout: 120_
     await assert.rejects(lstat(named.cwd), /ENOENT/);
     await call(socket, "bot_remove", { id: first.id });
     await assert.rejects(lstat(first.cwd), /ENOENT/);
+    const accessStore = new RoleStore(stateDir);
+    const { adminRoleId } = accessStore.accessRoleIds();
+    accessStore.close();
+    await assert.rejects(call(socket, "bot_admin_start", { id: "admin-proof", account, adminReason: "too short" }), /adminReason/);
+    await assert.rejects(socketCall(socket, "tools/call", { name: "bot_admin_start",
+      arguments: { id: "admin-proof", account, adminReason: "operator inspection" },
+      invocation: { transport: "mcp", botId: "bot-1", instance: "forged", threadId: "main", sessionId: null } }), /private local operator socket/);
+    const admin = await call(socket, "bot_admin_start", { id: "admin-proof", account, adminReason: "operator inspection" }) as View;
+    assert.equal(admin.roleId, adminRoleId);
+    const persisted = new StateStore(stateDir);
+    assert.equal(persisted.servers().find(server => server.id === admin.id)?.adminReason, "operator inspection");
+    persisted.close();
+    await call(socket, "bot_stop", { id: admin.id });
+    const ordinary = await call(socket, "bot_start", { id: admin.id, account }) as View;
+    assert.equal(ordinary.roleId, fixture.roles.at(-1)!.id, "ordinary restart returns to the Bot default");
+    await call(socket, "bot_remove", { id: admin.id });
     await call(auth.socketPath ?? "", "account_remove", { id: account });
     assert.deepEqual((await call(socket, "bot_list") as { bots: View[] }).bots, []);
     await assert.rejects(lstat(second.cwd), /ENOENT/);

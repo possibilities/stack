@@ -130,7 +130,7 @@ test("inject provisions missing defaults without a server and regenerates capabi
     let initial: RoleCatalog;
     try {
       initial = JSON.parse(JSON.stringify(store.catalog()));
-      assert.deepEqual(initial.roles.map(role => role.name), ["Manager", "Worker"]);
+      assert.deepEqual(initial.roles.map(role => role.name), ["Manager", "Worker", "Admin"]);
       assert.equal(store.defaultSnapshot().name, "Manager");
       assert.equal(store.launchSnapshot(undefined, "worker").name, "Worker");
     } finally { store.close(); }

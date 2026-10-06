@@ -46,7 +46,8 @@ export function RoleCatalogWindow() {
           <ol aria-label="Roles" className="flex flex-col">
             {catalog.roles.map((role) => (
               <RoleRow key={role.id} role={role} selected={role.id === view.roleId} isDefault={role.id === catalog.defaultRoleId}
-                isWorkerDefault={role.id === catalog.workerDefaultRoleId} connected={connected} />
+                isWorkerDefault={role.id === catalog.workerDefaultRoleId} isAdmin={role.id === catalog.adminRoleId}
+                isCanonical={role.id === catalog.managerRoleId || role.id === catalog.adminRoleId} connected={connected} />
             ))}
           </ol>
           {orphaned.map((id) => (
@@ -59,7 +60,7 @@ export function RoleCatalogWindow() {
             </Alert>
           ))}
           <p className="px-0.5 text-[0.66rem] text-pretty text-muted-foreground">
-            New Bots use the Bot default{view.defaultRole ? ` “${view.defaultRole.name}”` : ""}. New Workers always use the fixed Worker Role{view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""}. Editing a Role changes later launches only; running sessions keep their snapshots.
+            New Bots use the Bot default{view.defaultRole ? ` “${view.defaultRole.name}”` : ""}. New Workers always use the fixed Worker Role{view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""}. Admin requires a separate local operator start. Editing a Role changes later launches only; running sessions keep their snapshots.
           </p>
         </>
       ) : catalog ? (
@@ -79,7 +80,7 @@ export function RoleCatalogWindow() {
   );
 }
 
-function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { role: Role; selected: boolean; isDefault: boolean; isWorkerDefault: boolean; connected: boolean }) {
+function RoleRow({ role, selected, isDefault, isWorkerDefault, isAdmin, isCanonical, connected }: { role: Role; selected: boolean; isDefault: boolean; isWorkerDefault: boolean; isAdmin: boolean; isCanonical: boolean; connected: boolean }) {
   const actions = useRoleActions();
   const { select, flash } = useWorkbench();
   const node = { kind: "role", id: role.id } as const;
@@ -97,6 +98,7 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
           <span className="truncate text-[0.82rem] font-semibold tracking-tight">{role.name}</span>
           {isDefault ? <span className={cn(chip, "bg-success/15 text-success")} title="Later Bot launches use this Role">Bot default</span> : null}
           {isWorkerDefault ? <span className={cn(chip, "bg-success/15 text-success")} title="Every new Worker uses this fixed Role">Worker Role</span> : null}
+          {isAdmin ? <span className={cn(chip, "bg-warning/15 text-warning")} title="Started explicitly by the local operator">Admin Role</span> : null}
           {selected ? <span className={cn(chip, "bg-pkg-roles/15 text-pkg-roles")} title="The Roles windows show and edit this Role">Editing</span> : null}
           {dirty ? <span role="img" aria-label="Unsaved changes" className="size-1.5 shrink-0 rounded-full bg-pkg-roles" /> : null}
         </span>
@@ -110,15 +112,15 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
         <DropdownMenuContent align="end" className="min-w-48">
           <DropdownMenuGroup>
             <DropdownMenuItem disabled={!connected} onClick={() => actions.openIn(role.id, { kind: "role", id: role.id })}><PencilIcon />Edit details</DropdownMenuItem>
-            <DropdownMenuItem disabled={!connected || isDefault} onClick={() => actions.confirmDefault(role.id)}><StarIcon />{isDefault ? "Bot default" : "Make Bot default…"}</DropdownMenuItem>
+            <DropdownMenuItem disabled={!connected || isDefault || isAdmin} onClick={() => actions.confirmDefault(role.id)}><StarIcon />{isDefault ? "Bot default" : isAdmin ? "Admin cannot be the Bot default" : "Make Bot default…"}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => select(node)}><ScanSearchIcon />Inspect record</DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" disabled={!connected || isDefault || isWorkerDefault} onClick={() => actions.confirmDeleteRole(role.id)}>
+          <DropdownMenuItem variant="destructive" disabled={!connected || isDefault || isWorkerDefault || isCanonical} onClick={() => actions.confirmDeleteRole(role.id)}>
             <Trash2Icon />
             <span className="flex flex-col">
               <span>Delete…</span>
-              {isDefault || isWorkerDefault ? <span className="text-[0.66rem] font-normal text-muted-foreground">{defaultDeleteHint(isDefault, isWorkerDefault)}</span> : null}
+              {isDefault || isWorkerDefault || isCanonical ? <span className="text-[0.66rem] font-normal text-muted-foreground">{isCanonical ? "Canonical Roles cannot be deleted." : defaultDeleteHint(isDefault, isWorkerDefault)}</span> : null}
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -131,7 +133,7 @@ function RoleRow({ role, selected, isDefault, isWorkerDefault, connected }: { ro
  * Explains who receives the selected Role and offers to make it the Bot default.
  */
 export function DefaultNote() {
-  const { status, remote } = useStack();
+  const { status, remote, roleCatalog } = useStack();
   const actions = useRoleActions();
   const view = useRoleView();
   if (view.state !== "ready" || !view.role || (view.isDefault && view.isWorkerDefault)) return null;
@@ -141,13 +143,14 @@ export function DefaultNote() {
     ? "It is the fixed Worker Role used by every new Worker."
     : `New Workers use the fixed Worker Role${view.workerDefaultRole ? ` “${view.workerDefaultRole.name}”` : ""}.`;
   const id = view.role.id;
+  const isAdmin = id === roleCatalog.data?.adminRoleId;
   return (
     <Alert className="border-pkg-roles/30 bg-pkg-roles/5">
       <InfoIcon className="text-pkg-roles" />
       <AlertDescription className="flex flex-col gap-1.5">
         <span>{bots} {workers} Edits reach later launches only; running sessions keep their snapshot.</span>
         <span className="flex flex-wrap gap-1.5">
-          {view.isDefault ? null : (
+          {view.isDefault || isAdmin ? null : (
             <Button size="xs" variant="outline" disabled={!connected} onClick={() => actions.confirmDefault(id)}>
               <StarIcon data-icon="inline-start" />Make Bot default
             </Button>

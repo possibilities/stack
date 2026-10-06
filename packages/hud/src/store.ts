@@ -80,7 +80,7 @@ export class HudStore {
   }
 
   /** The receipt, hidden metadata, journal, hierarchy and revisions have one commit boundary. */
-  apply(requestId: string, changes: Change[], actor: Actor): Receipt {
+  apply(requestId: string, changes: Change[], actor: Actor, validateFinal?: (items: WorkItem[]) => void): Receipt {
     const digest = hash({ changes, actor });
     const changed = new Set<string>();
     const receipt = this.transaction(() => {
@@ -135,6 +135,7 @@ export class HudStore {
       }
       const after = this.all();
       this.validateGraph(after);
+      validateFinal?.(after);
       // Reverse edges from both graphs include old parents after a move. Notify derived
       // readiness transitively without revising those records or depending on insertion order.
       const dependents = new Map<string, Set<string>>();
@@ -195,8 +196,9 @@ export class HudStore {
     }
   }
 
-  list(input: ListInput) {
+  list(input: ListInput, visible: (item: WorkItem) => boolean = () => true) {
     const entries = this.all().filter(item => item.sequence > input.after
+      && visible(item)
       && (input.parentId === undefined || item.parentId === input.parentId)
       && (!input.states || input.states.includes(item.state)) && (!input.attention || item.attention === input.attention)
       && (!input.query || `${item.title}\n${item.summary}\n${item.objective}\n${item.labels.join(" ")}`.toLowerCase().includes(input.query.toLowerCase()))
@@ -323,6 +325,16 @@ export class HudStore {
     const count = this.db.prepare("SELECT COUNT(*) AS n FROM focus WHERE json_extract(body,'$.workItemId')=?").get(id) as { n: number };
     const entries = this.db.prepare("SELECT body FROM focus WHERE json_extract(body,'$.workItemId')=? ORDER BY key LIMIT 100").all(id).map(decode<Focus>);
     return { entries, total: count.n, truncated: count.n > entries.length };
+  }
+  focusesForBot(id: string, botId: string, mainThreadId: string): { entries: Focus[]; total: number; truncated: boolean } {
+    const where = "json_extract(body,'$.workItemId')=? AND json_extract(body,'$.botId')=? AND json_extract(body,'$.mainThreadId')=?";
+    const count = this.db.prepare(`SELECT COUNT(*) AS n FROM focus WHERE ${where}`).get(id, botId, mainThreadId) as { n: number };
+    const entries = this.db.prepare(`SELECT body FROM focus WHERE ${where} ORDER BY key LIMIT 100`).all(id, botId, mainThreadId).map(decode<Focus>);
+    return { entries, total: count.n, truncated: count.n > entries.length };
+  }
+  hasBotFocus(id: string, botId: string, mainThreadId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM focus WHERE json_extract(body,'$.workItemId')=? AND json_extract(body,'$.botId')=? AND json_extract(body,'$.mainThreadId')=? LIMIT 1")
+      .get(id, botId, mainThreadId));
   }
   setFocus(input: { requestId: string; target: ChatTarget; workItemId: string | null; expectedRevision: number }, actor: Actor): Receipt {
     const digest = hash({ action: "focus", ...input, actor });
