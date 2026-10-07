@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SettingEvidence, SettingsBackend, SettingValues } from "./schema.js";
 
-export const CODEX_REVISION = "3aae20d1ad1d41734b7303b4f0a4bfe95eb56d8c";
+export const CODEX_REVISION = "6ddf4f91251200f5e330d35a8e142fb4b435baa1";
 const text = z.string().min(1).max(1_024);
 const prompt = z.string().max(262_144);
 const tokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -41,7 +41,7 @@ export const botDefinitions: Record<string, Definition> = {
   "voice.realtimeEndInstructions": item("Call-end instructions", "Optional native instructions to the working agent when realtime ends. Unset adds nothing.", "Voice instructions", prompt),
   "voice.includeStartupContext": item("Startup context", "Native startup context switch. Unset is omitted; Stack does not reproduce AgentVoice's false default or append-slot behavior.", "Voice", z.boolean()),
   "voice.delegationAckFiller": item("Delegation acknowledgement", "Native speech filler selection; unset follows the native service.", "Voice", z.boolean()),
-  "voice.flushTranscriptTailOnSessionEnd": item("Flush transcript tail", "Native end-of-call transcript delivery; may result in working-agent activity after hangup. Unset follows Codex.", "Voice", z.boolean()),
+  "voice.flushTranscriptTailOnSessionEnd": item("Flush transcript tail", "Native end-of-call transcript persistence without working-agent inference; registered middleware admits the tail before history is written. Unset follows Codex.", "Voice", z.boolean()),
   "voice.codexResponseHandoffMode": item("Response handoff", "Native orchestrator response handoff mode; no client-managed handoff implementation.", "Voice advanced", z.enum(["thinking", "commentary", "bemTags"])),
   "voice.codexResponsesAsItems": item("Responses as items", "Native response-item delivery selection.", "Voice advanced", z.boolean()),
   "voice.codexResponseItemPrefix": item("Response item prefix", "Explicit prefix for native response items.", "Voice advanced", prompt),

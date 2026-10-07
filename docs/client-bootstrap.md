@@ -222,8 +222,8 @@ The archive contains files/directories only, with no enclosing directory:
 - Prebuilt platform packages, UI and dependencies, with any workspace links
   materialized safely, and a durable Node runtime needed by the launcher.
 - `runtime/codexnk-install.py`: the compatible reviewed codexnk owner installer.
-  It receives `--install --tag codexnk-v0.1.7 --sha
-  3aae20d1ad1d41734b7303b4f0a4bfe95eb56d8c`. The consumer clears relocation and
+  It receives `--install --tag codexnk-v0.1.8 --sha
+  6ddf4f91251200f5e330d35a8e142fb4b435baa1`. The consumer clears relocation and
   preserves `~/.local/libexec/codexnk/codex`. Pin advances remain coordinated with
   Stack's existing installer and AgentStart. This is consumption, not a fork patch.
 

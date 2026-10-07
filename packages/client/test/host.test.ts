@@ -15,7 +15,7 @@ async function bundle(root: string, unsafe = false) {
   const source = join(root, `source-${randomUUID()}`); await mkdir(join(source, "bin"), { recursive: true });
   await mkdir(join(source, "runtime"));
   const manifest = bundleSchema.parse({ version: "test-1", platform: process.platform, architecture: process.arch,
-    codexnk: { tag: "codexnk-v0.1.7", sha: "3aae20d1ad1d41734b7303b4f0a4bfe95eb56d8c" } });
+    codexnk: { tag: "codexnk-v0.1.8", sha: "6ddf4f91251200f5e330d35a8e142fb4b435baa1" } });
   await writeFile(join(source, "stack-release.json"), JSON.stringify(manifest));
   await writeFile(join(source, "bin", "stack"), "#!/bin/sh\nexit 0\n");
   // Release producer fixture, not a mocked host: exercises the real installer
