@@ -1,4 +1,4 @@
-# 127. QR invitations and delegated device enrollment
+# 176. QR invitations and delegated device enrollment
 
 Status: accepted, 2026-09-29. Extends [ADR 0091](0091-shared-access-and-direct-tailnet-ingress.md). The manual pairing protocol and [ADR 0101](0101-remote-uix-through-access.md)'s remote browser boundary remain available.
 

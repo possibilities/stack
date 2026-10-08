@@ -1,4 +1,4 @@
-# 117. Package-owned CLI commands
+# 175. Package-owned CLI commands
 
 Status: accepted, 2026-09-28. Separates the transport-serving launcher in [ADR 0001](0001-package-apis.md) from human-facing package commands.
 

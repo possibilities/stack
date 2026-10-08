@@ -1,8 +1,10 @@
-# 111. Keep the following-feed archive separate from Brain
+# 174. Keep the following-feed archive separate from Brain
 
 Status: accepted, 2026-09-28.
 
 Renumbered from 0110 after concurrent integration with the already-published Proc authority decision.
+Its later collision with the Proc space's 0111 identifier is corrected to 0174;
+the decision and its original acceptance date are unchanged.
 
 ## Decision
 

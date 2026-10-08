@@ -1,4 +1,4 @@
-# 60. Resizable windows and a compact Fleet
+# 173. Resizable windows and a compact Fleet
 
 Status: accepted, 2026-09-25; amended by [ADR 0089](0089-window-sizes-in-grid-cells.md). Amends [ADR 0058](0058-open-bench-and-global-tools.md)
 and the Fleet presentation in [ADR 0056](0056-fleet-usage-catalogs-and-bot-controls.md).

@@ -30,7 +30,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0024 | [Make the first canvas experiment a live, read-only workbench](0024-live-canvas-workbench.md) | Accepted |
 | 0025 | [Verify recovered app-server ownership and use per-launch sockets](0025-app-server-process-ownership.md) | Accepted |
 | 0026 | [Operate the auth Package API from the canvas](0026-canvas-auth-controls.md) | Accepted |
-| 0026 | [Bind the first durable UI thread as a Server's main thread](0026-lazy-server-main-thread.md) | Accepted |
 | 0027 | [Materialize the default capabilities bundle for each managed Codex launch](0027-default-capabilities-bundle.md) | Accepted |
 | 0028 | [Dial native realtime into the existing main thread](0028-main-thread-voice-call.md) | Accepted |
 | 0029 | [Make Bots the sole managed Codex lifecycle](0029-bots-own-codex-lifecycle.md) | Accepted |
@@ -40,7 +39,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0033 | [Deliver Package API event snapshots into subscribed Bot threads](0033-agent-facing-event-subscriptions.md) | Accepted |
 | 0034 | [Select project MCP through explicit Role trust](0034-explicit-project-trust-for-role-bots.md) | Accepted |
 | 0035 | [Launch Bots with full access by default](0035-full-access-bot-default.md) | Accepted |
-| 0035 | [A call dock and shared voice state on the canvas](0035-voice-call-dock.md) | Accepted |
 | 0036 | [Bind worker catalogs to isolated native ACP accounts](0036-account-bound-acp-foundation.md) | Accepted |
 | 0037 | [Snapshot API-owned launch defaults for each Bot](0037-bot-launch-settings.md) | Accepted |
 | 0038 | [Keep ACP Worker sessions and turns durable in owned worktrees](0038-durable-acp-worker-execution.md) | Accepted |
@@ -66,7 +64,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0058 | [One open bench with global System and API tools](0058-open-bench-and-global-tools.md) | Accepted |
 | 0059 | [Isolate Brain and make device clients Stack applications](0059-isolated-brain-and-platform-clients.md) | Accepted |
 | 0060 | [Share the Worker lifecycle with native Claude SDK sessions](0060-claude-sdk-workers.md) | Accepted |
-| 0060 | [Resizable windows and a compact Fleet](0060-resizable-windows-and-compact-fleet.md) | Accepted |
 | 0061 | [A Spaces menu apart from edge-anchored tools](0061-spaces-menu-and-edge-tools.md) | Accepted |
 | 0062 | [Uniform usage limits and Grok Bot on the Grok Worker card](0062-usage-limits-and-grok-bot-card.md) | Accepted |
 | 0063 | [Usage subscription end and sample age](0063-usage-subscription-end-and-sample-age.md) | Accepted |
@@ -118,13 +115,11 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0109 | [A Brain space, and Brain change notices on the local WebSocket](0109-brain-space.md) | Accepted |
 | 0110 | [Proc schedules retain durable caller authority](0110-proc-durable-caller-authority.md) | Accepted |
 | 0111 | [A Proc space for schedules, runs and their output](0111-proc-space.md) | Accepted |
-| 0111 | [Keep the following-feed archive separate from Brain](0111-xcom-following-archive.md) | Accepted |
 | 0112 | [Enforce research network authority at execution and connection boundaries](0112-research-network-egress.md) | Accepted |
 | 0113 | [Authenticate ordinary loopback control clients](0113-authenticated-local-control.md) | Accepted |
 | 0114 | [Select Worker-visible reads explicitly](0114-explicit-worker-disclosure.md) | Accepted |
 | 0115 | [Name the process package Serve and the canvas package UI](0115-serve-and-ui-names.md) | Accepted |
 | 0116 | [Serve the UI at the origin root](0116-ui-at-root.md) | Accepted |
-| 0117 | [Package-owned CLI commands](0117-package-cli-exports.md) | Accepted |
 | 0117 | [Rename the project identity to Stack](0117-stack-project-identity.md) | Accepted |
 | 0118 | [Named Roles with one launch default](0118-multiple-roles-and-default.md) | Accepted |
 | 0119 | [Per-Role internal MCP enablement](0119-per-role-internal-mcp.md) | Accepted |
@@ -135,7 +130,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0124 | [Separate Manager and Worker launch defaults with instruction-capable Workers](0124-manager-and-worker-launch-defaults.md) | Accepted |
 | 0125 | [The Roles space sets the Worker default](0125-roles-space-worker-default-control.md) | Accepted |
 | 0126 | [The Roles space edits fragment conditions and previews a rendering context](0126-roles-space-fragment-conditions.md) | Accepted |
-| 0127 | [QR invitations and delegated device enrollment](0127-qr-device-enrollment.md) | Accepted |
 | 0127 | [The Roles space manages Role shims](0127-roles-space-role-shims.md) | Accepted |
 | 0128 | [Manage explicit runtime settings with native defaults and separate application evidence](0128-managed-runtime-settings.md) | Accepted |
 | 0129 | [Codex tools in the default MCP fleet](0129-codex-tools-in-default-mcp-fleet.md) | Unstated |
@@ -150,7 +144,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0138 | [Global developer mode gates upstream harness-release observations](0138-developer-mode-and-harness-releases.md) | Accepted |
 | 0139 | [Owner maintenance in existing spaces](0139-owner-maintenance-in-existing-spaces.md) | Accepted |
 | 0140 | [Use native stdio for Stack-provided MCP connections](0140-internal-mcp-over-stdio.md) | Accepted |
-| 0141 | [Retire Grok support without deleting stored data](0141-retire-grok-support.md) | Accepted |
 | 0141 | [Role-owned bot.md and fenced first-turn orientation](0141-role-bot-personality-and-orientation.md) | Accepted |
 | 0142 | [Retire exact Work bodies without deleting semantic identity](0142-exact-work-body-retirement.md) | Accepted |
 | 0143 | [Retire terminal Bot queue bodies with atomic admission evidence](0143-terminal-bot-queue-body-retirement.md) | Accepted |
@@ -166,7 +159,6 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0153 | [Exact closed-Worker state maintenance](0153-exact-worker-state-maintenance.md) | Accepted |
 | 0154 | [Coordinate Notification sends and one-shot dismissal watches in the Server](0154-notification-send-and-watch.md) | Accepted |
 | 0155 | [Correlate asynchronous admissions with exact completion and attention reads](0155-correlated-admission-watches.md) | Accepted |
-| 0155 | [Exact Browser provider maintenance](0155-exact-browser-provider-maintenance.md) | Accepted |
 | 0156 | [Content retention disclosure and publication maintenance](0156-content-retention-and-publication-maintenance.md) | Accepted |
 | 0157 | [Device-local clear requests and receipts](0157-device-local-clear-request-and-receipt.md) | Proposed |
 | 0158 | [Installation factory reset](0158-installation-factory-reset.md) | Accepted |
@@ -182,18 +174,32 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0168 | [Resolve Content transport configuration once](0168-shared-content-transport-configuration.md) | Accepted |
 | 0169 | [Discover Source remote-request history from its server owner](0169-source-server-request-history.md) | Accepted |
 | 0170 | [New Workers always use the canonical Worker Role](0170-fixed-worker-role.md) | Accepted |
+| 0171 | [Bind the first durable UI thread as a Server's main thread](0171-lazy-server-main-thread.md) | Accepted |
+| 0172 | [A call dock and shared voice state on the canvas](0172-voice-call-dock.md) | Accepted |
+| 0173 | [Resizable windows and a compact Fleet](0173-resizable-windows-and-compact-fleet.md) | Accepted |
+| 0174 | [Keep the following-feed archive separate from Brain](0174-xcom-following-archive.md) | Accepted |
+| 0175 | [Package-owned CLI commands](0175-package-cli-exports.md) | Accepted |
+| 0176 | [QR invitations and delegated device enrollment](0176-qr-device-enrollment.md) | Accepted |
+| 0177 | [Retire Grok support without deleting stored data](0177-retire-grok-support.md) | Accepted |
+| 0178 | [Exact Browser provider maintenance](0178-exact-browser-provider-maintenance.md) | Accepted |
 
-## Reused identifiers
+## Historical identifier corrections
 
-The following identifiers name more than one existing record. Use the linked filenames to disambiguate them until their identities and inbound references can be reviewed:
+On 2026-10-07, eight duplicate identifiers were resolved by assigning unused IDs
+0171–0178 to one record in each pair and updating its inbound links and labels.
+This changes record identity only, not decision text, acceptance dates, status or
+supersession scope. The paired records keep their existing IDs; the mappings
+below disambiguate older references. Git history retains the original filenames.
 
-- 0026: [0026-canvas-auth-controls.md](0026-canvas-auth-controls.md), [0026-lazy-server-main-thread.md](0026-lazy-server-main-thread.md)
-- 0035: [0035-full-access-bot-default.md](0035-full-access-bot-default.md), [0035-voice-call-dock.md](0035-voice-call-dock.md)
-- 0060: [0060-claude-sdk-workers.md](0060-claude-sdk-workers.md), [0060-resizable-windows-and-compact-fleet.md](0060-resizable-windows-and-compact-fleet.md)
-- 0111: [0111-proc-space.md](0111-proc-space.md), [0111-xcom-following-archive.md](0111-xcom-following-archive.md)
-- 0117: [0117-package-cli-exports.md](0117-package-cli-exports.md), [0117-stack-project-identity.md](0117-stack-project-identity.md)
-- 0127: [0127-qr-device-enrollment.md](0127-qr-device-enrollment.md), [0127-roles-space-role-shims.md](0127-roles-space-role-shims.md)
-- 0141: [0141-retire-grok-support.md](0141-retire-grok-support.md), [0141-role-bot-personality-and-orientation.md](0141-role-bot-personality-and-orientation.md)
-- 0155: [0155-correlated-admission-watches.md](0155-correlated-admission-watches.md), [0155-exact-browser-provider-maintenance.md](0155-exact-browser-provider-maintenance.md)
+| Former shared ID | Record retaining the ID | Renumbered record |
+| --- | --- | --- |
+| 0026 | [Canvas auth controls](0026-canvas-auth-controls.md) | [0171: Lazy Server main thread](0171-lazy-server-main-thread.md) |
+| 0035 | [Full-access Bot default](0035-full-access-bot-default.md) | [0172: Voice call dock](0172-voice-call-dock.md) |
+| 0060 | [Claude SDK Workers](0060-claude-sdk-workers.md) | [0173: Resizable windows and compact Fleet](0173-resizable-windows-and-compact-fleet.md) |
+| 0111 | [Proc space](0111-proc-space.md) | [0174: Xcom following archive](0174-xcom-following-archive.md) |
+| 0117 | [Stack project identity](0117-stack-project-identity.md) | [0175: Package CLI exports](0175-package-cli-exports.md) |
+| 0127 | [Roles space Role shims](0127-roles-space-role-shims.md) | [0176: QR device enrollment](0176-qr-device-enrollment.md) |
+| 0141 | [Role Bot personality and orientation](0141-role-bot-personality-and-orientation.md) | [0177: Retire Grok support](0177-retire-grok-support.md) |
+| 0155 | [Correlated admission watches](0155-correlated-admission-watches.md) | [0178: Exact Browser provider maintenance](0178-exact-browser-provider-maintenance.md) |
 
 New records must use an unused identifier. Preserve earlier records and their reasoning when a decision changes.

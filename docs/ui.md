@@ -47,7 +47,7 @@ Keep window implementation separate from bench layout:
    it, so live data growth does not rearrange neighboring spaces. People can
    resize any window, and moves and resizes snap to the dot grid (sizes to
    whole cells) unless Alt/Option is held; sizes persist as manual extents
-   ([ADR 0060](adr/0060-resizable-windows-and-compact-fleet.md)).
+   ([ADR 0173](adr/0173-resizable-windows-and-compact-fleet.md)).
 3. If it introduces a node kind, add that record reference in
    `packages/ui/lib/stack/types.ts` and give it a canvas destination in
    `packages/ui/lib/stack/spaces.ts`. Keep node key parsing and routing tests

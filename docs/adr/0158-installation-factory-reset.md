@@ -5,7 +5,7 @@
 Accepted, 2026-10-01, following human-approved F1–F6. Extends
 [0135](0135-owner-state-maintenance.md) and the scope boundaries in
 [0153](0153-exact-worker-state-maintenance.md),
-[0155](0155-exact-browser-provider-maintenance.md),
+[0178](0178-exact-browser-provider-maintenance.md),
 [0156](0156-content-retention-and-publication-maintenance.md) and
 [0152](0152-independent-client-bootstrap-and-ui-handoffs.md).
 Does not implement the proposed device protocol in

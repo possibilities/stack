@@ -1,7 +1,7 @@
 # 141. Role-owned bot.md and fenced first-turn orientation
 
 Status: accepted, 2026-09-30. Supersedes the first-UI-turn policy in
-[ADR 0026](0026-lazy-server-main-thread.md) and
+[ADR 0171](0171-lazy-server-main-thread.md) and
 [ADR 0043](0043-bot-chat-apis.md) **for newly created, account-bound Bots only**.
 Extends [ADR 0121](0121-roles-space-for-named-roles.md)'s Role editor and
 [ADR 0028](0028-main-thread-voice-call.md)'s initial voice eligibility. Preserves

@@ -1,4 +1,4 @@
-# 141. Retire Grok support without deleting stored data
+# 177. Retire Grok support without deleting stored data
 
 Status: accepted, 2026-09-30. Supersedes the Grok-specific portions of
 [ADR 0036](0036-account-bound-acp-foundation.md),

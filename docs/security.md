@@ -63,7 +63,7 @@ Brain's research database and content-addressed bytes are private Stack state un
 Chrome and Android pair through Access's authenticated tailnet ingress. Brain's backend Share listener is loopback-only (8877 by default); non-loopback binding is refused, and legacy shared tokens are not imported. Access verifies remote provenance and client scopes, stamps share attribution and filters status reads through client-bound receipts. Its `share_receive` and `share_read_states` socket seams are excluded from MCP and WebSocket. Client settings, Share outboxes and Share history use Stack application namespaces.
 
 QR enrollment adds one-use local invitations and explicit phone-sponsored device
-induction ([ADR 0127](adr/0127-qr-device-enrollment.md)). Native sponsors need the
+induction ([ADR 0176](adr/0176-qr-device-enrollment.md)). Native sponsors need the
 locally assigned `access:enroll` scope and a separate access-audience bearer.
 They can grant only requested scopes they hold, never enrollment authority. The
 target keeps its own secret and ephemeral signing key; request/receipt QRs contain no device credential.

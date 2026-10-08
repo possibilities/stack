@@ -1,6 +1,6 @@
 # 43. Expose sanctioned Codex chats through Bots
 
-Status: accepted, 2026-09-25. Extends [ADR 0029](0029-bots-own-codex-lifecycle.md) and [ADR 0026](0026-lazy-server-main-thread.md).
+Status: accepted, 2026-09-25. Extends [ADR 0029](0029-bots-own-codex-lifecycle.md) and [ADR 0171](0171-lazy-server-main-thread.md).
 
 Extended by [ADR 0055](0055-agent-tree-observability.md) for rich nested Bot subagent observations and their relationship to ACP Workers.
 

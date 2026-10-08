@@ -1,6 +1,6 @@
 # 89. Window sizes in whole grid cells
 
-Status: accepted, 2026-09-27. Amends the grid snapping of [ADR 0060](0060-resizable-windows-and-compact-fleet.md) and [ADR 0072](0072-fluid-drag-and-content-fit-groove.md).
+Status: accepted, 2026-09-27. Amends the grid snapping of [ADR 0173](0173-resizable-windows-and-compact-fleet.md) and [ADR 0072](0072-fluid-drag-and-content-fit-groove.md).
 
 ## Decision
 

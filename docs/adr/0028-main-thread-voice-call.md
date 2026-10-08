@@ -1,6 +1,6 @@
 # 28. Dial native realtime into the existing main thread
 
-Status: accepted, 2026-09-24. Extends [lazy main-thread binding](0026-lazy-server-main-thread.md) and [ADR 0024](0024-live-canvas-workbench.md)'s initial read-only canvas with an explicitly requested call control.
+Status: accepted, 2026-09-24. Extends [lazy main-thread binding](0171-lazy-server-main-thread.md) and [ADR 0024](0024-live-canvas-workbench.md)'s initial read-only canvas with an explicitly requested call control.
 
 The voice operations moved from the Codex Package API to Bots in [ADR 0029](0029-bots-own-codex-lifecycle.md); the single-call and main-thread behavior remains.
 

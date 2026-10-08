@@ -1,4 +1,4 @@
-# 26. Bind the first durable UI thread as a Server's main thread
+# 171. Bind the first durable UI thread as a Server's main thread
 
 Status: accepted, 2026-09-24. Supersedes [ADR 0005](0005-server-main-threads.md)'s thread allocation on Server launch; retains its single durable binding and no-substitution rule.
 

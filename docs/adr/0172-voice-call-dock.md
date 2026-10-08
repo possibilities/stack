@@ -1,4 +1,4 @@
-# 35. A call dock and shared voice state on the canvas
+# 172. A call dock and shared voice state on the canvas
 
 Status: accepted, 2026-09-24. Extends [ADR 0028](0028-main-thread-voice-call.md)'s main-thread voice call and replaces its fixed widget with canvas-wide entry points.
 

@@ -2,7 +2,7 @@
 
 Status: accepted, 2026-09-30. Extends [ADR 0003](0003-required-codexnk-runtime.md),
 [ADR 0101](0101-remote-uix-through-access.md), [ADR 0113](0113-authenticated-local-control.md)
-and [ADR 0127](0127-qr-device-enrollment.md). Qualifies ADR 0101's browser-kind-only
+and [ADR 0176](0176-qr-device-enrollment.md). Qualifies ADR 0101's browser-kind-only
 UI sessions: desktop clients may now establish scoped viewer sessions through a
 one-use handoff, not the legacy browser credential exchange.
 

@@ -1,7 +1,7 @@
 # 70. Windows grow with their content and push windows below
 
 Status: accepted, 2026-09-26. Amends the maximum-footprint rule of
-[ADR 0060](0060-resizable-windows-and-compact-fleet.md) and the fitted
+[ADR 0173](0173-resizable-windows-and-compact-fleet.md) and the fitted
 empty-state note of [ADR 0067](0067-one-accounts-window-and-bare-empty-states.md).
 
 ## Decision
