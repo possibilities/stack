@@ -90,6 +90,15 @@ test("Manager notifications remain owned by their Bot", async () => {
     assert.equal((await callAs(null, "notification_get", { id: sent.id }) as Notification).dismissedAt, null,
       "a second Manager's group does not replace the first Manager's notification");
     assert.equal((await callAs(null, "notification_get", { id: sibling.id }) as Notification).id, sibling.id);
+    const injectedManager: InvocationContext = { transport: "mcp", botId: null, instance: null, threadId: null, sessionId: null,
+      injected: { role: "manager", launch: "codex-AbC123" } };
+    const injected = await callAs(injectedManager, "notification_send", { title: "Local Manager", message: "Owned notice", subscribe: false }) as Send;
+    assert.equal((await callAs(injectedManager, "notification_get", { id: injected.id }) as Notification).id, injected.id);
+    await assert.rejects(callAs(injectedManager, "notification_get", { id: sent.id }), /another Manager/);
+    await assert.rejects(callAs(first, "notification_get", { id: injected.id }), /another Manager/);
+    await assert.rejects(callAs(injectedManager, "notification_send", { id: sent.id, title: "Question", message: "Choose", subscribe: false }), /owner_conflict/);
+    const injectedAdmin: InvocationContext = { ...injectedManager, injected: { role: "admin", launch: "codex-Def456" } };
+    assert.equal((await callAs(injectedAdmin, "notification_get", { id: sent.id }) as Notification).id, sent.id);
   } finally {
     await mcp.close(); await capability.close(); await owner.close();
     await notifications.close(); await roles.close(); await bots.close();

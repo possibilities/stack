@@ -21,19 +21,20 @@ export async function runMcpStdio(name: string, env: NodeJS.ProcessEnv = process
   if (!definition) throw new Error("unknown Stack MCP server");
   let identity: McpIdentity = null;
   let auth: LocalAuth | undefined;
-  let injectedRole: PackageRole | undefined;
+  let injected: { role: PackageRole; launch: string } | undefined;
   const kind = env.STACK_MCP_AUTHORITY;
   if (kind === "bot" || kind === "worker") {
     identity = parseMcpBinding(env.STACK_MCP_BINDING ?? "", env);
     if (("botId" in identity ? "bot" : "worker") !== kind || env.STACK_MCP_OPERATOR || env.STACK_MCP_INJECT_BINDING) throw new Error("ambiguous managed MCP authority");
   } else if (kind === "inject" && !env.STACK_MCP_BINDING && !env.STACK_MCP_OPERATOR) {
-    injectedRole = await verifyInjectedMcpBinding(env.STACK_MCP_INJECT_BINDING ?? "", env);
+    injected = await verifyInjectedMcpBinding(env.STACK_MCP_INJECT_BINDING ?? "", env);
   } else if (kind === "operator" && !env.STACK_MCP_BINDING && !env.STACK_MCP_INJECT_BINDING && env.STACK_MCP_OPERATOR) auth = new LocalAuth(env);
   else throw new Error("stdio MCP requires explicit launch authority");
   const checkAuthority = async () => {
     if (identity) await verifyMcpIdentity(identity, env);
-    else if (injectedRole) {
-      if (await verifyInjectedMcpBinding(env.STACK_MCP_INJECT_BINDING ?? "", env) !== injectedRole) throw new Error("injected Role authority changed");
+    else if (injected) {
+      const current = await verifyInjectedMcpBinding(env.STACK_MCP_INJECT_BINDING ?? "", env);
+      if (current.role !== injected.role || current.launch !== injected.launch) throw new Error("injected Role authority changed");
     }
     else auth!.operator(env.STACK_MCP_OPERATOR, "stdio");
   };
@@ -55,7 +56,7 @@ export async function runMcpStdio(name: string, env: NodeJS.ProcessEnv = process
   };
   const bridge = codexMcpDefinition(name);
   const native = bridge ? codexMcpServer(bridge, env, checkAuthority, identity, checkCatalogAuthority) : undefined;
-  const mcp = native?.mcp ?? packageMcpServer(name, definition.description, root, env, identity, checkAuthority, events, { checkCatalogAuthority }, injectedRole);
+  const mcp = native?.mcp ?? packageMcpServer(name, definition.description, root, env, identity, checkAuthority, events, { checkCatalogAuthority }, injected);
   const transport = new StdioServerTransport();
   let closing: Promise<void> | undefined;
   let finish!: () => void;

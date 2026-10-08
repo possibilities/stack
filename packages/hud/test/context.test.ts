@@ -57,6 +57,10 @@ test("verified Chat focus inherits only sanctioned ancestry and captures explici
     await call("work_create", { requestId: randomUUID(), id: other, title: "Other work", objective: "An independent objective" });
     const secondBot = { ...invocation, botId: "bot-2", threadId: secondMain };
     await call("work_create", { requestId: randomUUID(), id: foreign, title: "Second Manager work", objective: "Private objective" }, secondBot);
+    const injectedManager: InvocationContext = { transport: "mcp", botId: null, instance: null, threadId: null, sessionId: null,
+      injected: { role: "manager", launch: "codex-AbC123" } };
+    assert.equal((await call<WorkItem>("work_get", { id: foreign }, injectedManager)).id, foreign,
+      "local injected Manager uses the selected Role without claiming a Bot assignment");
     assert.equal((await call<WorkItem>("work_get", { id: foreign }, { ...invocation, botId: "bot-3", threadId: adminMain })).id, foreign,
       "Admin can inspect work outside a Manager assignment");
     const resources = await call<{ workers: { entries: Array<{ botId: string }> }; observation: { visibility: string } }>(

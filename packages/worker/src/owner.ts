@@ -11,7 +11,8 @@ function contains(threads: ActiveThread[], id: string): boolean {
 }
 
 export async function workerOwner(invocation: InvocationContext | undefined, env: NodeJS.ProcessEnv): Promise<WorkerOwner> {
-  if (!invocation || operatorInvocation(invocation)) return { botId: LOCAL_OPERATOR_ID, threadId: LOCAL_OPERATOR_ID };
+  if (!invocation || operatorInvocation(invocation) || invocation.transport === "mcp" && invocation.injected)
+    return { botId: LOCAL_OPERATOR_ID, threadId: LOCAL_OPERATOR_ID };
   if (!invocation.botId) throw new Error("worker lifecycle operations require a Bot-bound MCP call or the local socket");
   if (!invocation.instance || !invocation.threadId) throw new Error("worker operations require a verified Bot thread");
   const listed = await socketCall(socketPath("bots", env), "tools/call", { name: "bot_list", arguments: {} }, { timeoutMs: 2_000 }) as {

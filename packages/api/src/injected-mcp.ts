@@ -37,7 +37,7 @@ export function injectedMcpBinding(launchPath: string, pid: number, birth: strin
 }
 
 /** The lock and process birth fence an exited launch even if its config survives a crash. */
-export async function verifyInjectedMcpBinding(value: string, env: NodeJS.ProcessEnv = process.env): Promise<PackageRole> {
+export async function verifyInjectedMcpBinding(value: string, env: NodeJS.ProcessEnv = process.env): Promise<{ role: PackageRole; launch: string }> {
   if (!value || value.length > 2_048) throw new Error("invalid injected Role MCP binding");
   let binding: Binding;
   try { binding = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Binding; }
@@ -50,5 +50,5 @@ export async function verifyInjectedMcpBinding(value: string, env: NodeJS.Proces
   const lock = JSON.parse(await readFile(join(stateDir(env), "roles", "inject", binding.launch, "launch-lock.json"), "utf8")) as Record<string, unknown>;
   if (lock.version !== 1 || lock.state !== "running" || lock.pid !== binding.pid || lock.birth !== binding.birth ||
     await processBirth(binding.pid) !== binding.birth) throw new Error("injected Role launch is no longer running");
-  return binding.role;
+  return { role: binding.role, launch: binding.launch };
 }

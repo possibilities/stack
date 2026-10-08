@@ -291,7 +291,10 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.equal(failed.turn.phase, "failed"); assert.equal(failed.turn.promptChars, "Retain failed preparation prompt".length);
     assert.equal((await manager.turns(failed.worker.id, undefined, 1)).turns[0]?.prompt, "Retain failed preparation prompt");
     assert.equal(failed.turn.dispatchedAt, null); assert.equal(failed.turn.requestedModel, start.model);
-    const started = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_start", arguments: start }) as Awaited<ReturnType<WorkerManager["start"]>>;
+    const injectedManager = { transport: "mcp" as const, botId: null, instance: null, threadId: null, sessionId: null,
+      injected: { role: "manager" as const, launch: "codex-AbC123" } };
+    const started = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_start", arguments: start,
+      invocation: injectedManager }) as Awaited<ReturnType<WorkerManager["start"]>>;
     assert.equal(started.duplicate, false);
     assert.deepEqual(started.turn.workContext, { workItemId, scopeRevision: 1, source: "explicit" });
     assert.equal(started.worker.roleId, roleId);
@@ -387,7 +390,8 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     const followed = { id, message: "ASK to write approval", requestId: randomUUID() };
     await assert.rejects(manager.send({ ...followed, subscribe: true }), /owner-coordinated/);
     assert.equal(manager.ledger.turnByRequestId(followed.requestId), null, "unsupported follow-up watch must not reserve a turn");
-    const sent = await manager.send(followed);
+    const sent = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_send", arguments: followed,
+      invocation: injectedManager }) as Awaited<ReturnType<WorkerManager["send"]>>;
     assert.deepEqual(sent.turn.workContext, { workItemId, scopeRevision: 2, source: "continuation" });
     assert.equal((await manager.send(followed)).turn.id, sent.turn.id);
     await assert.rejects(manager.send({ ...followed, message: "Different follow-up" }), /requestId was reused/);

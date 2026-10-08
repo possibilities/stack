@@ -6,7 +6,14 @@ import { withStateInventory, requireStateOperator, statePlan, stateApplyInput, s
 import { notifyStateCategories } from "./src/state-categories.js";
 
 type Context = { store: NotificationStore; env: NodeJS.ProcessEnv; changed?: () => void };
+// A local injected Manager is not a Bot, but must remain distinct from the operator and managed Bots.
+const INJECTED_MANAGER_OWNER = "_injected_manager";
 async function caller(ctx: Context, invocation?: InvocationContext): Promise<{ role: "admin" | "manager"; botId: string | null }> {
+  if (invocation?.transport === "mcp" && invocation.injected) {
+    if (invocation.injected.role === "manager") return { role: "manager", botId: INJECTED_MANAGER_OWNER };
+    if (invocation.injected.role !== "admin") throw new Error("notification operation is not granted to this role");
+    return { role: "admin", botId: null };
+  }
   if (!invocation || operatorInvocation(invocation) || invocation.transport === "mcp" && !invocation.botId && !invocation.workerId)
     return { role: "admin", botId: null };
   if (!invocation.botId || !invocation.instance) throw new Error("notification caller is not a verified Bot");

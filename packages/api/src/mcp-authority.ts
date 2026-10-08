@@ -59,7 +59,7 @@ export async function packageRole(identity: McpIdentity, env: NodeJS.ProcessEnv)
   return "unassigned";
 }
 
-export function mcpInvocation(identity: McpIdentity, meta: unknown): InvocationContext {
+export function mcpInvocation(identity: McpIdentity, meta: unknown, injected?: { role: PackageRole; launch: string }): InvocationContext {
   const ids = meta && typeof meta === "object" && !Array.isArray(meta) ? meta as Record<string, unknown> : {};
   const identifier = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 128 ? value : null;
   const bot = identity && "botId" in identity ? identity : null;
@@ -67,5 +67,6 @@ export function mcpInvocation(identity: McpIdentity, meta: unknown): InvocationC
   const threadId = identifier(ids.threadId);
   if (bot && !threadId) throw new Error("bot MCP tool call is missing Codex threadId metadata");
   return { transport: "mcp", botId: bot?.botId ?? null, instance: bot?.instance ?? null, threadId,
-    sessionId: identifier(ids.sessionId), workerId: worker?.workerId ?? null, workerInstance: worker?.instance ?? null };
+    sessionId: identifier(ids.sessionId), workerId: worker?.workerId ?? null, workerInstance: worker?.instance ?? null,
+    ...(injected ? { injected } : {}) };
 }

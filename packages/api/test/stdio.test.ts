@@ -24,6 +24,7 @@ import { pollEvent } from "../src/occurrence.js";
 import { operatorHeaders, withLocalAuth } from "../src/local-auth.js";
 import { serveMcp } from "../src/mcp.js";
 import { processBirth } from "../src/injected-mcp.js";
+import { invocationContext, operatorInvocation } from "../src/invocation.js";
 
 // This boundary owns stdio authentication, live policy and the private owner relay.
 // The separate delivery tests own actual Codex lineage and turn/start admission.
@@ -204,6 +205,11 @@ test("stdio children use private sockets, refresh policy, fence identities and l
 });
 
 test("injected canonical Roles enforce grants at list and call, and lose authority when their launch exits", { timeout: 30_000 }, async () => {
+  const injectedAdmin = { transport: "mcp" as const, botId: null, instance: null, threadId: null, sessionId: null,
+    injected: { role: "admin" as const, launch: "codex-AbC123" } };
+  assert.equal(operatorInvocation(injectedAdmin), true, "an authenticated injected Admin can call operator-only package tools");
+  assert.equal(operatorInvocation({ ...injectedAdmin, injected: { ...injectedAdmin.injected, role: "manager" as const } }), false);
+  assert.equal(invocationContext.safeParse({ ...injectedAdmin, botId: "forged" }).success, false);
   const root = await mkdtemp(join(tmpdir(), "stack-injected-stdio-"));
   const env = { ...process.env, STACK_STATE_DIR: join(root, "state") };
   const dir = join(root, "packages", "worker");
@@ -222,11 +228,12 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
   const lockPath = join(launchPath, "launch-lock.json");
   const lock = { version: 1, pid: process.pid, birth, state: "running" };
   await writeFile(lockPath, JSON.stringify(lock));
-  const invoked: string[] = [];
+  const invoked: Array<{ name: string; role: string | null; launch: string | null }> = [];
   const names = ["worker_status", "worker_close", "worker_start", "worker_state_clear"];
   const socket = await serveSocket({ info: { name: "worker", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("worker", env) },
     context: {}, operations: names.map(name => operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }),
-      async call() { invoked.push(name); return { ok: true }; } })) });
+      async call(_ctx, _input, invocation) { invoked.push({ name, role: invocation?.transport === "mcp" ? invocation.injected?.role ?? null : null,
+        launch: invocation?.transport === "mcp" ? invocation.injected?.launch ?? null : null }); return { ok: true }; } })) });
   const clients: Client[] = [];
   const connect = async (role: "admin" | "manager" | "worker" | "unassigned", overrides: Record<string, string> = {}) => {
     const launch = (await internalMcpLaunches(root, { kind: "inject", role, launchPath, pid: process.pid, birth }, env)).worker!;
@@ -246,6 +253,7 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
         const permitted = (expected as readonly string[]).includes(name);
         assert.equal(Boolean(result.isError), !permitted, `${role} ${name}`);
         assert.equal(invoked.length, before + Number(permitted));
+        if (permitted) assert.deepEqual(invoked.at(-1), { name, role, launch: "codex-AbC123" }, "verified launch provenance reaches the owner socket");
       }
     }
     const manager = await connect("manager");
