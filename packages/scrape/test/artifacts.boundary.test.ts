@@ -14,7 +14,7 @@ test("retained text publication writes complete private UTF-8 bytes and clears o
   assert.deepEqual(readdirSync(f.input), ["sidecar.html"]);
 });
 
-for (const kind of ["file", "symlink", "hardlink"] as const)
+for (const kind of ["file", "symlink"] as const)
   test(`retained text refuses a ${kind} staging replacement without publishing or unlinking it`, async (t) => {
     const f = fixture(t), destination = join(f.input, "sidecar.html");
     writeFileSync(destination, "old destination");
@@ -27,8 +27,7 @@ for (const kind of ["file", "symlink", "hardlink"] as const)
     const victim = join(f.input, "victim");
     writeFileSync(victim, "alien artifact", { mode: 0o600 });
     if (kind === "file") writeFileSync(temporary, "alien artifact", { mode: 0o600 });
-    else if (kind === "symlink") symlinkSync(victim, temporary);
-    else linkSync(victim, temporary);
+    else symlinkSync(victim, temporary);
     const replacement = inode(temporary), victimIdentity = inode(victim);
     await owner.resume();
     refusal(await owner.result(), /failed to retain a text artifact/, "AgentscrapeArtifactError");
@@ -37,11 +36,33 @@ for (const kind of ["file", "symlink", "hardlink"] as const)
     assert.equal(inode(temporary), replacement, "cleanup must not unlink a foreign staging generation");
     assert.equal(readFileSync(temporary, "utf8"), "alien artifact");
     if (kind === "symlink") assert.equal(readlinkSync(temporary), victim);
-    if (kind === "hardlink") assert.equal(lstatSync(victim).nlink, 2);
     assert.equal(inode(victim), victimIdentity);
     assert.equal(readFileSync(victim, "utf8"), "alien artifact");
     assert.equal(readFileSync(join(f.input, "owned.saved"), "utf8"), "owned artifact");
   });
+
+test("retained text refuses a multiply-linked owned staging inode without publishing or deleting either name", async (t) => {
+  const f = fixture(t), destination = join(f.input, "sidecar.html"), content = "owned artifact";
+  writeFileSync(destination, "old destination");
+  const selected = inode(destination);
+  const owner = f.start({ owner: "artifacts", path: destination, content, triggers: [
+    // The ready stat must observe two links, not a later metadata change or a foreign inode.
+    { method: "fsyncSync", when: "after", path: "/\\.agentscrape-artifact-[^/]+\\.tmp$" },
+  ] });
+  const hit = await owner.boundary(), temporary = hit.paths[0]!, retained = join(f.input, "second-link");
+  const staging = inode(temporary);
+  linkSync(temporary, retained);
+  assert.equal(inode(retained), staging);
+  await owner.resume();
+  refusal(await owner.result(), /failed to retain a text artifact/, "AgentscrapeArtifactError");
+  assert.equal(inode(destination), selected);
+  assert.equal(readFileSync(destination, "utf8"), "old destination");
+  for (const path of [temporary, retained]) {
+    assert.equal(inode(path), staging);
+    assert.equal(lstatSync(path).nlink, 2);
+    assert.equal(readFileSync(path, "utf8"), content);
+  }
+});
 
 test("retained text refuses a final pathname replacement and preserves that replacement", async (t) => {
   const f = fixture(t), destination = join(f.input, "sidecar.html");
