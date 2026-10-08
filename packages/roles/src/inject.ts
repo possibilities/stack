@@ -10,7 +10,7 @@ import { roleMcpConflict, serverMcpOrigins } from "./bundle.js";
 import { injectArguments, type Harness } from "./inject-args.js";
 import { startOpenCodeHost } from "./inject-opencode.js";
 import { mcpRecord, skillRecord } from "./resources.js";
-import { RoleStore, renderInstructions, type RoleSnapshot } from "./store.js";
+import { RoleStore, renderBotInstructions, type RoleSnapshot } from "./store.js";
 import { processBirth } from "./launch-state.js";
 import { selectRoleCapabilities } from "./capabilities.js";
 
@@ -28,13 +28,14 @@ async function executable(command: string): Promise<string> {
   throw new Error(`executable is unavailable: ${command}`);
 }
 
-async function snapshotFor(name: string): Promise<RoleSnapshot> {
+async function snapshotFor(name: string): Promise<ReturnType<RoleStore["namedAccessLaunch"]>> {
   const store = new RoleStore(stateDir(), { readOnly: true, initializeIfMissing: true });
-  try { return store.namedLaunchSnapshot(name); } finally { store.close(); }
+  try { return store.namedAccessLaunch(name); } finally { store.close(); }
 }
 
-async function connections(snapshot: RoleSnapshot): Promise<Record<string, Mcp>> {
-  const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "operator" });
+async function connections(snapshot: RoleSnapshot, access: "admin" | "manager" | "worker" | "unassigned",
+  launchPath: string, birth: string): Promise<Record<string, Mcp>> {
+  const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "inject", role: access, launchPath, pid: process.pid, birth });
   const names = new Set(Object.keys(launches).map(asciiFold));
   const ports = [mcpPort(), Number(process.env.STACK_SERVER_MCP_PORT)].filter(port => Number.isInteger(port) && port > 0);
   const origins = new Set(ports.flatMap(serverMcpOrigins));
@@ -136,9 +137,9 @@ async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
   assertInstallationOpen(process.env);
   const { role, harness, native, command, commandIndex, context } = injectArguments(args);
   const binary = await executable(harness);
-  const snapshot = selectRoleCapabilities(await snapshotFor(role), harness);
-  const servers = await connections(snapshot);
-  const instructions = renderInstructions(snapshot, context);
+  const selected = await snapshotFor(role);
+  const snapshot = selectRoleCapabilities(selected.snapshot, harness);
+  const instructions = renderBotInstructions(snapshot, context);
   assertInstallationOpen(process.env);
   const parent = join(stateDir(), "roles", "inject");
   await mkdir(parent, { recursive: true, mode: 0o700 });
@@ -147,12 +148,14 @@ async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
   await file(join(root, "launch-lock.json"), json(lock));
   const capabilities = join(root, "capabilities");
   const env = { ...process.env };
+  for (const key of ["STACK_MCP_AUTHORITY", "STACK_MCP_BINDING", "STACK_MCP_OPERATOR", "STACK_MCP_INJECT_BINDING"]) delete env[key];
   let launched = false;
   let result: Exit;
   let host: Awaited<ReturnType<typeof startOpenCodeHost>> | undefined;
   const cleanup: string[] = [capabilities];
   try {
     await file(join(root, "launch.json"), json({ harness, roleId: snapshot.id, roleRevision: snapshot.revision, createdAt: new Date().toISOString() }));
+    const servers = await connections(snapshot, selected.access, root, lock.birth);
     let argv: string[];
     if (harness === "claude") {
       // setting-sources gates native home/project customizations without changing

@@ -242,6 +242,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
   applied = contents.createMcpServer(applied.revision, "codex-only", "Excluded before executable lookup", { type: "stdio", command: "/missing/unused", args: [] }, true, ["codex"]);
   applied = contents.setInternalMcp(applied.revision, "codex-computer-use", true, ["claude"]);
   applied = contents.setInternalMcp(applied.revision, "notify", false);
+  applied = contents.update(applied.revision, { botMarkdown: "Worker personality marker." });
   const roles = await serveApi({ name: "roles", transport: "socket", env });
   const server = await serveSocket({ info: { name: "serve", description: "Server", transportDescription: "Socket", path: socketPath("serve", env) },
     context: {}, operations: [operation({ name: "serve_status", description: "Status", input: z.object({}), output: z.any(),
@@ -306,7 +307,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.equal((await manager.observeTurn(observationInput)).result?.turnId, started.turn.id);
     assert.equal((await manager.observeTurn(observationInput)).result?.phase, "completed");
     await assert.rejects(manager.observeTurn({ ...observationInput, threadId: "another-chat" }), /originating Chat/);
-    assert.equal(await readFile(join(started.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n${start.task}`);
+    assert.equal(await readFile(join(started.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker.\n\n${start.task}`);
     const listed = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_list", arguments: {} }) as { workers: Awaited<ReturnType<WorkerManager["list"]>> };
     const row = listed.workers.find((worker) => worker.id === id)!;
     assert.equal(row.turn?.phase, "completed"); assert.equal(row.turn?.stopReason, "end_turn"); assert.equal(row.pendingPermissions, 0);
@@ -375,7 +376,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.deepEqual(parseMcpBinding(internal.env.find(item => item.name === "STACK_MCP_BINDING")!.value, env), { workerId: id, instance: started.worker.runtimeInstance });
     assert.equal(JSON.stringify(await manager.status(id)).includes("fixture-secret"), false);
     const output = await readFile(join(started.worker.cwd!, "output.txt"), "utf8");
-    assert.equal(output, `Check your work.\n\n${start.task}`);
+    assert.equal(output, `Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker.\n\n${start.task}`);
     const beforePrompt = manager.send({ id, message: "NEVER WRITE THIS", effort: "high", requestId: randomUUID() });
     for (let i = 0; i < 100 && (await manager.status(id)).turn?.phase !== "queued"; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal((await manager.status(id)).turn?.phase, "queued");
@@ -483,7 +484,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.equal(next.worker.roleRevision, roleStore.role(roleId).snapshot().revision);
     assert.deepEqual(JSON.parse(await readFile(join(next.worker.cwd!, "mcp-names.json"), "utf8")), [...fleet.filter(name => !["roles", "notify"].includes(name)), "fixture-mcp"]);
     assert.match(await readFile(join(next.worker.cwd!, ".opencode", "skills", "review", "SKILL.md"), "utf8"), /Review the diff/);
-    assert.equal(await readFile(join(next.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n${start.task}`);
+    assert.equal(await readFile(join(next.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker.\n\n${start.task}`);
     await manager.closeWorker(next.worker.id);
     await manager.remove(next.worker.id, true);
     roleStore.role(roleId).createMcpServer(roleStore.role(roleId).snapshot().revision, "external-http", "Requires native HTTP support", { type: "http", url: "https://fixture.invalid/mcp" });

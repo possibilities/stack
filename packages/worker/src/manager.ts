@@ -1,5 +1,5 @@
 import { OperationRejected, requireCompletionCoordination, socketCall, socketPath, wantsCompletion, type InvocationContext } from "@stack/api";
-import { renderInstructions, selectRoleCapabilities } from "@stack/roles";
+import { renderBotInstructions, selectRoleCapabilities } from "@stack/roles";
 import { record, type AcpRequest } from "./acp.js";
 import { currentOption, effortOption, modelOption, optionsOf } from "./catalog.js";
 import { WorkerLedger, summarizeTurn, type WorkerRecord, type TurnSummary, type PendingRequest } from "./ledger.js";
@@ -523,7 +523,7 @@ export class WorkerManager {
       } finally { if (--creating.count === 0) this.creating.delete(runtime.instance); }
       await this.select(id, reserved.turn.id, runtime, result.sessionId as string, result, model, effort);
       this.ledger.settings.markLoaded(`worker:${id}`, runtime.instance, selection);
-      const instructions = renderInstructions(snapshot);
+      const instructions = renderBotInstructions(snapshot);
       this.prompt(id, reserved.turn.id, account.provider !== "claude" && instructions ? `${instructions}\n\n${input.task}` : input.task);
     } catch {
       const issue = `${stage} preparation failed; inspect the owned worktree and account runtime`;

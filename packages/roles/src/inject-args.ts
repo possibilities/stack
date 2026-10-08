@@ -9,6 +9,9 @@ Other names match SQLite NOCASE (ASCII case-insensitive).
 No running Server is required. A missing Roles store is initialized with Manager
 and Worker defaults; existing Roles are read without migration or replacement.
 Each invocation regenerates its private capabilities from the current Role.
+Stack MCP tools use the captured canonical Role grant; Admin has all package
+tools, while Manager and Worker use their reviewed allowlists. The five Codex
+bridges remain shared. A custom Role has no internal package tool grant.
 Skills and MCP connections use the actual command's harness allowlists, not the
 model family or the optional instruction-rendering context below.
 --with-model and --with-harness supply exact, case-sensitive fragment rendering
