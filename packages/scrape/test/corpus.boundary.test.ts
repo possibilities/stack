@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test from "node:test";
+import { CORPUS_AGGREGATE_MAX_BYTES, CORPUS_ARTIFACT_MAX_BYTES } from "../src/corpus.js";
 import { fixture, HTML, inode, MARKDOWN, PRESET, refusal, snapshot, success } from "./support/fs-boundary.js";
 
 test("default capture publishes private replayable success evidence and redacted failure diagnostics offline", async (t) => {
@@ -51,6 +52,42 @@ for (const unsafe of ["symlink", "nonprivate-data-home", "nonprivate-corpus", "n
     refusal(await f.start({ owner: "capture" }).result(), /plain directory|not private/, "CorpusSecurityError");
     assert.deepEqual(snapshot(f.state), before);
     assert.deepEqual(snapshot(external), outside);
+  });
+
+for (const cap of ["per-artifact", "aggregate"] as const)
+  for (const ancestry of ["missing", "unsafe"] as const)
+    test(`capture ${cap} byte preflight precedes ${ancestry} corpus ancestry effects`, async (t) => {
+      const f = fixture(t), corpus = join(f.state, "scrape", "corpus"), sibling = join(f.state, "sibling");
+      mkdirSync(sibling, { mode: 0o700 });
+      writeFileSync(join(sibling, "sentinel"), "unchanged sibling evidence", { mode: 0o600 });
+      if (ancestry === "unsafe") symlinkSync(sibling, corpus);
+      const before = snapshot(f.state), handlerMarker = join(f.input, "handler-called");
+      // Aggregate case keeps each artifact within its own cap. Structured Markdown is also
+      // retained in metadata, so the four bodies reach the aggregate cap before metadata overhead.
+      const captureBytes = cap === "per-artifact" ? { fullHtml: CORPUS_ARTIFACT_MAX_BYTES + 1 } : {
+        fullHtml: CORPUS_ARTIFACT_MAX_BYTES, selectedHtml: CORPUS_ARTIFACT_MAX_BYTES,
+        markdown: (CORPUS_AGGREGATE_MAX_BYTES - 2 * CORPUS_ARTIFACT_MAX_BYTES) / 2,
+      };
+      refusal(await f.start({ owner: "capture", captureBytes, handlerMarker }).result(),
+        cap === "per-artifact" ? /text artifact exceeds.*byte limit/ : /text artifacts exceed.*aggregate limit/,
+        "AgentscrapeArtifactError");
+      assert.equal(readFileSync(handlerMarker, "utf8"), "boundary.capture", "byte refusal must follow actual handler extraction");
+      assert.deepEqual(snapshot(f.state), before, "byte preflight must have no persisted ancestry effects");
+      if (ancestry === "missing") assert.equal(existsSync(corpus), false);
+    });
+
+for (const presetName of ["../sibling", "unsafe\\preset"])
+  test(`capture refuses declared unsafe preset name ${JSON.stringify(presetName)} at publication`, async (t) => {
+    const f = fixture(t), corpus = join(f.state, "scrape", "corpus"), sibling = join(f.state, "scrape", "sibling");
+    mkdirSync(corpus, { mode: 0o700 });
+    mkdirSync(sibling, { mode: 0o700 });
+    writeFileSync(join(corpus, "sentinel"), "unchanged corpus evidence", { mode: 0o600 });
+    writeFileSync(join(sibling, "sentinel"), "unchanged sibling evidence", { mode: 0o600 });
+    f.declarePreset(presetName);
+    const before = snapshot(f.state), handlerMarker = join(f.input, "handler-called");
+    refusal(await f.start({ owner: "capture", presetName, handlerMarker }).result(), /unsafe path name/, "CorpusSecurityError");
+    assert.equal(readFileSync(handlerMarker, "utf8"), "boundary.capture", "declared preset must select its handler, not fail registry lookup");
+    assert.deepEqual(snapshot(f.state), before, "unsafe preset publication must preserve corpus and sibling generations");
   });
 
 test("capture refuses a preset directory swap and never cleans the replacement staging pathname", async (t) => {

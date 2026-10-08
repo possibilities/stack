@@ -28,6 +28,9 @@ interface Request {
   content?: string;
   url?: string;
   expectFailure?: string;
+  presetName?: string;
+  captureBytes?: { fullHtml?: number; selectedHtml?: number; markdown?: number };
+  handlerMarker?: string;
   ids?: string[];
   triggers?: Trigger[];
 }
@@ -133,10 +136,11 @@ export function fixture(t: TestContext) {
   const state = join(root, "state"), input = join(root, "input");
   for (const path of [state, input, join(state, "scrape"), join(state, "scrape", "presets")])
     fs.mkdirSync(path, { mode: 0o700 });
-  fs.writeFileSync(join(state, "scrape", "presets", "boundary.json"), JSON.stringify({
-    name: PRESET, summary: "Offline boundary fixture", domain: "capture.example.test", mode: "content",
+  const declarePreset = (name: string) => fs.writeFileSync(join(state, "scrape", "presets", "boundary.json"), JSON.stringify({
+    name, summary: "Offline boundary fixture", domain: "capture.example.test", mode: "content",
     url_patterns: ["^https://capture\\.example\\.test/.*$"], handler: "boundary.capture", schema: "BoundaryPage",
   }), { mode: 0o600 });
+  declarePreset(PRESET);
   const children: BoundaryProcess[] = [];
   const start = (request: Request) => {
     const child = new BoundaryProcess(request, state);
@@ -154,7 +158,7 @@ export function fixture(t: TestContext) {
     makeEnumerable(root);
     fs.rmSync(root, { recursive: true, force: true });
   });
-  return { root, state, input, preset: join(state, "scrape", "corpus", PRESET), start };
+  return { root, state, input, preset: join(state, "scrape", "corpus", PRESET), declarePreset, start };
 }
 
 export function success(outcome: Outcome): any {
@@ -246,16 +250,24 @@ async function runOwner(request: Request): Promise<unknown> {
   const unregister = registerContentHandler({
     handlerName: "boundary.capture", schemaName: "BoundaryPage", schema: BoundaryPage,
     handler: async (url, options) => {
+      if (request.handlerMarker) fs.writeFileSync(request.handlerMarker, "boundary.capture", { mode: 0o600 });
       if (url.includes("/failure")) throw new TypeError(`Capture failed at ${url}; token=private-secret`);
       const html = options?.html ?? HTML;
-      const structured = new BoundaryPage(convertHtml(html));
-      return { full_html: html, selected_html: html, markdown: structured.toMarkdown(), structured };
+      // Sized UTF-8 handler output exercises live publication without parsing multi-megabyte HTML.
+      const sized = (bytes: number) => "é".repeat(Math.floor(bytes / 2)) + (bytes % 2 ? "x" : "");
+      const structured = new BoundaryPage(request.captureBytes?.markdown === undefined
+        ? convertHtml(html) : sized(request.captureBytes.markdown));
+      return {
+        full_html: request.captureBytes?.fullHtml === undefined ? html : sized(request.captureBytes.fullHtml),
+        selected_html: request.captureBytes?.selectedHtml === undefined ? html : sized(request.captureBytes.selectedHtml),
+        markdown: structured.toMarkdown(), structured,
+      };
     },
   });
   try {
     const { captureCorpus, testCorpus } = await import("../../src/corpus.js");
     return request.owner === "replay" ? await testCorpus(PRESET)
-      : await captureCorpus(request.url ?? "https://capture.example.test/success#private-fragment", { preset: PRESET, expectFailure: request.expectFailure });
+      : await captureCorpus(request.url ?? "https://capture.example.test/success#private-fragment", { preset: request.presetName ?? PRESET, expectFailure: request.expectFailure });
   } finally { unregister(); }
 }
 
