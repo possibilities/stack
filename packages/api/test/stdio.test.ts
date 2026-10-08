@@ -221,7 +221,7 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
   await writeFile(join(dir, "dist", "api.js"), `
     import { operation } from ${JSON.stringify(new URL("../src/operation.js", import.meta.url).href)};
     import { z } from ${JSON.stringify(import.meta.resolve("zod"))};
-    export const api = { operations: ["worker_status", "worker_close", "worker_start", "worker_state_clear"].map(name =>
+    export const api = { operations: ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"].map(name =>
       operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })) };
   `);
   const birth = await processBirth(process.pid);
@@ -229,7 +229,7 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
   const lock = { version: 1, pid: process.pid, birth, state: "running" };
   await writeFile(lockPath, JSON.stringify(lock));
   const invoked: Array<{ name: string; role: string | null; launch: string | null }> = [];
-  const names = ["worker_status", "worker_close", "worker_start", "worker_state_clear"];
+  const names = ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"];
   const socket = await serveSocket({ info: { name: "worker", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("worker", env) },
     context: {}, operations: names.map(name => operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }),
       async call(_ctx, _input, invocation) { invoked.push({ name, role: invocation?.transport === "mcp" ? invocation.injected?.role ?? null : null,
@@ -243,7 +243,7 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
     return { client, launch };
   };
   try {
-    for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 3)], ["worker", names.slice(0, 1)], ["unassigned", []]] as const) {
+    for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 4)], ["worker", names.slice(0, 1)], ["unassigned", []]] as const) {
       const { client, launch } = await connect(role);
       assert.equal(launch.env.STACK_MCP_OPERATOR, "");
       assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), expected);

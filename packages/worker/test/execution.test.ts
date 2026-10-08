@@ -277,9 +277,14 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     workerSocket = await serveSocket({ info: { name: "worker", description: "Workers", transportDescription: "Socket", path: socketPath("worker", env) },
       context: { supervisor, manager }, operations: workersApi.operations });
     await supervisor.reconcile();
-    const catalog = await supervisor.catalog(accountId, true);
+    const available = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_account_list", arguments: {} }) as {
+      accounts: Array<{ id: string; provider: string; enabled: boolean; ready: boolean; removing: boolean }> };
+    assert.deepEqual(available.accounts, [{ id: accountId, provider: "codex", enabled: true, ready: true, removing: false }]);
+    const chosenId = available.accounts[0]!.id;
+    const catalog = await socketCall(socketPath("worker", env), "tools/call", { name: "worker_catalog", arguments: { accountId: chosenId, refresh: true } }) as
+      Awaited<ReturnType<WorkerSupervisor["catalog"]>>;
     assert.deepEqual(catalog.models[0]?.efforts, ["low", "high"]);
-    const start = { accountId, model: "openai/gpt-fixture", effort: "low", repo, task: "Write an output file", requestId: randomUUID(), workItemId };
+    const start = { accountId: chosenId, model: catalog.models[0]!.id, effort: catalog.models[0]!.efforts[0]!, repo, task: "Write an output file", requestId: randomUUID(), workItemId };
     const observationInput = { requestId: start.requestId, botId: "_local_operator", threadId: "_local_operator" };
     assert.deepEqual(await manager.observeTurn(observationInput), { result: null, update: null });
     await assert.rejects(manager.start({ ...start, subscribe: true }), /owner-coordinated/);

@@ -400,9 +400,10 @@ test("Manager Worker turns coordinate default and explicit completion without ev
   const root = await mkdtemp(join(tmpdir(), "stack-manager-watch-"));
   const env = { ...process.env, STACK_STATE_DIR: root, STACK_MCP_PORT: "0" };
   const dir = join(root, "packages", "worker"); await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Workers.\nmcp:\n  description: Workers.\n  operations: all\n  events: all\n");
+  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Workers.\nmcp:\n  description: Workers.\n  operations: all\n  workerOperations: [worker_status, worker_account_list]\n  events: all\n");
   const endpoint = "unix:///fixture/manager-watch.sock";
   const managerRoleId = randomUUID();
+  const workerId = randomUUID(), accountId = randomUUID(), runtimeInstance = randomUUID();
   const watch: CompletionWatch = { topic: "worker_turn_changed", readOperation: "worker_turn_observation", idArgument: "requestId",
     terminalField: "result", defaultWhen: [], defaultOnForBot: true, updateField: "update", initialValueField: "observation",
     scope: { input: "requestId", prefix: "request:" }, readArguments: { requestId: { input: "requestId" },
@@ -433,6 +434,15 @@ test("Manager Worker turns coordinate default and explicit completion without ev
         annotations: { readOnlyHint: true }, async call(_ctx, input: { requestId: string }) {
           return { result: null, update: admitted.includes(input.requestId) ? { phase: "running" } : null };
         } }),
+      operation({ name: "worker_account_list", description: "Current account choices", input: z.strictObject({}),
+        output: z.strictObject({ accounts: z.array(z.strictObject({ id: z.uuid(), provider: z.literal("codex"), enabled: z.boolean(), ready: z.boolean(), removing: z.boolean() })) }),
+        annotations: { readOnlyHint: true }, async call() { return { accounts: [{ id: accountId, provider: "codex" as const, enabled: true, ready: true, removing: false }] }; } }),
+      operation({ name: "worker_status", description: "Worker identity", input: z.strictObject({ id: z.uuid() }), output: z.strictObject({ worker: z.strictObject({ accountId: z.uuid(), phase: z.string(), runtimeInstance: z.uuid() }) }),
+        annotations: { readOnlyHint: true }, async call(_ctx, { id }) {
+          assert.equal(id, workerId); return { worker: { accountId, phase: "running", runtimeInstance } };
+        } }),
+      operation({ name: "worker_runtime_list", description: "Runtime identity", input: z.strictObject({}), output: z.strictObject({ runtimes: z.array(z.strictObject({ id: z.uuid(), state: z.string(), instance: z.uuid() })) }),
+        annotations: { readOnlyHint: true }, async call() { return { runtimes: [{ id: accountId, state: "running", instance: runtimeInstance }] }; } }),
       operation({ name: "worker_close", description: "No watch grant", input: z.strictObject({}), output: z.strictObject({}), async call() { return {}; } }),
     ], events: { topics: { worker_turn_changed: "Turn changed" },
       scope: { description: "Exact request", example: "request:UUID", required: true,
@@ -452,7 +462,16 @@ test("Manager Worker turns coordinate default and explicit completion without ev
   const client = new Client({ name: "manager-watch", version: "1" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(url)));
-    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["worker_start", "worker_send", "worker_close"]);
+    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["worker_start", "worker_send", "worker_account_list", "worker_status", "worker_close"]);
+    assert.deepEqual((await client.callTool({ name: "worker_account_list", arguments: {}, _meta: { threadId: "main" } })).structuredContent,
+      { accounts: [{ id: accountId, provider: "codex", enabled: true, ready: true, removing: false }] });
+    const workerClient = new Client({ name: "worker-account-grant", version: "1" });
+    try {
+      await workerClient.connect(new StreamableHTTPClientTransport(new URL(workerMcpUrl(mcp.urls.worker!, workerId, runtimeInstance, env))));
+      assert.deepEqual((await workerClient.listTools()).tools.map(tool => tool.name), ["worker_status"]);
+      assert.equal((await workerClient.callTool({ name: "worker_account_list", arguments: {} })).isError, true);
+      assert.equal((await workerClient.callTool({ name: "worker_status", arguments: { id: workerId } })).isError, undefined);
+    } finally { await workerClient.close(); }
     for (const [operationName, subscribe, expectedWatch] of [
       ["worker_start", undefined, true], ["worker_send", undefined, true], ["worker_send", false, false], ["worker_start", true, true],
     ] as const) {
