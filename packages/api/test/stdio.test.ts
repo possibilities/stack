@@ -23,6 +23,8 @@ import { codexMcpDefinition } from "../src/codex-mcp/catalog.js";
 import { pollEvent } from "../src/occurrence.js";
 import { operatorHeaders, withLocalAuth } from "../src/local-auth.js";
 import { serveMcp } from "../src/mcp.js";
+import { processBirth } from "../src/injected-mcp.js";
+import { invocationContext, operatorInvocation } from "../src/invocation.js";
 
 // This boundary owns stdio authentication, live policy and the private owner relay.
 // The separate delivery tests own actual Codex lineage and turn/start admission.
@@ -198,6 +200,73 @@ test("stdio children use private sockets, refresh policy, fence identities and l
   } finally {
     await Promise.all(clients.map(client => client.close()));
     await owner.close(); await Promise.all([serve.close(), pkg.close(), bots.close(), roles.close(), workers.close()]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("injected canonical Roles enforce grants at list and call, and lose authority when their launch exits", { timeout: 30_000 }, async () => {
+  const injectedAdmin = { transport: "mcp" as const, botId: null, instance: null, threadId: null, sessionId: null,
+    injected: { role: "admin" as const, launch: "codex-AbC123" } };
+  assert.equal(operatorInvocation(injectedAdmin), true, "an authenticated injected Admin can call operator-only package tools");
+  assert.equal(operatorInvocation({ ...injectedAdmin, injected: { ...injectedAdmin.injected, role: "manager" as const } }), false);
+  assert.equal(invocationContext.safeParse({ ...injectedAdmin, botId: "forged" }).success, false);
+  const root = await mkdtemp(join(tmpdir(), "stack-injected-stdio-"));
+  const env = { ...process.env, STACK_STATE_DIR: join(root, "state") };
+  const dir = join(root, "packages", "worker");
+  const launchPath = join(env.STACK_STATE_DIR, "roles", "inject", "codex-AbC123");
+  await mkdir(dir, { recursive: true });
+  await mkdir(launchPath, { recursive: true });
+  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Fixture.\nmcp:\n  description: Fixture.\n  operations: all\n  events: []\n");
+  await mkdir(join(dir, "dist"));
+  await writeFile(join(dir, "dist", "api.js"), `
+    import { operation } from ${JSON.stringify(new URL("../src/operation.js", import.meta.url).href)};
+    import { z } from ${JSON.stringify(import.meta.resolve("zod"))};
+    export const api = { operations: ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"].map(name =>
+      operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })) };
+  `);
+  const birth = await processBirth(process.pid);
+  const lockPath = join(launchPath, "launch-lock.json");
+  const lock = { version: 1, pid: process.pid, birth, state: "running" };
+  await writeFile(lockPath, JSON.stringify(lock));
+  const invoked: Array<{ name: string; role: string | null; launch: string | null }> = [];
+  const names = ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"];
+  const socket = await serveSocket({ info: { name: "worker", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("worker", env) },
+    context: {}, operations: names.map(name => operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }),
+      async call(_ctx, _input, invocation) { invoked.push({ name, role: invocation?.transport === "mcp" ? invocation.injected?.role ?? null : null,
+        launch: invocation?.transport === "mcp" ? invocation.injected?.launch ?? null : null }); return { ok: true }; } })) });
+  const clients: Client[] = [];
+  const connect = async (role: "admin" | "manager" | "worker" | "unassigned", overrides: Record<string, string> = {}) => {
+    const launch = (await internalMcpLaunches(root, { kind: "inject", role, launchPath, pid: process.pid, birth }, env)).worker!;
+    const transport = new StdioClientTransport({ command: launch.command, args: launch.args, env: { ...launch.env, ...overrides }, cwd: root, stderr: "pipe" });
+    const client = new Client({ name: "injected-role-fixture", version: "1" }); clients.push(client);
+    await client.connect(transport);
+    return { client, launch };
+  };
+  try {
+    for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 4)], ["worker", names.slice(0, 1)], ["unassigned", []]] as const) {
+      const { client, launch } = await connect(role);
+      assert.equal(launch.env.STACK_MCP_OPERATOR, "");
+      assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), expected);
+      for (const name of names) {
+        const before = invoked.length;
+        const result = await client.callTool({ name });
+        const permitted = (expected as readonly string[]).includes(name);
+        assert.equal(Boolean(result.isError), !permitted, `${role} ${name}`);
+        assert.equal(invoked.length, before + Number(permitted));
+        if (permitted) assert.deepEqual(invoked.at(-1), { name, role, launch: "codex-AbC123" }, "verified launch provenance reaches the owner socket");
+      }
+    }
+    const manager = await connect("manager");
+    const altered = JSON.parse(Buffer.from(manager.launch.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
+    altered.role = "admin";
+    await assert.rejects(connect("manager", { STACK_MCP_INJECT_BINDING: Buffer.from(JSON.stringify(altered)).toString("base64url") }), /closed/);
+    await assert.rejects(connect("manager", { STACK_MCP_AUTHORITY: "operator" }), /closed/);
+    await writeFile(lockPath, JSON.stringify({ ...lock, state: "exited" }));
+    assert.equal((await manager.client.callTool({ name: "worker_close" })).isError, true);
+    await assert.rejects(manager.client.listTools());
+  } finally {
+    await Promise.all(clients.map(client => client.close()));
+    await socket.close();
     await rm(root, { recursive: true, force: true });
   }
 });

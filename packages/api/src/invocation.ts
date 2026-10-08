@@ -16,6 +16,10 @@ const caller = {
 export const invocationContext = z.discriminatedUnion("transport", [
   z.strictObject({ transport: z.literal("mcp"), ...caller,
     completionWatchId: z.uuid().optional(),
+    injected: z.strictObject({ role: z.enum(["admin", "manager", "worker", "unassigned"]), launch: identity }).optional(),
+  }).superRefine((value, ctx) => {
+    if (value.injected && (value.botId || value.instance || value.workerId || value.workerInstance))
+      ctx.addIssue({ code: "custom", message: "injected Role cannot claim a managed Bot or Worker identity" });
   }),
   z.strictObject({ transport: z.literal("proc"), ...caller,
     scheduleId: z.uuid(), executionId: z.uuid(), authority: scheduledAuthority,
@@ -30,7 +34,8 @@ export const invocationContext = z.discriminatedUnion("transport", [
 ]);
 export type InvocationContext = z.infer<typeof invocationContext>;
 
-/** An explicit operator schedule has the same target permissions as the local operator. */
+/** Operator schedules and signed injected Admin launches have local operator target permissions. */
 export function operatorInvocation(invocation?: InvocationContext): boolean {
-  return !invocation || invocation.transport === "proc" && invocation.authority.kind === "operator";
+  return !invocation || invocation.transport === "proc" && invocation.authority.kind === "operator"
+    || invocation.transport === "mcp" && invocation.injected?.role === "admin";
 }

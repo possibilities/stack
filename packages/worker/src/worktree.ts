@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { renderInstructions, skillRecord, type RoleSnapshot } from "@stack/roles";
+import { renderBotInstructions, skillRecord, type RoleSnapshot } from "@stack/roles";
 
 export type ClaimedWorktree = { repo: string; cwd: string; branch: string; baseCommit: string; sourceDirty: boolean;
   roleId: string; roleRevision: number };
@@ -120,7 +120,7 @@ export async function claudeRole(stateDir: string, id: string, snapshot: RoleSna
   await writeFile(join(pluginPath, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "stack-role", version: "1.0.0" }), { mode: 0o600 });
   await mkdir(join(pluginPath, "skills"), { mode: 0o700 });
   for (const skill of snapshot.skills) await writeSkill(join(pluginPath, "skills"), skill);
-  return { pluginPath, roleInstructions: renderInstructions(snapshot) };
+  return { pluginPath, roleInstructions: renderBotInstructions(snapshot) };
 }
 export async function loadWorkerRole(stateDir: string, id: string): Promise<RoleSnapshot> {
   const snapshot = JSON.parse(await readFile(rolePath(stateDir, id), "utf8")) as RoleSnapshot;

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { serveApi, socketCall, socketPath } from "@stack/api";
+import { serveApi, socketCall, socketPath, socketSubscribe } from "@stack/api";
 import { AuthStore } from "@stack/auth";
 import { WorkerSupervisor } from "../src/supervisor.js";
 import { catalogModels, nativeDevinModels, optionsOf } from "../src/catalog.js";
@@ -161,21 +161,35 @@ test("operator disable and removal drain the exact account process before deleti
   const auth = await serveApi({ name: "auth", transport: "socket", env });
   const workers = await serveApi({ name: "worker", transport: "socket", env });
   const call = (name: string, args: object) => socketCall(socketPath("auth", env), "tools/call", { name, arguments: args });
+  const available = () => socketCall(socketPath("worker", env), "tools/call", { name: "worker_account_list", arguments: {} }) as Promise<{
+    accounts: Array<{ id: string; provider: string; enabled: boolean; ready: boolean; removing: boolean }> }>;
+  let subscription: Awaited<ReturnType<typeof socketSubscribe>> | undefined;
   try {
     const { account } = await call("worker_account_prepare", { provider: "devin" }) as { account: { id: string } };
     assert.deepEqual((await call("worker_account_list", {}) as { accounts: unknown[] }).accounts, [
       { id: account.id, provider: "devin", enabled: true, ready: false, removing: false, linkedAccounts: [] },
     ]);
+    assert.deepEqual((await available()).accounts, [{ id: account.id, provider: "devin", enabled: true, ready: false, removing: false }],
+      "Worker exposes only launch metadata from the current Auth inventory");
     const root = join(dir, "worker-accounts", account.id);
     await (await import("node:fs/promises")).mkdir(join(root, "data", "devin"), { recursive: true });
     await writeFile(join(root, "data", "devin", "credentials.toml"), 'api_key = "test-key"\napi_server_url = "https://api.devin.ai/"\n', { mode: 0o600 });
     await call("worker_account_confirm", { id: account.id });
+    assert.deepEqual((await available()).accounts, [{ id: account.id, provider: "devin", enabled: true, ready: true, removing: false }]);
     const runtimes = async () => (await socketCall(socketPath("worker", env), "tools/call", {
       name: "worker_runtime_list", arguments: {},
     }) as { runtimes: Array<{ id: string }> }).runtimes;
     for (let attempt = 0; attempt < 40 && !(await runtimes()).some((item) => item.id === account.id); attempt++)
       await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal((await runtimes()).length, 1);
+    const notices: string[] = [];
+    subscription = await socketSubscribe(socketPath("worker", env), ["workers_changed"], topic => notices.push(topic));
+    const pending = await call("worker_account_prepare", { provider: "devin" }) as { account: { id: string } };
+    for (let attempt = 0; attempt < 100 && !notices.length; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(notices.includes("workers_changed"), "a not-yet-ready account invalidates Worker socket readers without a runtime transition");
+    assert.deepEqual((await available()).accounts.find(row => row.id === pending.account.id),
+      { id: pending.account.id, provider: "devin", enabled: true, ready: false, removing: false });
+    await call("worker_account_remove", { id: pending.account.id });
     const catalog = await socketCall(socketPath("worker", env), "tools/call", {
       name: "worker_catalog", arguments: { accountId: account.id },
     }) as { models: unknown[]; runtimeVersion: string; stale: boolean };
@@ -183,12 +197,15 @@ test("operator disable and removal drain the exact account process before deleti
      assert.equal(catalog.runtimeVersion, "fake-acp 2.0");
     assert.equal(catalog.stale, false);
     await call("worker_account_set_enabled", { id: account.id, enabled: false });
+    assert.equal((await available()).accounts.find(row => row.id === account.id)?.enabled, false);
     assert.equal((await runtimes()).length, 0);
     await call("worker_account_set_enabled", { id: account.id, enabled: true });
+    assert.equal((await available()).accounts.find(row => row.id === account.id)?.enabled, true);
     for (let attempt = 0; attempt < 40 && !(await runtimes()).some((item) => item.id === account.id); attempt++)
       await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal((await runtimes()).length, 1);
     await call("worker_account_remove", { id: account.id });
+    assert.equal((await available()).accounts.some(row => row.id === account.id), false);
     assert.equal((await runtimes()).length, 0);
     await assert.rejects(stat(root), /ENOENT/);
     assert.deepEqual((await call("worker_account_list", {}) as { accounts: unknown[] }).accounts, []);
@@ -214,6 +231,7 @@ test("operator disable and removal drain the exact account process before deleti
     assert.equal((await runtimes()).length, 0);
     await assert.rejects(stat(codexRoot), /ENOENT/);
   } finally {
+    await subscription?.close();
     await workers.close();
     await auth.close();
     await rm(dir, { recursive: true, force: true });

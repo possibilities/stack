@@ -4,10 +4,13 @@ import { botMcpUrl, workerMcpUrl } from "./bot-mcp-identity.js";
 import { withLocalAuth } from "./local-auth.js";
 import { stateDir, workspaceRoot } from "./workspace.js";
 import { configuredMcpServers } from "./mcp.js";
+import { injectedMcpBinding } from "./injected-mcp.js";
+import type { PackageRole } from "./role-grants.js";
 
 export type McpStdioLaunch = { type: "stdio"; command: string; args: string[]; env: Record<string, string> };
 export type McpLaunchAuthority = { kind: "bot"; botId: string; endpoint: string } |
-  { kind: "worker"; workerId: string; instance: string } | { kind: "operator" };
+  { kind: "worker"; workerId: string; instance: string } | { kind: "operator" } |
+  { kind: "inject"; role: PackageRole; launchPath: string; pid: number; birth: string };
 
 /** Private launch config only: env values contain authority and never belong in discovery. */
 export async function internalMcpLaunches(root: string, authority: McpLaunchAuthority, env: NodeJS.ProcessEnv = process.env): Promise<Record<string, McpStdioLaunch>> {
@@ -17,6 +20,7 @@ export async function internalMcpLaunches(root: string, authority: McpLaunchAuth
   const values: Record<string, string> = {
     STACK_STATE_DIR: resolve(stateDir(env)), STACK_MCP_ROOT: resolve(root), STACK_MCP_AUTHORITY: authority.kind,
     STACK_MCP_BINDING: binding, STACK_MCP_OPERATOR: authority.kind === "operator" ? withLocalAuth(env, auth => `Bearer ${auth.credential("stdio")}`) : "",
+    STACK_MCP_INJECT_BINDING: authority.kind === "inject" ? injectedMcpBinding(authority.launchPath, authority.pid, authority.birth, authority.role, env) : "",
     // Harnesses may replace HOME and PATH. Bridges still use the operator's installation.
     HOME: home, STACK_CODEX_TOOLS_HOME: env.STACK_CODEX_TOOLS_HOME ?? join(home, ".codex"),
     XDG_CONFIG_HOME: env.XDG_CONFIG_HOME ?? join(home, ".config"),

@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { configuredMcpServers, workspaceRoot, withLocalAuth, serveApi, socketCall, socketPath, socketSubscribe } from "@stack/api";
+import { configuredMcpServers, workspaceRoot, serveApi, socketCall, socketPath, socketSubscribe } from "@stack/api";
 import { startOpenCodeHost } from "../src/inject-opencode.js";
 import { RoleStore, type RoleCatalog } from "../src/store.js";
 
@@ -117,11 +117,15 @@ test("inject provisions missing defaults without a server and regenerates capabi
       f.run(["inject", "--", "claude"]),
       f.run(["inject", "Worker", "--", "claude"]),
     ]);
-    for (const result of results) {
+    for (const [index, result] of results.entries()) {
       assert.equal(result.code, 0, result.stderr);
       const report = JSON.parse(result.stdout);
-      assert.equal(report.instructions, "");
+      if (index === 0) assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
+      else assert.equal(report.instructions, "");
       assert.deepEqual(report.skills, {});
+      const binding = JSON.parse(Buffer.from(report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
+      assert.equal(binding.role, index === 0 ? "manager" : "worker");
+      assert.equal(report.config.mcpServers.roles.env.STACK_MCP_OPERATOR, "");
     }
     await assert.rejects(stat(socketPath("roles", f.env)), { code: "ENOENT" });
     assert.equal((await stat(f.state)).mode & 0o777, 0o700);
@@ -142,7 +146,7 @@ test("inject provisions missing defaults without a server and regenerates capabi
     await f.call("fragment_create", { roleId, expectedRevision: 1, categoryId: snapshot.categories[0].id, title: "Rule", body: "First revision" });
     const first = await f.run(["inject", "--", "claude"]);
     assert.equal(first.code, 0, first.stderr);
-    assert.equal(JSON.parse(first.stdout).instructions, "First revision");
+    assert.ok(JSON.parse(first.stdout).instructions.startsWith("First revision"));
     const authored = await f.call("role_snapshot", { roleId });
     await f.call("fragment_update", { roleId, expectedRevision: 2, id: authored.categories[0].fragments[0].id, body: "Revised instructions" });
     await f.call("skill_create", { roleId, expectedRevision: 3, name: "new-skill", description: "Added later", body: "Revised skill" });
@@ -150,11 +154,15 @@ test("inject provisions missing defaults without a server and regenerates capabi
     const second = await f.run(["inject", "--", "claude"]);
     assert.equal(second.code, 0, second.stderr);
     const regenerated = JSON.parse(second.stdout);
-    assert.equal(regenerated.instructions, "Revised instructions");
+    assert.ok(regenerated.instructions.startsWith("Revised instructions"));
     assert.match(regenerated.skills["new-skill/SKILL.md"], /Revised skill/);
     const worker = await f.run(["inject", "Worker", "--", "claude"]);
     assert.equal(worker.code, 0, worker.stderr);
     assert.equal(JSON.parse(worker.stdout).instructions, "");
+    const admin = await f.run(["inject", "Admin", "--", "claude"]);
+    assert.equal(admin.code, 0, admin.stderr);
+    const adminBinding = JSON.parse(Buffer.from(JSON.parse(admin.stdout).config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
+    assert.equal(adminBinding.role, "admin");
   } finally { await server?.close(); await f.close(); }
 });
 
@@ -236,6 +244,10 @@ test("inject launches each native boundary with the selected bytes, private cred
       assert.equal(result.code, 7, result.stderr);
       const report = JSON.parse(result.stdout);
       assert.ok(!report.argv.some((arg: string) => /with-model|with-harness|render-only/.test(arg)));
+      const binding = harness === "claude" ? report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING
+        : harness === "opencode" ? report.config.mcp.servers.roles.environment.STACK_MCP_INJECT_BINDING
+          : /"STACK_MCP_INJECT_BINDING" = "([^"]+)"/.exec(report.config)?.[1];
+      assert.equal(JSON.parse(Buffer.from(binding, "base64url").toString()).role, "unassigned", "a custom Role keeps its capabilities without acquiring canonical grants");
       assert.deepEqual(harness === "opencode" ? [report.argv[0], ...report.argv.slice(3)] : report.argv.slice(-native.length), native);
       assert.equal(report.input, "piped input\n");
       assert.deepEqual(Object.keys(report.skills).sort(), [`only-${harness}/SKILL.md`, "role-skill/SKILL.md", "role-skill/assets/bytes.txt"]);
@@ -243,12 +255,15 @@ test("inject launches each native boundary with the selected bytes, private cred
       assert.equal(report.skills["role-skill/assets/bytes.txt"], "support\0bytes");
       assert.match(report.skills["role-skill/SKILL.md"], /Role skill body/);
       if (harness === "claude") {
-        assert.equal(report.instructions, instructions);
+        assert.ok(report.instructions.startsWith(instructions));
+        assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
         assert.equal(report.memory, "1");
         assert.equal(report.argv[report.argv.indexOf("--setting-sources") + 1], "");
         assert.equal(report.config.mcpServers.roles.type, "stdio");
         assert.equal(report.config.mcpServers.roles.command, process.execPath);
-        withLocalAuth(f.env, auth => auth.operator(report.config.mcpServers.roles.env.STACK_MCP_OPERATOR, "stdio"));
+        assert.equal(report.config.mcpServers.roles.env.STACK_MCP_AUTHORITY, "inject");
+        assert.equal(report.config.mcpServers.roles.env.STACK_MCP_OPERATOR, "");
+        assert.ok(report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING);
         assert.equal(report.config.mcpServers.roles.env.STACK_STATE_DIR, f.state);
         assert.equal(report.config.mcpServers.roles.env.HOME, f.home);
         assert.equal(report.config.mcpServers.external.headers.Authorization, "Bearer private-fixture-token");
@@ -262,9 +277,11 @@ test("inject launches each native boundary with the selected bytes, private cred
           assert.equal(report.ambient, null);
           assert.equal(report.authLink, join(f.env.CODEX_HOME, "auth.json"));
           assert.match(report.config, /developer_instructions = "  Role instructions/);
+          assert.match(report.config, /Be a thoughtful, warm and capable collaborator/);
           assert.match(report.config, /private-fixture-token/);
           assert.match(report.config, /private-fixture-env/);
-          assert.ok(report.config.includes(withLocalAuth(f.env, auth => `Bearer ${auth.credential("stdio")}`)));
+          assert.match(report.config, /STACK_MCP_AUTHORITY.*inject/);
+          assert.doesNotMatch(report.config, /STACK_MCP_OPERATOR[^\n]*Bearer/);
           assert.doesNotMatch(report.config, /disabled-mcp|notify|ambient/);
           assert.deepEqual([...report.config.matchAll(/\[mcp_servers\."([^"]+)"\]/g)].map(match => match[1]).sort(), selectedNames);
           assert.equal(await readFile(join(report.root, "home", ".codex", "session-fixture"), "utf8"), "history");
@@ -279,13 +296,16 @@ test("inject launches each native boundary with the selected bytes, private cred
           assert.equal(report.config.mcp.servers.external.headers["X-Test"], "private-fixture-header");
           assert.equal(report.config.mcp.servers.roles.type, "local");
           assert.equal(report.config.mcp.servers.roles.command[0], process.execPath);
-          withLocalAuth(f.env, auth => auth.operator(report.config.mcp.servers.roles.environment.STACK_MCP_OPERATOR, "stdio"));
+          assert.equal(report.config.mcp.servers.roles.environment.STACK_MCP_AUTHORITY, "inject");
+          assert.equal(report.config.mcp.servers.roles.environment.STACK_MCP_OPERATOR, "");
+          assert.ok(report.config.mcp.servers.roles.environment.STACK_MCP_INJECT_BINDING);
           assert.equal(report.config.mcp.servers.roles.environment.STACK_STATE_DIR, f.state);
           assert.deepEqual(report.config.mcp.servers.stdio.command, [process.execPath, "--version", "one argument"]);
           assert.deepEqual(Object.keys(report.config.mcp.servers).sort(), selectedNames);
           assert.ok(report.config.plugins.includes("-opencode.config.compatibility"));
           assert.ok(report.config.plugins.includes("-opencode.config.instruction"));
-          assert.equal(report.instructions, instructions);
+          assert.ok(report.instructions.startsWith(instructions));
+          assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
           assert.equal(report.disposed, true);
           assert.equal(report.unauthorized, 401);
           assert.ok(Array.isArray(report.nativeConfig));
@@ -302,7 +322,7 @@ test("inject launches each native boundary with the selected bytes, private cred
     }
     const defaultRun = await f.run(["inject", "default", "--with-model=render-only-model", "--with-harness=render-only-harness", "--", "claude"]);
     assert.equal(defaultRun.code, 0, defaultRun.stderr);
-    assert.equal(JSON.parse(defaultRun.stdout).instructions, instructions);
+    assert.ok(JSON.parse(defaultRun.stdout).instructions.startsWith(instructions));
     assert.deepEqual(await readFile(rolePath), before);
     assert.equal((await stat(rolePath)).mtimeMs, beforeStat.mtimeMs);
     // Imported definitions cannot bypass the launch collision guard merely
@@ -347,7 +367,8 @@ test("Role shim API installs a real PATH command, preserves both argument region
     const report = JSON.parse(result.stdout);
     assert.equal(report.harness, "claude");
     assert.deepEqual(report.argv.slice(-7), ["--model", "test/model", "--output-format=json", "--max-turns", "3", "--", "an argument with ' quotes"]);
-    assert.equal(report.instructions, instructions);
+    assert.ok(report.instructions.startsWith(instructions));
+    assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
     await symlink(join(f.bin, "claude"), join(f.bin, "foreign-shim"));
     await assert.rejects(f.call("role_shim_create", { name: "foreign-shim", args }), /refusing to replace/);
     await assert.rejects(f.call("role_shim_delete", { name: "foreign-shim", expectedRevision: updated.revision }), /not a Stack-owned/);
@@ -392,7 +413,7 @@ test("default selection is catalog-marked; empty Roles still isolate; invalid na
   try {
     const initiallyDefault = await f.run(["inject", "--", "claude"]);
     assert.equal(initiallyDefault.code, 0, initiallyDefault.stderr);
-    assert.equal(JSON.parse(initiallyDefault.stdout).instructions, "");
+    assert.match(JSON.parse(initiallyDefault.stdout).instructions, /Be a thoughtful, warm and capable collaborator/);
     await populate(f);
     const catalog = await f.call("roles_snapshot");
     const created = await f.call("role_create", { expectedRevision: catalog.revision, name: "Empty" });
@@ -400,14 +421,14 @@ test("default selection is catalog-marked; empty Roles still isolate; invalid na
     await f.call("role_set_default", { expectedRevision: created.revision, roleId: emptyId });
     const named = await f.run(["inject", "Research É", "--", "claude"]);
     assert.equal(named.code, 0, named.stderr);
-    assert.equal(JSON.parse(named.stdout).instructions, instructions, "an explicit name selects the non-default Role");
+    assert.ok(JSON.parse(named.stdout).instructions.startsWith(instructions), "an explicit name selects the non-default Role");
     for (const [selector, harness] of [[[], "claude"], [["default"], "codex"], [["Empty"], "opencode"]] as const) {
       const result = await f.run(["inject", ...selector, "--", harness]);
       assert.equal(result.code, 0, result.stderr);
       const report = JSON.parse(result.stdout);
       assert.deepEqual(report.skills, {});
-      if (harness === "claude") assert.equal(report.instructions, "");
-      if (harness === "codex") assert.match(report.config, /^developer_instructions = ""/);
+      if (harness === "claude") assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
+      if (harness === "codex") assert.match(report.config, /Be a thoughtful, warm and capable collaborator/);
       if (harness === "opencode") assert.equal(report.env.project, "1");
     }
     for (const args of [

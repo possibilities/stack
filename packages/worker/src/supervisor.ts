@@ -54,7 +54,12 @@ export class WorkerSupervisor {
   private async connect(): Promise<void> {
     if (this.closing) return;
     try {
-      this.watch = await socketSubscribe(socketPath("auth", this.env), ["worker_accounts_changed"], () => { void this.reconcile().catch(() => undefined); });
+      this.watch = await socketSubscribe(socketPath("auth", this.env), ["worker_accounts_changed"], () => {
+        this.onChange?.();
+        void this.reconcile().catch(() => undefined);
+      });
+      // A reconnect may have missed account changes; invalidate readers before reconciling runtimes.
+      this.onChange?.();
       await this.reconcile();
       void this.watch.closed.then(() => { this.watch = undefined; if (!this.closing) setTimeout(() => void this.connect(), 2_000).unref(); });
     } catch {
@@ -62,7 +67,7 @@ export class WorkerSupervisor {
     }
   }
 
-  private accounts(): Promise<WorkerAccount[]> {
+  accounts(): Promise<WorkerAccount[]> {
     return socketCall(socketPath("auth", this.env), "tools/call", { name: "worker_account_list", arguments: {} }, { timeoutMs: 5_000 })
       .then((value) => (value as { accounts: WorkerAccount[] }).accounts);
   }

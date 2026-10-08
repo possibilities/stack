@@ -34,6 +34,11 @@ export class HudService {
     return (await socketCall(socketPath("bots", this.env), "tools/call", { name: "bot_list", arguments: {} }, { timeoutMs: 2000 }) as { bots: Bot[] }).bots;
   }
   async caller(invocation?: InvocationContext): Promise<Caller> {
+    if (invocation?.transport === "mcp" && invocation.injected) {
+      if (invocation.injected.role !== "admin" && invocation.injected.role !== "manager")
+        throw new Error("hud_work_scope: Role has no Work management grant");
+      return { actor: { kind: "operator" }, lineage: [], role: invocation.injected.role };
+    }
     if (operatorInvocation(invocation) || invocation?.transport === "mcp" && !invocation.botId && !invocation.workerId)
       return { actor: { kind: "operator" }, lineage: [], role: "admin" };
     if (!invocation?.botId || !invocation.instance || !invocation.threadId || invocation.workerId)

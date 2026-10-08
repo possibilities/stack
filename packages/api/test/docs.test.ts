@@ -55,10 +55,10 @@ test("the api package serves structured documents for every workspace package", 
     }
     const snapshot = (await socketCall(served.socketPath, "tools/call", { name: "docs_snapshot", arguments: {} })) as { packages: PackageDoc[] };
     const mcpByPackage = new Map([...found].map(([name, doc]) => [name, doc.transports.find(entry => entry.type === "mcp" && entry.supported)?.operations ?? []]));
-    assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 286);
+    assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 287);
     for (const role of ["manager", "worker"] as const) {
       const selected = roleGrants[role] as Record<string, readonly string[]>;
-      assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 18 : 29);
+      assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 19 : 29);
       for (const [pkg, names] of Object.entries(selected)) for (const name of names)
         assert.ok(mcpByPackage.get(pkg)?.includes(name), `stale ${role} grant: ${pkg}.${name}`);
       assert.equal(packageToolAllowed(role, "roles", "role_set_default"), false);
@@ -413,7 +413,7 @@ test("the api package serves structured documents for every workspace package", 
     }
     assert.deepEqual(Object.keys(workers.events).sort(), ["worker_changed", "worker_progress", "worker_turn_changed", "workers_changed"]);
     assert.equal(workers.eventScope?.required, false);
-    assert.deepEqual(workers.operations.map((operation) => operation.name).filter(name => !stateOperation(name)), ["worker_settings_catalog", "worker_settings_read", "worker_settings_preview", "worker_settings_patch", "worker_settings_apply", "worker_catalog", "worker_runtime_list", "worker_account_drain",
+    assert.deepEqual(workers.operations.map((operation) => operation.name).filter(name => !stateOperation(name)), ["worker_settings_catalog", "worker_settings_read", "worker_settings_preview", "worker_settings_patch", "worker_settings_apply", "worker_catalog", "worker_account_list", "worker_runtime_list", "worker_account_drain",
       "worker_start", "worker_list", "worker_status", "worker_read", "worker_detail", "worker_turn_list", "worker_record_list", "worker_record_read", "worker_tool_list",
       "worker_diff", "worker_send", "worker_respond", "worker_cancel", "worker_resume", "worker_close", "worker_remove", "worker_work_list", "worker_turn_context", "worker_turn_observation", "worker_event_receive", "worker_event_list"]);
     for (const name of ["worker_list", "worker_detail", "worker_turn_list", "worker_record_list", "worker_record_read", "worker_tool_list", "worker_diff"]) {

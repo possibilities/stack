@@ -100,7 +100,7 @@ function sdkFixture() {
   return { factory, calls };
 }
 
-const role: RoleSnapshot = { id: randomUUID(), name: "Fixture", description: "", createdAt: null, updatedAt: null, disabledInternalMcpServers: [], revision: 3, categories: [{ id: randomUUID(), title: "Role", description: "", enabled: true, createdAt: null, updatedAt: null,
+const role: RoleSnapshot = { id: randomUUID(), name: "Fixture", description: "", botMarkdown: "Worker personality marker.", createdAt: null, updatedAt: null, disabledInternalMcpServers: [], revision: 3, categories: [{ id: randomUUID(), title: "Role", description: "", enabled: true, createdAt: null, updatedAt: null,
   fragments: [{ id: randomUUID(), categoryId: randomUUID(), title: "Instruction", description: "", body: "Check your work.", enabled: true, createdAt: null, updatedAt: null }] }],
 skills: [{ id: randomUUID(), name: "fixture", description: "Fixture skill", body: "Review carefully", enabled: true, files: [], harnesses: ["claude"] },
   { id: randomUUID(), name: "excluded", description: "Not for Claude", body: "Do not load", enabled: true, files: [], harnesses: ["codex"] }],
@@ -166,7 +166,7 @@ test("Claude SDK workers preserve account/session continuity, exact permission a
     assert.equal(native.options.env!.ANTHROPIC_API_KEY, undefined); assert.equal(native.options.env!.CLAUDE_CODE_OAUTH_TOKEN, undefined);
     assert.equal(native.options.env!.CLAUDE_CODE_RESUME_INTERRUPTED_TURN, undefined);
     assert.deepEqual(native.options.settingSources, []); assert.equal(native.options.strictMcpConfig, true);
-    assert.deepEqual(native.options.systemPrompt, { type: "preset", preset: "claude_code", append: "Check your work." });
+    assert.deepEqual(native.options.systemPrompt, { type: "preset", preset: "claude_code", append: "Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker." });
     const plugin = native.options.plugins![0]!;
     assert.match(await readFile(join(plugin.path, "skills", "fixture", "SKILL.md"), "utf8"), /Review carefully/);
     await assert.rejects(stat(join(plugin.path, "skills", "excluded")), { code: "ENOENT" });
@@ -251,7 +251,7 @@ test("Claude SDK workers preserve account/session continuity, exact permission a
     assert.equal(resumedNative.options.resume, first.worker.sessionId);
     assert.equal(resumedNative.options.mcpServers!["codex-computer-use"], undefined);
     assert.equal(resumedNative.options.mcpServers!.excluded, undefined);
-    assert.deepEqual(resumedNative.options.systemPrompt, { type: "preset", preset: "claude_code", append: "Check your work." });
+    assert.deepEqual(resumedNative.options.systemPrompt, { type: "preset", preset: "claude_code", append: "Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker." });
     assert.equal(resumedNative.options.sessionId, undefined); assert.equal(resumedNative.inputs.length, 0);
     assert.equal(native.inputs.length, beforeLoss + 1); assert.equal(manager.ledger.turn(lost.turn!.id)?.phase, "unknown");
     await manager.send({ id, message: "Explicit correction", requestId: randomUUID() }); await wait(manager, id, "idle");

@@ -5,7 +5,7 @@ export const roleGrants = {
   manager: {
     hud: ["work_create", "work_update", "work_get", "work_list", "work_note_add", "work_context_resolve", "work_resources"],
     notify: ["notification_send", "notification_get"],
-    worker: ["worker_list", "worker_status", "worker_read", "worker_catalog", "worker_start", "worker_send", "worker_cancel", "worker_resume", "worker_close"],
+    worker: ["worker_list", "worker_status", "worker_read", "worker_catalog", "worker_account_list", "worker_start", "worker_send", "worker_cancel", "worker_resume", "worker_close"],
   },
   worker: {
     brain: ["search", "get", "context"],

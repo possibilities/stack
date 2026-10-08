@@ -54,7 +54,7 @@ export function renderInstructions(snapshot: Pick<RoleSnapshot, "categories">, c
   return renderSegments(snapshot, context).rendered;
 }
 
-/** Bot launches append the Role's personality; Workers and injected CLIs keep their existing instructions. */
+/** The Role's complete appended instructions for Bots, Workers and injected CLIs. */
 export function renderBotInstructions(snapshot: Pick<RoleSnapshot, "categories" | "botMarkdown">, context: RenderContext = {}): string {
   const instructions = renderInstructions(snapshot, context);
   const personality = snapshot.botMarkdown ?? "";
@@ -167,12 +167,20 @@ export class RoleStore {
 
   /** Injection resolves names and reads complete resources in one SQLite snapshot. */
   namedLaunchSnapshot(name: string): RoleSnapshot {
+    return this.namedAccessLaunch(name).snapshot;
+  }
+
+  /** Canonical access is captured with the Role, never inferred from its mutable name. */
+  namedAccessLaunch(name: string): { snapshot: RoleSnapshot; access: "admin" | "manager" | "worker" | "unassigned" } {
     return transaction(this.db, false, () => {
       const catalog = this.readCatalog();
       const fold = (text: string) => text.replace(/[A-Z]/g, char => char.toLowerCase());
       const selected = name === "default" ? catalog.defaultRoleId : catalog.roles.find(role => fold(role.name) === fold(name))?.id;
       if (!selected) throw new Error(name === "default" ? "no Bot default Role; run stack serve and provision Roles" : `unknown Role name: ${name}`);
-      return this.role(selected).readSnapshot();
+      const ids = this.accessRoleIds();
+      const access = selected === ids.adminRoleId ? "admin" : selected === ids.managerRoleId ? "manager"
+        : selected === ids.workerRoleId ? "worker" : "unassigned";
+      return { snapshot: this.role(selected).readSnapshot(), access };
     });
   }
 

@@ -1,17 +1,12 @@
-import { execFile } from "node:child_process";
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { StateJournal, clearStateFiles, listStateFiles, readStateFile, snapshotStateFiles, stateHash,
-  type StateApplyInput, type FileSnapshot } from "@stack/api";
+  processBirth, type StateApplyInput, type FileSnapshot } from "@stack/api";
+export { processBirth } from "@stack/api";
 
 export const launchId = z.string().regex(/^(codex|claude|opencode)-[A-Za-z0-9]{6}$/);
 const launchLock = z.strictObject({ version: z.literal(1), pid: z.number().int().positive(), birth: z.string().min(1), state: z.enum(["preparing", "running", "exited"]) });
-export async function processBirth(pid: number): Promise<string> {
-  const { stdout } = await promisify(execFile)("/bin/ps", ["-p", String(pid), "-o", "lstart="], { env: { ...process.env, LC_ALL: "C" }, timeout: 5000, maxBuffer: 4096 });
-  const birth = stdout.trim(); if (!birth) throw new Error("launch process identity unavailable"); return birth;
-}
 type Prepared = { ids: string[]; snapshot: FileSnapshot };
 export async function factoryRoleLaunchBlockers(stateDir: string) {
   const root = join(stateDir, "roles", "inject"), blockedBy: string[] = [];

@@ -92,6 +92,16 @@ export const workerCatalog = operation({
   annotations: { title: "Account-bound worker catalog", readOnlyHint: true },
   async call(ctx: WorkersContext, { accountId, refresh }) { return ctx.supervisor.catalog(accountId, refresh ?? false); },
 });
+export const workerAccountList = operation({
+  name: "worker_account_list", description: "List current Worker account IDs, providers and launch eligibility from Auth, without credentials or Bot account links. enabled and ready must both be true and removing false before worker_start. Worker socket/WebSocket workers_changed notices invalidate cached lists; MCP clients should re-read before choosing an account.",
+  input: z.strictObject({}), output: z.strictObject({ accounts: z.array(z.strictObject({
+    id, provider: z.enum(["codex", "devin", "claude"]), enabled: z.boolean(), ready: z.boolean(), removing: z.boolean(),
+  })) }), annotations: { title: "List available Worker accounts", readOnlyHint: true },
+  async call(ctx: WorkersContext) {
+    return { accounts: (await ctx.supervisor.accounts()).map(({ id, provider, enabled, ready, removing }) =>
+      ({ id, provider, enabled, ready, removing })) };
+  },
+});
 export const workerRuntimeList = operation({
   name: "worker_runtime_list", description: "Read account runtime health. ACP owns one account process; Claude SDK owns separate session children (pid is null, pids lists current children). A running SDK group may have no children until catalog or session setup.",
   input: z.strictObject({}), output: z.strictObject({ runtimes: z.array(z.strictObject({ id, provider: z.enum(["codex", "devin", "claude"]),
@@ -249,7 +259,7 @@ export const workerTurnContext = operation({ name: "worker_turn_context", descri
   async call(ctx: WorkersContext, input, invocation) { return ctx.manager.turnContext(input.id, input.turnId, invocation); },
 });
 const packageApi: PackageApi<WorkersContext, keyof typeof topics> = {
-   operations: [workerAccountStateDependencies, workerBotDependencies, workerWorkspaceList, workerWorkspaceRead, ...workerStateOperations, ...workerSettingsOperations, workerCatalog, workerRuntimeList, workerAccountDrain, workerStart, workerList, workerStatus, workerRead,
+   operations: [workerAccountStateDependencies, workerBotDependencies, workerWorkspaceList, workerWorkspaceRead, ...workerStateOperations, ...workerSettingsOperations, workerCatalog, workerAccountList, workerRuntimeList, workerAccountDrain, workerStart, workerList, workerStatus, workerRead,
     workerDetail, workerTurnList, workerRecordList, workerRecordRead, workerToolList, workerDiff,
       workerSend, workerRespond, workerCancel, workerResume, workerClose, workerRemove, workerWorkList, workerTurnContext, workerTurnObservation, workerEventReceive, workerEventList, workerCompletionIdentity],
   events: {
