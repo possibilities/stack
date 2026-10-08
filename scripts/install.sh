@@ -6,8 +6,8 @@ workshops_root="${STACK_WORKSHOPS_ROOT:-$HOME/workshops}"
 bin_dir="${STACK_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 runtime_installer="$workshops_root/codexnk/scripts/install.sh"
 # Exact reviewed runtime dependency; keep AgentStart's shared consumer pin aligned.
-release_tag=codexnk-v0.1.8
-integration_sha=6ddf4f91251200f5e330d35a8e142fb4b435baa1
+release_tag=codexnk-v0.1.9
+integration_sha=f90eede076ea40885897c5f2e165b4d48f0fb28f
 mode="${1:---check}"
 if [ "$#" -gt 1 ]; then mode=invalid; fi
 case "$mode" in
