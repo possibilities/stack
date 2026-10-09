@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { localOperation, type Page } from "@/lib/stack/state";
+import { localOperation } from "@/lib/stack/state";
 import type { ContentVaultHistoryEntry, ContentVaultHistoryPage } from "@/lib/stack/types";
-import { usePagedRead } from "./owner-reads";
+import { ObservationStatus, usePagedRead } from "./owner-reads";
 import { useStack, useStore } from "./provider";
 
 const hint = "text-xs text-pretty text-muted-foreground";
@@ -54,20 +54,20 @@ function ExactSlugHistory() {
 function HistoryReader({ slug }: { slug: string }) {
   const store = useStore();
   const state = useStack();
-  const pages = usePagedRead<ContentVaultHistoryEntry>(async (offset, revision) => {
-    if (state.status.content !== "open") throw new Error("The Content connection is not open.");
+  const pages = usePagedRead<ContentVaultHistoryEntry, ContentVaultHistoryPage>(async (offset, revision) => {
     const page = await store.call<ContentVaultHistoryPage>("content", "content_vault_history_plan", { slugs: [slug], offset, limit: 50, ...(revision ? { revision } : {}) });
     return { ...page, items: page.entries };
-  }, `content:vault-history:${slug}:${state.status.content}`, state.contentGeneration);
-  const page = pages.page as (Page<ContentVaultHistoryEntry> & Pick<ContentVaultHistoryPage, "commitsScanned" | "paths" | "remotes" | "retained">) | null;
+  }, `content:vault-history:${slug}:50`, state.contentGeneration, { pkg: "content", operation: "content_vault_history_plan" });
+  const page = pages.page;
   return <section aria-label={`Retained history for ${slug}`} className="flex min-w-0 flex-col gap-2">
     <div className="flex flex-wrap items-center gap-2">
       <code className="min-w-0 break-all text-xs">{slug}</code>
       <Button size="xs" variant="ghost" disabled={pages.loading || state.status.content !== "open"} onClick={pages.refresh}>{pages.loading ? <Spinner data-icon="inline-start" /> : null}Refresh history</Button>
     </div>
     {pages.error ? <p role="alert" className="text-xs text-destructive">Retained history inspection failed: {pages.error}. Coverage is unavailable, not proof that no bodies remain.</p> : null}
+    <ObservationStatus read={pages} />
     {page?.restarted ? <p role="status" className="text-xs text-warning">Vault history changed while paging; restarted from the first page.</p> : null}
-    {page && !pages.error ? <>
+    {page ? <>
       <p className={hint}>{page.commitsScanned} commits scanned · {page.items.length} entries loaded{page.nextOffset !== null ? " · more available" : ""}</p>
       <ul aria-label="Observed Vault paths" className="flex flex-col gap-1 text-xs">
         {page.paths.map((path) => <li key={`${path.slug}:${path.path}`}><code className="break-all">{path.path}</code> · {path.current ? "current path" : "historical path"}</li>)}
@@ -85,7 +85,7 @@ function HistoryReader({ slug }: { slug: string }) {
         {page.remotes.map((remote) => <li key={remote.name}><code className="break-all">{remote.name}</code> · fetch {remote.fetch ? "present" : "absent"} · push {remote.push ? "present" : "absent"}</li>)}
       </ul> : <p className={hint}>No remotes configured in this observation; clones and backups remain unobservable.</p>}
       {page.retained.map((text, index) => <p key={index} className={hint}>{text}</p>)}
-      {page.nextOffset !== null ? <Button size="xs" variant="ghost" className="self-start" disabled={pages.loading} onClick={pages.more}>Load more history</Button> : null}
+      {page.nextOffset !== null ? <Button size="xs" variant="ghost" className="self-start" disabled={!pages.canMore} onClick={pages.more}>Load more history</Button> : null}
     </> : null}
   </section>;
 }

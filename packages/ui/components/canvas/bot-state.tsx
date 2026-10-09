@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { errorMessage } from "./auth-actions";
 import { BotLifecycleControls } from "./bot-actions";
 import { BotAction, hintClass, labelClass, MoreButton, Pill, ReadError, useBotAction, useBotPages, useBotRead, ViewHeader, type BotScope } from "./bot-state-shared";
+import { ObservationStatus, useRevealedRead } from "./owner-reads";
 import { LogView, RecoveryView, UploadsView, WorkspaceView } from "./bot-state-files";
 import { MaintenanceDisclosure, StateFlowView, StateReceiptView } from "./state-flow";
 import { StateEntryDetails } from "./state-windows";
@@ -60,7 +61,7 @@ export function BotStateWindow() {
   const observe = botId ? botStateGenerations[botId] ?? 0 : 0;
   const access = localOperation(state, "bots", "bot_state_read");
   const unavailable = remote ? "Bot state is available only on the local UI." : !access.available ? access.reason : status.bots !== "open" ? "The bots connection is not open." : null;
-  const read = useBotRead(() => botId && !unavailable ? store.call<BotStateRead>("bots", "bot_state_read", { botId }) : Promise.resolve(null), `${botId}:${unavailable ?? ""}`, observe);
+  const read = useBotRead(() => store.call<BotStateRead>("bots", "bot_state_read", { botId }), botId, observe, { pkg: "bots", operation: "bot_state_read" });
   if (remote) {
     return (
       <Window id="bot-state" title="Bot state" icon={HardDriveIcon} accent="bots" empty>
@@ -87,6 +88,7 @@ export function BotStateWindow() {
         {unavailable ? <p className={hintClass}>{unavailable}</p> : null}
         {!botId ? <Empty icon={HardDriveIcon} title="Choose a Bot to inspect its state" /> : null}
         <ReadError error={read.error} what="Bot state" />
+        <ObservationStatus read={read} />
         {botId && !data && read.loading ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner />Reading {botId}&rsquo;s state and cleanup dependencies…</p> : null}
         {scope && bot && data ? (
           <>
@@ -221,7 +223,7 @@ function Overview({ scope, bot, data, refresh }: { scope: BotScope; bot: Bot; da
 function MaintenanceFence({ scope, requestId, onReleased }: { scope: BotScope; requestId: string; onReleased(): void }) {
   const store = useStore();
   const now = useNow(15_000);
-  const receipt = useBotRead(() => store.call<{ receipt: StateReceipt | null }>("bots", "bot_state_receipt_get", { requestId }).then((value) => value.receipt), `${scope.incarnation}:${requestId}`, scope.observe);
+  const receipt = useBotRead(() => store.call<{ receipt: StateReceipt | null }>("bots", "bot_state_receipt_get", { requestId }).then((value) => value.receipt), `${scope.incarnation}:${requestId}`, scope.observe, { pkg: "bots", operation: "bot_state_receipt_get" });
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,7 +238,8 @@ function MaintenanceFence({ scope, requestId, onReleased }: { scope: BotScope; r
     <section aria-label="Maintenance fence" className="flex flex-col gap-1.5 rounded-lg border border-warning/50 bg-warning/5 p-2">
       <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldAlertIcon aria-hidden className="size-3.5 text-warning" />An earlier cleanup is unresolved, so this Bot cannot start</span>
       <ReadError error={receipt.error} what="Receipt" />
-      {receipt.data ? <StateReceiptView receipt={receipt.data} now={now} /> : receipt.data === null && !receipt.loading && !receipt.error ? <p className="text-xs text-muted-foreground">The owner has no receipt for request {requestId}.</p> : null}
+      <ObservationStatus read={receipt} />
+      {receipt.data ? <StateReceiptView receipt={receipt.data} now={now} /> : receipt.hasRead && !receipt.stale && !receipt.error ? <p className="text-xs text-muted-foreground">The owner has no receipt for request {requestId}.</p> : null}
       <p className={hintClass}>Inspect the outcomes and the remaining files. Releasing the fence acknowledges that inspection so the Bot can start again. It does not finish the cleanup, and the receipt stays {receipt.data?.status ?? "as it is"}.</p>
       <Button size="sm" variant="outline" className="self-start" disabled={running || !!scope.unavailable} title={running ? "Cleanup is still running" : undefined} onClick={() => { setError(null); setConfirming(true); }}>Release start fence…</Button>
       <AlertDialog open={confirming} onOpenChange={(value) => { if (!value && !pending) setConfirming(false); }}>
@@ -266,13 +269,14 @@ function ConversationView({ scope, bot }: { scope: BotScope; bot: Bot }) {
   const [history, setHistory] = useState<"retain" | "purge" | null>(null);
   const [purging, setPurging] = useState<string | null>(null);
   const pages = useBotPages<BotHistoryGeneration>((offset, revision) => store.call<{ generations: BotHistoryGeneration[]; revision: string; nextOffset: number | null }>("bots", "bot_history_list",
-    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ items: page.generations, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
+    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ ...page, items: page.generations })), `${scope.incarnation}:100`, scope.observe, { pkg: "bots", operation: "bot_history_list" });
   const reset = useBotAction(scope, { kind: "session_reset", history: history ?? "retain" }, history ? null : "Choose whether to retain or purge the current history.");
   const idle = reset.flow.phase === "idle";
   return (
     <div className="flex flex-col gap-2.5">
       <ViewHeader title="Conversation generations" loading={pages.loading} onRefresh={pages.refresh} />
       <ReadError error={pages.error} what="History generations" />
+      <ObservationStatus read={pages} />
       {pages.page ? (
         <ul aria-label="History generations" className="flex flex-col gap-1">
           {pages.page.items.map((generation) => (
@@ -295,7 +299,7 @@ function ConversationView({ scope, bot }: { scope: BotScope; bot: Bot }) {
           ))}
         </ul>
       ) : null}
-      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} onMore={pages.more} restarted={pages.page.restarted} /> : null}
+      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} canMore={pages.canMore} onMore={pages.more} restarted={pages.page.restarted} /> : null}
       <section aria-label="Reset conversation" className="flex flex-col gap-1.5 border-t pt-2">
         <span className={labelClass}>Reset conversation</span>
         <ul className="flex list-disc flex-col gap-0.5 pl-4 text-[0.72rem] text-muted-foreground">
@@ -324,9 +328,9 @@ function QueueView({ scope }: { scope: BotScope }) {
   const store = useStore();
   const now = useNow(60_000);
   const pages = useBotPages<BotQueueEntry>((offset, revision) => store.call<{ entries: BotQueueEntry[]; revision: string; nextOffset: number | null }>("bots", "bot_queue_history",
-    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ items: page.entries, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
+    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ ...page, items: page.entries })), `${scope.incarnation}:100`, scope.observe, { pkg: "bots", operation: "bot_queue_history" });
   const generations = useBotPages<BotHistoryGeneration>((offset, revision) => store.call<{ generations: BotHistoryGeneration[]; revision: string; nextOffset: number | null }>("bots", "bot_history_list",
-    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ items: page.generations, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
+    { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ ...page, items: page.generations })), `${scope.incarnation}:100`, scope.observe, { pkg: "bots", operation: "bot_history_list" });
   const [maintaining, setMaintaining] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [generation, setGeneration] = useState<string | null>(null);
@@ -349,6 +353,7 @@ function QueueView({ scope }: { scope: BotScope }) {
       </ViewHeader>
       <p className={hintClass}>Identities and sizes only, across current and retired roots. The current root&rsquo;s queued messages are in its chat.</p>
       <ReadError error={pages.error} what="Queue history" />
+      <ObservationStatus read={pages} />
       {pages.page ? entries.length ? (
         <ul aria-label="Queue receipts" className="flex flex-col">
           {entries.map((entry) => {
@@ -378,7 +383,7 @@ function QueueView({ scope }: { scope: BotScope }) {
         </ul>
       ) : <p className="text-xs text-muted-foreground">No queue entries recorded.</p> : null}
       {counts.get("unknown") ? <p className="text-xs text-warning">{queueWords.unknown}</p> : null}
-      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} onMore={pages.more} restarted={pages.page.restarted} /> : null}
+      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} canMore={pages.canMore} onMore={pages.more} restarted={pages.page.restarted} /> : null}
       <MaintenanceDisclosure active={!idle} aside="clear queued bodies" onOpenChange={setMaintaining}>
         <p className={hintClass}>
           Clears queued message bodies only. Each entry keeps its original size, admission digest, destination and sent, unknown or cancelled outcome, and a cleared entry can never be sent.
@@ -401,6 +406,7 @@ function QueueView({ scope }: { scope: BotScope }) {
             ))}
           </NativeSelect>
           <ReadError error={generations.error} what="History generations" />
+          <ObservationStatus read={generations} />
           <p className={hintClass}>Selects every entry recorded for that generation. Entries recorded before generations were attributed aren&rsquo;t included; tick those above.</p>
           <StateFlowView controls={byGeneration} label="Prepare clearing this generation's bodies" applyLabel="Clear these bodies" />
         </section>
@@ -413,20 +419,21 @@ function QueueView({ scope }: { scope: BotScope }) {
 function LaunchView({ scope }: { scope: BotScope }) {
   const store = useStore();
   const { goTo } = useWorkbench();
-  const [revealed, setRevealed] = useState<BotLaunch | null>(null);
-  const [revealing, setRevealing] = useState(false);
-  const launch = useBotRead(() => store.call<BotLaunch>("bots", "bot_launch_read", { botId: scope.botId, revealArguments: false }), scope.incarnation, scope.observe);
+  const launch = useBotRead(() => store.call<BotLaunch>("bots", "bot_launch_read", { botId: scope.botId, revealArguments: false }), scope.incarnation, scope.observe, { pkg: "bots", operation: "bot_launch_read" });
   const data = launch.data;
-  // Revealed values belong to the revision they were read at.
-  const shown = revealed && data && revealed.revision === data.revision ? revealed : null;
-  const reveal = () => {
-    setRevealing(true);
-    store.call<BotLaunch>("bots", "bot_launch_read", { botId: scope.botId, revealArguments: true }).then(setRevealed, (error) => toast.error(errorMessage(error))).finally(() => setRevealing(false));
-  };
+  const revealed = useRevealedRead(async () => {
+    const value = await store.call<BotLaunch>("bots", "bot_launch_read", { botId: scope.botId, revealArguments: true });
+    if (value.revision !== data?.revision) throw new Error("Launch arguments changed. Refresh and reveal the current revision.");
+    return value;
+  }, JSON.stringify([scope.incarnation, data?.revision]), scope.observe, { pkg: "bots", operation: "bot_launch_read" });
+  const shown = revealed.shown ? revealed.data : null;
   return (
     <div className="flex flex-col gap-2">
       <ViewHeader title="Launch arguments" loading={launch.loading} onRefresh={launch.refresh} />
       <ReadError error={launch.error} what="Launch arguments" />
+      <ObservationStatus read={launch} />
+      {revealed.shown ? <ObservationStatus read={revealed} /> : null}
+      {revealed.error ? <ReadError error={revealed.error} what="Revealed arguments" /> : null}
       {data ? (
         <>
           <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5 text-xs">
@@ -436,8 +443,8 @@ function LaunchView({ scope }: { scope: BotScope }) {
             <dt className="text-muted-foreground">Running</dt><dd>{data.running ? "Yes: running processes keep what they launched with" : "No"}</dd>
           </dl>
           {data.count ? (
-            <Button size="xs" variant="ghost" className="self-start" disabled={revealing || !!scope.unavailable} onClick={() => shown ? setRevealed(null) : reveal()}>
-              {revealing ? <Spinner /> : shown ? <EyeOffIcon /> : <EyeIcon />}{shown ? "Hide values" : "Reveal values"}
+            <Button size="xs" variant="ghost" className="self-start" disabled={revealed.loading || !!scope.unavailable} onClick={() => revealed.shown ? revealed.hide() : revealed.reveal()}>
+              {revealed.loading ? <Spinner /> : revealed.shown ? <EyeOffIcon /> : <EyeIcon />}{revealed.shown ? "Hide values" : "Reveal values"}
             </Button>
           ) : null}
           {shown?.arguments ? (

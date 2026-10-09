@@ -200,7 +200,7 @@ const handlers = {
   content_publication_list: ({ offset = 0, revision }) => {
     if (revision && revision !== content.publicationRevision) throw new Error("Publication inventory changed; restart paging");
     return { entries: content.publications.slice(offset, offset + 2), nextOffset: offset + 2 < content.publications.length ? offset + 2 : null,
-      revision: content.publicationRevision, retained: ["Published Artifact objects and source references remain", "Unattributed temporary retained: bundle:legacy-no-claim"] };
+      revision: content.publicationRevision, retained: ["Published Artifact objects and source references remain", offset ? "Latest-page retained-copy disclosure" : "Unattributed temporary retained: bundle:legacy-no-claim"] };
   },
   content_publication_plan: ({ ids }) => {
     assert.ok(ids.length > 0 && ids.length <= 100, "UI never sends an empty or oversized selection");
@@ -228,8 +228,8 @@ const handlers = {
     if (revision && revision !== content.historyRevision) throw new Error("Vault history changed; restart paging");
     const entries = [1, 2, 3].map((n) => ({ slug: slugs[0], path: `${slugs[0]}.md`, commit: String(n).repeat(40), blob: String(n + 3).repeat(40), mode: "100644" }));
     return { entries: slugs[0] === "empty-history" ? [] : entries.slice(offset, offset + 2), revision: content.historyRevision,
-      nextOffset: slugs[0] === "empty-history" || offset ? null : 2, commitsScanned: 4, paths: [{ slug: slugs[0], path: `${slugs[0]}.md`, current: false }],
-      remotes: [{ name: "backup-origin", fetch: true, push: true }], retained: ["Read-only retention disclosure, not an erasure plan", "Renamed different slugs, unreachable objects, clones, remotes, backups and device copies are unobservable"] };
+      nextOffset: slugs[0] === "empty-history" || offset ? null : 2, commitsScanned: offset ? 7 : 4, paths: [{ slug: slugs[0], path: `${slugs[0]}.md`, current: false }],
+      remotes: offset ? [] : [{ name: "backup-origin", fetch: true, push: true }], retained: ["Read-only retention disclosure, not an erasure plan", "Renamed different slugs, unreachable objects, clones, remotes, backups and device copies are unobservable"] };
   },
   list: () => ({ documents: [{ slug: "retained-note", title: "Retained note", tags: [] }], nextOffset: null }),
   get: () => ({ slug: "retained-note", title: "Retained note", digest: "a".repeat(64), content: "# Retained note", tags: [], updated: null, frontmatter: {} }),
@@ -346,6 +346,8 @@ try {
     await publications.getByText("Unattributed temporary retained: bundle:legacy-no-claim", { exact: true }).waitFor();
     await publications.getByRole("button", { name: "Load more publications" }).click();
     await publications.getByRole("checkbox", { name: `Select publication ${publicationIds.uncertain}` }).waitFor();
+    await publications.getByText("Latest-page retained-copy disclosure", { exact: true }).waitFor();
+    assert.equal(await publications.getByText("Unattributed temporary retained: bundle:legacy-no-claim", { exact: true }).count(), 0, "latest metadata replaces earlier disclosure");
     await publications.getByRole("checkbox", { name: `Select publication ${publicationIds.dead}` }).check();
     content.publicationBlocked = true;
     await publications.getByRole("button", { name: "Prepare collecting 1 temporary publication", exact: true }).focus();
@@ -381,7 +383,9 @@ try {
     await history.getByText("backup-origin · fetch present · push present", { exact: false }).waitFor();
     assert.equal(await history.getByRole("button", { name: /apply|collect|clear/i }).count(), 0, "history is not a flow");
     await history.getByRole("button", { name: "Load more history" }).focus(); await page.keyboard.press("Enter");
-    await history.getByText("4 commits scanned · 3 entries loaded", { exact: true }).waitFor();
+    await history.getByText("7 commits scanned · 3 entries loaded", { exact: true }).waitFor();
+    await history.getByText("No remotes configured in this observation; clones and backups remain unobservable.", { exact: true }).waitFor();
+    assert.equal(await history.getByText("backup-origin · fetch present · push present", { exact: false }).count(), 0, "authoritative remotes are replaced, not unioned");
     assert.equal(content.historyCalls.at(-1).revision, "history-r1");
     await shot("content-history-light", storage);
     await page.emulateMedia({ colorScheme: "dark" }); await shot("content-history-dark", storage);

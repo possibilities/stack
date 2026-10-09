@@ -6,7 +6,7 @@ import { corpusSelection, queueMaintenanceActions, type ScrapeQueueAction } from
 import { localOperations } from "@/lib/stack/state";
 import { stateOperations } from "@/lib/stack/maintenance";
 import type { ScrapeCorpus, ScrapeQueueJob } from "@/lib/stack/types";
-import { useKeyedRead } from "./owner-reads";
+import { ObservationStatus, useKeyedRead } from "./owner-reads";
 import { useStack, useStore } from "./provider";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
 
@@ -64,7 +64,7 @@ function CorpusFlow({ preset, onLockChange }: { preset: string; onLockChange(loc
   const state = useStack();
   const store = useStore();
   const [selected, setSelected] = useState<string[]>([]);
-  const read = useKeyedRead(() => store.call<ScrapeCorpus>("scrape", "scrape_corpus_list", { preset }), `scrape:corpus:${preset}`, state.scrapeQueue.at ?? 0);
+  const read = useKeyedRead(() => store.call<ScrapeCorpus>("scrape", "scrape_corpus_list", { preset }), `scrape:corpus:${preset}`, state.scrapeQueue.at ?? 0, { pkg: "scrape", operation: "scrape_corpus_list" });
   const rows = read.data?.captures ?? [];
   const selection = corpusSelection(rows, preset, selected);
   const controls = useStateFlow({ operations: stateOperations(store.call, "scrape", corpusOperations, { captures: selection ?? [] }),
@@ -72,12 +72,13 @@ function CorpusFlow({ preset, onLockChange }: { preset: string; onLockChange(loc
     onReceipt: (receipt, captured) => { if (receipt.status !== "running") read.refresh(); if (receipt.status === "completed" && captured) setSelected([]); } });
   const locked = controls.flow.phase !== "idle";
   useEffect(() => { onLockChange(locked); return () => onLockChange(false); }, [locked, onLockChange]);
-  const unavailable = read.error || read.loading || !read.data ? "Refresh local captures before preparing."
+  const unavailable = read.error || read.stale || read.loading || !read.data ? "Refresh local captures before preparing."
     : !selection ? "Select up to 100 exact local captures; review changed selections." : null;
   return <MaintenanceDisclosure active={locked} aside={`Local captures · ${preset}`}>
     <p className={hint}>Clear only selected final local sample-NNN captures for {preset}. Shipped fixtures, presets, canary definitions, temporary publications, authenticated Browse sessions, external copies and backups are never targets. Clearing admits no extraction or capture.</p>
     <Button size="xs" variant="ghost" disabled={read.loading || locked || state.status.scrape !== "open"} onClick={read.refresh}>Refresh local captures</Button>
     {read.error ? <p role="alert" className="text-xs text-destructive">Local captures unavailable: {read.error}</p> : null}
+    <ObservationStatus read={read} />
     <ul aria-label={`Local captures for ${preset}`} className="flex max-h-56 flex-col gap-1 overflow-auto">
       {rows.map((row) => <li key={`${row.preset}:${row.id}`} className="text-xs">
         <label className="flex items-start gap-1.5"><input type="checkbox" aria-label={`Select capture ${row.id}`} checked={selected.includes(row.id)}

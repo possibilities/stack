@@ -7,7 +7,7 @@ import { stateOperations } from "@/lib/stack/maintenance";
 import type { WorkerBranch, WorkerBranchPage, WorkerSession } from "@/lib/stack/types";
 import { workerBranchSelection, workerNativeDisclosure, workerNativePreconditions, type WorkerStateKind } from "@/lib/stack/worker-maintenance";
 import { useAuthActions } from "./auth-actions";
-import { usePagedRead } from "./owner-reads";
+import { ObservationStatus, usePagedRead } from "./owner-reads";
 import { Time } from "./primitives";
 import { useStack, useStore } from "./provider";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
@@ -117,16 +117,11 @@ function RetainedBranches() {
   const store = useStore();
   const [selected, setSelected] = useState<string[]>([]);
   const [allowUnmerged, setAllowUnmerged] = useState<string[]>([]);
-  const pages = usePagedRead<WorkerBranch>(async (offset, revision) => {
-    try {
-      const page = await store.call<WorkerBranchPage>("worker", "worker_state_branches", { offset, limit: 100, ...(revision ? { revision } : {}) });
-      return { items: page.branches, revision: page.revision, nextOffset: page.nextOffset };
-    } catch (error) {
-      // This owner's revision refusal predates the shared pager's standard wording.
-      if (error instanceof Error && error.message.includes("Worker branch inventory changed")) throw new Error("Worker branch inventory changed; restart paging");
-      throw error;
-    }
-  }, "worker:branches", state.workerSessions.at ?? 0);
+  const pages = usePagedRead<WorkerBranch, WorkerBranchPage>(async (offset, revision) => {
+    const page = await store.call<WorkerBranchPage>("worker", "worker_state_branches", { offset, limit: 100, ...(revision ? { revision } : {}) });
+    return { ...page, items: page.branches };
+  }, "worker:branches:100", state.workerSessions.at ?? 0, { pkg: "worker", operation: "worker_state_branches",
+    revisionRefused: (error) => error instanceof Error && /Worker branch inventory changed|restart paging/.test(error.message) });
   const rows = pages.page?.items ?? [];
   const selection = workerBranchSelection(rows, selected, allowUnmerged);
   const controls = useStateFlow({ operations: stateOperations(store.call, "worker", workerStateOperations, selection ?? { ids: [], kind: "branch", allowUnmerged: [] }),
@@ -134,7 +129,7 @@ function RetainedBranches() {
     onReceipt: (receipt, captured) => { pages.refresh(); if (receipt.status === "completed" && captured) { setSelected([]); setAllowUnmerged([]); } },
   });
   const locked = controls.flow.phase !== "idle";
-  const unavailable = pages.error ? "Refresh retained branches before preparing."
+  const unavailable = pages.error || pages.stale || pages.loading ? "Refresh retained branches before preparing."
     : !selected.length ? "Select up to 100 recorded branches by Worker ID." : !selection ? "The selected claims changed; discard the plan and review the selection." : null;
   const select = (id: string) => {
     setSelected((held) => held.includes(id) ? held.filter((value) => value !== id) : [...held, id]);
@@ -144,6 +139,7 @@ function RetainedBranches() {
   return <Section title="Retained branches" aside={<Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.worker !== "open"} onClick={pages.refresh}>Refresh branches</Button>}>
     <p className={hint}>Recorded claims, including removed Workers, independent of the Worker filters above. Refresh explicitly for external Git changes.</p>
     {pages.error ? <p role="alert" className="text-xs text-destructive">Branch inventory unavailable: {pages.error}</p> : null}
+    <ObservationStatus read={pages} />
     {pages.page?.restarted ? <p className={hint}>The observation changed while paging; showing the first page again.</p> : null}
     <MaintenanceDisclosure active={locked} aside="branch collection">
       <BranchConsequences />
@@ -162,7 +158,7 @@ function RetainedBranches() {
         </li>)}
       </ul>
       {!rows.length ? <p className={hint}>{pages.page ? "No recorded Worker branches." : "Reading retained branches…"}</p> : null}
-      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.worker !== "open"} onClick={pages.more}>Load more branches</Button> : null}
+      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={!pages.canMore || locked} onClick={pages.more}>Load more branches</Button> : null}
       <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} branches`} applyLabel="Collect these branches" />
     </MaintenanceDisclosure>
   </Section>;

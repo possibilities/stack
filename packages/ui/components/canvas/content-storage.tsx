@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { HardDriveIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogMedia, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -10,13 +10,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { relativeTime } from "@/lib/stack/derive";
 import { publicationSelection } from "@/lib/stack/content";
 import { formatBytes } from "@/lib/stack/resources";
-import { localOperation, localOperations, measured, type Page } from "@/lib/stack/state";
+import { localOperation, localOperations, measured } from "@/lib/stack/state";
 import { stateOperations } from "@/lib/stack/maintenance";
 import type { ContentPublication, ContentPublicationPage, StateFile } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "./auth-actions";
 import { ContentVaultHistory } from "./content-history";
-import { usePagedRead } from "./owner-reads";
+import { ObservationStatus, useKeyedRead, usePagedRead } from "./owner-reads";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
 import { Empty, Time } from "./primitives";
 import { useNow, useStack, useStore } from "./provider";
@@ -29,6 +29,39 @@ type Blob = StateFile & { digest: string; reference: BlobReference | null };
 
 const hint = "text-[0.68rem] text-pretty text-muted-foreground";
 const prefixes = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"));
+
+/** Upload stages expose unfenced offsets, not an owner revision. Keep that continuation contract
+ * separate; the first snapshot shares read identity/readiness, without inventing a revision. */
+function useUploadStages(observe: number) {
+  const store = useStore();
+  const read = (offset: number) => store.call<{ stages: Stage[]; nextOffset: number | null }>("content", "blob_stage_list", { offset, limit: 100 })
+    .then((page) => ({ ...page, items: page.stages }));
+  const first = useKeyedRead(() => read(0), "content:stages:100", observe, { pkg: "content", operation: "blob_stage_list" });
+  const [extra, setExtra] = useState<{ base: typeof first.evidence; items: Stage[]; nextOffset: number | null; error: string | null } | null>(null);
+  const [paging, setPaging] = useState(false);
+  const seq = useRef(0), busy = useRef(false);
+  useLayoutEffect(() => {
+    busy.current = false; setPaging(false);
+    return () => { seq.current++; busy.current = false; };
+  }, [first.evidence, first.pending, first.stale, first.unavailable]);
+  const held = extra?.base === first.evidence ? extra : null;
+  const page = first.data ? { ...first.data, items: [...first.data.items, ...(held?.items ?? [])], nextOffset: held ? held.nextOffset : first.data.nextOffset } : null;
+  const canMore = !!page && page.nextOffset !== null && !first.pending && !first.stale && !first.unavailable && !paging;
+  const more = async () => {
+    if (!canMore || busy.current) return;
+    busy.current = true; setPaging(true);
+    const mine = ++seq.current, base = first.evidence;
+    try {
+      const next = await read(page!.nextOffset!);
+      if (seq.current === mine) setExtra({ base, items: [...(held?.items ?? []), ...next.items], nextOffset: next.nextOffset, error: null });
+    } catch (error) {
+      if (seq.current === mine) setExtra({ base, items: held?.items ?? [], nextOffset: page!.nextOffset, error: errorMessage(error) });
+    } finally {
+      if (seq.current === mine) { busy.current = false; setPaging(false); }
+    }
+  };
+  return { ...first, page, error: first.error ?? held?.error ?? null, loading: first.loading || paging, canMore, more };
+}
 
 /**
  * Collection storage: upload stages and the collection's content-addressed blobs. Stage abort is an exact-revision
@@ -80,19 +113,18 @@ function PublicationCollection() {
   const store = useStore();
   const state = useStack();
   const [selected, setSelected] = useState<string[]>([]);
-  const pages = usePagedRead<ContentPublication>(async (offset, revision) => {
-    if (state.status.content !== "open") throw new Error("The Content connection is not open.");
+  const pages = usePagedRead<ContentPublication, ContentPublicationPage>(async (offset, revision) => {
     const page = await store.call<ContentPublicationPage>("content", "content_publication_list", { offset, limit: 100, ...(revision ? { revision } : {}) });
     return { ...page, items: page.entries };
-  }, `content:publications:${state.status.content}`, state.contentGeneration);
+  }, "content:publications:100", state.contentGeneration, { pkg: "content", operation: "content_publication_list" });
   // The pager preserves the last page's observation metadata alongside the accumulated rows.
-  const page = pages.page as (Page<ContentPublication> & Pick<ContentPublicationPage, "retained">) | null;
+  const page = pages.page;
   const selection = publicationSelection(page?.items ?? [], selected);
   const flow = useStateFlow({ operations: stateOperations(store.call, "content", publicationOperations, { ids: selection ?? [] }),
     recoveryKey: "content:publication_clear:claims", policy: "receipt-only", prerequisite: () => unavailable,
     onReceipt: (receipt, captured) => { if (receipt.status !== "running") pages.refresh(); if (receipt.status === "completed" && captured) setSelected([]); } });
   const locked = flow.flow.phase !== "idle";
-  const unavailable = pages.error || pages.loading || !page ? "Refresh temporary publications before preparing."
+  const unavailable = pages.error || pages.stale || pages.loading || !page ? "Refresh temporary publications before preparing."
     : !selection ? "Select up to 100 unblocked claims; review changed selections." : null;
   return <Section title="Temporary publications">
     <MaintenanceDisclosure active={locked} aside="Exact claims">
@@ -100,6 +132,7 @@ function PublicationCollection() {
       <p className={hint}>Published objects, item/upload/blob references, Vault/Git and permanent claim/receipt evidence remain. Legacy untracked paths and cleanup quarantines are not adopted; remotes, backups and device copies are separate.</p>
       <Button size="xs" variant="ghost" className="self-start" disabled={pages.loading || state.status.content !== "open"} onClick={pages.refresh}>Refresh temporary publications</Button>
       {pages.error ? <p role="alert" className="text-xs text-destructive">Temporary publications unavailable: {pages.error}</p> : null}
+      <ObservationStatus read={pages} />
       {page?.restarted ? <p role="status" className="text-xs text-warning">Publication claims changed while paging; restarted from the first page.</p> : null}
       {page ? <>
         <ul aria-label="Temporary publication claims" className="flex max-h-64 flex-col gap-2 overflow-auto">
@@ -118,7 +151,7 @@ function PublicationCollection() {
         {!page.items.length && !pages.error ? <p className={hint}>No claimed temporary publications in this observation.</p> : null}
         {page.retained.map((text, index) => <p key={index} className={hint}>{text}</p>)}
       </> : null}
-      {page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" disabled={pages.loading} onClick={pages.more}>Load more publications</Button> : null}
+      {page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" disabled={!pages.canMore} onClick={pages.more}>Load more publications</Button> : null}
       <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} temporary publication${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these temporaries" />
     </MaintenanceDisclosure>
   </Section>;
@@ -131,8 +164,7 @@ function Stages() {
   const [aborting, setAborting] = useState<Stage | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pages = usePagedRead<Stage>((offset) => store.call<{ stages: Stage[]; nextOffset: number | null }>("content", "blob_stage_list", { offset, limit: 100 })
-    .then((page) => ({ items: page.stages, revision: "stages", nextOffset: page.nextOffset })), "stages", contentGeneration);
+  const pages = useUploadStages(contentGeneration);
   const listed = aborting ? pages.page?.items.find((stage) => stage.id === aborting.id) ?? null : null;
   const changed = aborting !== null && listed !== null && listed.revision !== aborting.revision;
   const abort = () => {
@@ -146,6 +178,7 @@ function Stages() {
   return (
     <Section title="Upload stages" aside={<Button size="xs" variant="ghost" className="-mr-1.5 h-5 text-[0.65rem]" disabled={pages.loading} onClick={pages.refresh}>{pages.loading ? <Spinner /> : "Refresh"}</Button>}>
       {pages.error ? <p className="text-xs text-destructive">Upload stages unavailable: {pages.error}</p> : null}
+      <ObservationStatus read={pages} />
       {pages.page ? pages.page.items.length ? (
         <ul aria-label="Upload stages" className="flex flex-col gap-1">
           {pages.page.items.map((stage) => (
@@ -159,7 +192,7 @@ function Stages() {
           ))}
         </ul>
       ) : <p className={hint}>No upload stages are held.</p> : null}
-      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" onClick={pages.more}>Load more</Button> : null}
+      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" disabled={!pages.canMore} onClick={pages.more}>Load more</Button> : null}
       <AlertDialog open={aborting !== null} onOpenChange={(open) => { if (!open && !pending) setAborting(null); }}>
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
@@ -188,13 +221,14 @@ function Blobs() {
   const state = useStack();
   const [prefix, setPrefix] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const pages = usePagedRead<Blob>((offset, revision) => prefix ? store.call<BlobPage>("content", "content_blob_list", { prefix, offset, limit: 100, ...(revision ? { revision } : {}) })
-    .then((page) => ({ revision: page.revision, nextOffset: page.nextOffset, items: page.entries.map((entry) => {
+  const pages = usePagedRead<Blob, BlobPage>((offset, revision) => store.call<BlobPage>("content", "content_blob_list", { prefix, offset, limit: 100, ...(revision ? { revision } : {}) })
+    .then((page) => ({ ...page, items: page.entries.map((entry) => {
       const digest = entry.path.split("/").at(-1) ?? entry.path;
       return { ...entry, digest, reference: page.references.find((row) => row.digest === digest) ?? null };
-    }) })) : Promise.resolve({ items: [], revision: "none", nextOffset: null }), `blobs:${prefix}`, state.contentGeneration);
+    }) })), prefix ? `blobs:${prefix}:100` : null, state.contentGeneration, { pkg: "content", operation: "content_blob_list" });
   const flow = useStateFlow({ operations: stateOperations(store.call, "content", { plan: "content_storage_plan", apply: "content_storage_collect", receipt: "content_state_receipt_get" }, { digests: selected }),
-    recoveryKey: "content:storage", policy: "identical-retry", prerequisite: !selected.length ? "Select unreferenced blobs first." : null,
+    recoveryKey: "content:storage", policy: "identical-retry",
+    prerequisite: pages.stale || pages.loading || pages.error || !pages.page ? "Refresh collection blobs before preparing." : !selected.length ? "Select unreferenced blobs first." : null,
     onReceipt: (receipt, captured) => { if (receipt.status === "completed" && captured) setSelected([]); } });
   const locked = flow.flow.phase !== "idle";
   const referenced = (blob: Blob) => Boolean(blob.reference && (blob.reference.items.length || blob.reference.stages.length));
@@ -209,6 +243,7 @@ function Blobs() {
       </div>
       <p className={hint}>Blobs are listed one two-character digest prefix at a time. One prefix says nothing about the others.</p>
       {pages.error ? <p className="text-xs text-destructive">{/missing|ENOENT|unavailable/i.test(pages.error) ? `Nothing is stored under ${prefix}, or it cannot be read: ${pages.error}` : pages.error}</p> : null}
+      <ObservationStatus read={pages} />
       {pages.page?.restarted ? <p role="status" className="text-xs text-warning">This prefix changed while paging, so it started again from the first page.</p> : null}
       {prefix && pages.page ? pages.page.items.length ? (
         <ul aria-label="Collection blobs" className="flex max-h-64 flex-col overflow-auto">
@@ -227,7 +262,7 @@ function Blobs() {
           ))}
         </ul>
       ) : <Empty icon={HardDriveIcon} title={`No blobs under ${prefix}`} /> : null}
-      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" onClick={pages.more}>Load more</Button> : null}
+      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" disabled={!pages.canMore} onClick={pages.more}>Load more</Button> : null}
       <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} blob${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these blobs" />
     </Section>
   );

@@ -21,6 +21,7 @@ import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow
 import { notRecorded, waitingForIdentity } from "@/lib/stack/destination";
 import { useDestination, useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
 import { BotWatch, useObservedRead } from "./watch-receipts";
+import { ObservationStatus } from "./owner-reads";
 import { PlacementContext, Section, Window } from "./window";
 
 function mint(): string {
@@ -288,13 +289,14 @@ function HandoffCompletion({ handoff }: { handoff: BrowserHandoff }) {
   const state = useStack();
   const store = useStore();
   const access = localOperation(state, "browse", "browser_handoff_completion");
-  const usable = access.available && Boolean(handoff.botId && handoff.threadId && handoff.requestId);
-  const read = useObservedRead<BrowserHandoffObservation>(usable ? `handoff-completion:${handoff.id}` : null, handoff.revision,
-    () => store.call<BrowserHandoffObservation>("browse", "browser_handoff_completion", { botId: handoff.botId, threadId: handoff.threadId, requestId: handoff.requestId }));
+  const usable = Boolean(handoff.botId && handoff.threadId && handoff.requestId);
+  const read = useObservedRead<BrowserHandoffObservation>(usable ? JSON.stringify(["handoff-completion", handoff.botId, handoff.threadId, handoff.requestId]) : null, handoff.revision,
+    () => store.call<BrowserHandoffObservation>("browse", "browser_handoff_completion", { botId: handoff.botId, threadId: handoff.threadId, requestId: handoff.requestId }), { pkg: "browse", operation: "browser_handoff_completion" });
   if (!access.available) return <p className="text-[0.72rem] text-pretty text-muted-foreground">{access.reason}</p>;
-  if (read.error) return <p className="text-[0.72rem] text-pretty text-destructive">Observation unavailable: {read.error}</p>;
-  if (read.loading || !read.data) return <p className="text-[0.72rem] text-muted-foreground">Reading…</p>;
-  return <p className="text-[0.72rem] text-pretty text-muted-foreground">{browseReportText(read.data.result?.outcome ?? null)}</p>;
+  return <><ObservationStatus read={read} />
+    {read.error ? <p className="text-[0.72rem] text-pretty text-destructive">Observation unavailable: {read.error}</p> : null}
+    {read.data ? <p className="text-[0.72rem] text-pretty text-muted-foreground">{browseReportText(read.data.result?.outcome ?? null)}</p>
+      : !read.error && !read.unavailable ? <p className="text-[0.72rem] text-muted-foreground">Reading…</p> : null}</>;
 }
 
 function HandoffHistory({ rows, profiles }: { rows: BrowserHandoff[]; profiles: Map<string, BrowserProfile> }) {

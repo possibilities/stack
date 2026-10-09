@@ -1,14 +1,15 @@
+import { pagedObservation } from "./observation";
 import type { SpaceId } from "./spaces";
 import type { NodeRef, PackageDoc, ServeCompletionPage, ServeCompletionReceipt, ServeOccurrencePage, ServeStateList, ServeSubscriptionPage, StateApplyInput, StateEntry, StateLink, StateOwner, StatePlan, StateReceiptStatus, StateRelationship } from "./types";
 
 /**
- * Owner state inspection and the shared plan/receipt flow (docs/state-control.md, ADR 0135). Pure and
+ * Owner state inspection, observation bindings and plan/receipt presentation helpers (docs/state-control.md). Pure and
  * browser-safe: the wire types are mirrored in `types.ts`, never imported from the Node-backed `@stack/api`.
  */
 
 type Call = <T>(name: string, args?: Record<string, unknown>) => Promise<T>;
 
-/** Both pagers use the contract's largest page. */
+/** Serve observation bindings use the contract's largest page. */
 export const statePageLimit = 100;
 
 /** Owners are a selection, never an implied "all known"; null reads every owner the Server lists. */
@@ -39,22 +40,12 @@ function inventoryArgs(selection: StateSelection, offset: number, revision?: str
   return { ...(selection.owners ? { owners: selection.owners } : {}), measure: selection.measure, offset, limit: statePageLimit, ...(revision ? { revision } : {}) };
 }
 
-export async function loadInventory(call: Call, selection: StateSelection): Promise<StateInventory> {
-  const page = await call<ServeStateList>("serve_state_list", inventoryArgs(selection, 0));
-  return { ...page, selection, restarted: false };
-}
-
-/** The next page of the same observation; a changed observation restarts from the first page rather than mixing revisions. */
-export async function continueInventory(call: Call, held: StateInventory): Promise<StateInventory> {
-  if (held.nextOffset === null) return held;
-  try {
-    const page = await call<ServeStateList>("serve_state_list", inventoryArgs(held.selection, held.nextOffset, held.revision));
-    return { ...page, entries: [...held.entries, ...page.entries], selection: held.selection, restarted: held.restarted };
-  } catch (error) {
-    if (!revisionChanged(error)) throw error;
-    return { ...await loadInventory(call, held.selection), restarted: true };
-  }
-}
+export const inventoryObservation = (call: Call) => pagedObservation({
+  key: (selection: StateSelection) => JSON.stringify([selection.owners ? [...selection.owners].sort() : null, selection.measure, statePageLimit]),
+  read: async (selection, offset, revision) => ({ ...await call<ServeStateList>("serve_state_list", inventoryArgs(selection, offset, revision)), selection }),
+  append: (held, page) => ({ ...page, entries: [...held.entries, ...page.entries] }),
+  revisionRefused: revisionChanged,
+});
 
 function subscriptionArgs(filter: Record<string, string | number | undefined>, offset: number, revision?: string): Record<string, unknown> {
   const exact = Object.fromEntries(Object.entries(filter).filter(([, value]) => typeof value === "string" && value.length > 0));
@@ -62,71 +53,28 @@ function subscriptionArgs(filter: Record<string, string | number | undefined>, o
   return { ...exact, offset, limit, ...(revision ? { revision } : {}) };
 }
 
-export async function loadSubscriptions(call: Call, filter: SubscriptionFilter): Promise<SubscriptionList> {
-  return { ...await call<ServeSubscriptionPage>("serve_subscription_list", subscriptionArgs(filter, 0)), filter, restarted: false };
-}
+const filterKey = (filter: Record<string, string | number | undefined>) => JSON.stringify(Object.entries(subscriptionArgs(filter, 0)).sort(([a], [b]) => a.localeCompare(b)));
 
-export async function continueSubscriptions(call: Call, held: SubscriptionList): Promise<SubscriptionList> {
-  if (held.nextOffset === null) return held;
-  try {
-    const page = await call<ServeSubscriptionPage>("serve_subscription_list", subscriptionArgs(held.filter, held.nextOffset, held.revision));
-    return { ...page, subscriptions: [...held.subscriptions, ...page.subscriptions], filter: held.filter, restarted: held.restarted };
-  } catch (error) {
-    if (!revisionChanged(error)) throw error;
-    return { ...await loadSubscriptions(call, held.filter), restarted: true };
-  }
-}
+export const subscriptionsObservation = (call: Call) => pagedObservation({
+  key: (filter: SubscriptionFilter) => filterKey(filter),
+  read: async (filter, offset, revision) => ({ ...await call<ServeSubscriptionPage>("serve_subscription_list", subscriptionArgs(filter, offset, revision)), filter }),
+  append: (held, page) => ({ ...page, subscriptions: [...held.subscriptions, ...page.subscriptions] }),
+  revisionRefused: revisionChanged,
+});
 
-/** Retained completion receipts page by receipt ID, outliving their watches; continuations pin the first page's revision. */
-export async function loadCompletions(call: Call, filter: ReceiptQuery): Promise<CompletionList> {
-  return { ...await call<ServeCompletionPage>("serve_completion_list", subscriptionArgs(filter, 0)), filter, restarted: false };
-}
+export const completionsObservation = (call: Call) => pagedObservation({
+  key: (filter: ReceiptQuery) => filterKey(filter),
+  read: async (filter, offset, revision) => ({ ...await call<ServeCompletionPage>("serve_completion_list", subscriptionArgs(filter, offset, revision)), filter }),
+  append: (held, page) => ({ ...page, completions: [...held.completions, ...page.completions] }),
+  revisionRefused: revisionChanged,
+});
 
-export async function continueCompletions(call: Call, held: CompletionList): Promise<CompletionList> {
-  if (held.nextOffset === null) return held;
-  try {
-    const page = await call<ServeCompletionPage>("serve_completion_list", subscriptionArgs(held.filter, held.nextOffset, held.revision));
-    return { ...page, completions: [...held.completions, ...page.completions], filter: held.filter, restarted: held.restarted };
-  } catch (error) {
-    if (!revisionChanged(error)) throw error;
-    return { ...await loadCompletions(call, held.filter), restarted: true };
-  }
-}
-
-export async function loadOccurrences(call: Call, filter: OccurrenceFilter): Promise<OccurrenceList> {
-  return { ...await call<ServeOccurrencePage>("serve_occurrence_list", subscriptionArgs(filter, 0)), filter, restarted: false };
-}
-
-export async function continueOccurrences(call: Call, held: OccurrenceList): Promise<OccurrenceList> {
-  if (held.nextOffset === null) return held;
-  try {
-    const page = await call<ServeOccurrencePage>("serve_occurrence_list", subscriptionArgs(held.filter, held.nextOffset, held.revision));
-    return { ...page, subscriptions: [...held.subscriptions, ...page.subscriptions], filter: held.filter, restarted: held.restarted };
-  } catch (error) {
-    if (!revisionChanged(error)) throw error;
-    return { ...await loadOccurrences(call, held.filter), restarted: true };
-  }
-}
-
-/** Bounded pages of one owner observation. */
-export type Page<T> = { items: T[]; revision: string; nextOffset: number | null; restarted: boolean };
-export type PageRead<T> = (offset: number, revision?: string) => Promise<{ items: T[]; revision: string; nextOffset: number | null }>;
-
-export async function firstPage<T>(read: PageRead<T>): Promise<Page<T>> {
-  return { ...await read(0), restarted: false };
-}
-
-/** The next page of the same observation, or the first page again when the owner says it changed. */
-export async function nextPage<T>(read: PageRead<T>, held: Page<T>): Promise<Page<T>> {
-  if (held.nextOffset === null) return held;
-  try {
-    const page = await read(held.nextOffset, held.revision);
-    return { ...page, items: [...held.items, ...page.items], restarted: held.restarted };
-  } catch (error) {
-    if (!revisionChanged(error)) throw error;
-    return { ...await read(0), restarted: true };
-  }
-}
+export const occurrencesObservation = (call: Call) => pagedObservation({
+  key: (filter: OccurrenceFilter) => filterKey(filter),
+  read: async (filter, offset, revision) => ({ ...await call<ServeOccurrencePage>("serve_occurrence_list", subscriptionArgs(filter, offset, revision)), filter }),
+  append: (held, page) => ({ ...page, subscriptions: [...held.subscriptions, ...page.subscriptions] }),
+  revisionRefused: revisionChanged,
+});
 
 export type LocalAccess = { available: true } | { available: false; reason: string };
 

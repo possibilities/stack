@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, EyeIcon, EyeOffIcon, ListChecksIcon, PauseIcon, PlayIcon, RefreshCwIcon, RssIcon, SatelliteDishIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { relativeTime, untilTime } from "@/lib/stack/derive";
 import { brainCallError, brainLocalReason, cadence, jobActions, jobStateView, jobViews, sourceHealthView, statusIssues, viewCount, type BrainJobView, type CallError } from "@/lib/stack/brain";
 import { brainSourcesView, brainSubmissionView, completionLinkStatusLabels, completionTargets, noBotWatch } from "@/lib/stack/completion";
-import { continueCompletions, loadCompletions, localOperation, type CompletionList } from "@/lib/stack/state";
-import type { BrainJob, BrainJobRecord, BrainRevealedJob, BrainShareState, BrainSource, BrainSourcesObservation, BrainSubmissionObservation, BrainSyncAdmission, ServeCompletionDetail, ServeCompletionReceipt } from "@/lib/stack/types";
+import { localOperation } from "@/lib/stack/state";
+import type { BrainJob, BrainJobRecord, BrainRevealedJob, BrainShareState, BrainSource, BrainSourcesObservation, BrainSubmissionObservation, BrainSyncAdmission, ServeCompletionDetail, ServeCompletionPage, ServeCompletionReceipt } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "./auth-actions";
 import { CopyButton, Empty, Flash, NodeCard, NodeLink, NodeTitle, Row, StatusDot, Time } from "./primitives";
 import { ReceiptSummary, useObservedRead } from "./watch-receipts";
+import { ObservationStatus, usePagedRead } from "./owner-reads";
 import { useNow, useStack, useStore, useWorkbench } from "./provider";
 import { badge, brainUnavailable, SensitivityBadge } from "./brain-shared";
 import { BrainJobMaintenance, BrainRunMaintenance, BrainSourceMaintenance } from "./brain-maintenance";
@@ -230,11 +231,11 @@ function JobDetail({ job, blocked }: { job: BrainJob; blocked: string | null }) 
                 {pending === action ? <Spinner data-icon="inline-start" /> : action === "retry" ? <RotateCcwIcon data-icon="inline-start" /> : null}{actionLabels[action]}
               </Button>
             ))}
-            {!clearedAt ? <RevealContent job={job} blocked={blocked} /> : null}
+            {!clearedAt ? <RevealContent key={`${job.id}:${job.updated_at}`} job={job} blocked={blocked} /> : null}
           </div>
           <CallErrorNote error={error} />
         </form>
-      ) : !clearedAt ? <div className="flex"><RevealContent job={job} blocked={blocked} /></div> : null}
+      ) : !clearedAt ? <div className="flex"><RevealContent key={`${job.id}:${job.updated_at}`} job={job} blocked={blocked} /></div> : null}
       <BrainJobMaintenance job={currentJob} />
     </div>
   );
@@ -470,56 +471,29 @@ function WatchDisclosure({ label, operation }: { label: string; operation: "subm
 export function BrainWatches({ operation }: { operation: "submit" | "sources_sync" }) {
   const state = useStack();
   const store = useStore();
-  const access = localOperation(state, "serve", "serve_completion_list");
   const detailAccess = localOperation(state, "serve", "serve_completion_get");
-  const usable = !state.remote && access.available && state.status.serve === "open";
-  const key = usable ? `brain-watches:${operation}` : null;
-  const generation = state.completionGeneration;
-  const [held, setHeld] = useState<{ key: string | null; list: CompletionList | null; error: string | null }>({ key, list: null, error: null });
-  const seq = useRef(0);
-  useEffect(() => {
-    if (!key) { setHeld({ key, list: null, error: null }); return; }
-    const mine = ++seq.current;
-    setHeld((current) => current.key === key ? current : { key, list: null, error: null });
-    loadCompletions((name, args) => store.call("serve", name, args), { package: "brain", operation, limit: 50 })
-      .then((list) => { if (seq.current === mine) setHeld({ key, list, error: null }); },
-        (error) => { if (seq.current === mine) setHeld({ key, list: null, error: errorMessage(error) }); });
-  }, [key, generation, operation, store]);
-  const list = held.key === key ? held.list : null;
-  const error = held.key === key ? held.error : null;
-  const [paging, setPaging] = useState(false);
-  const more = async () => {
-    const current = list;
-    if (!current?.nextOffset) return;
-    const mine = seq.current;
-    setPaging(true);
-    try {
-      const next = await continueCompletions((name, args) => store.call("serve", name, args), current);
-      if (seq.current === mine) setHeld({ key, list: next, error: null });
-    } catch (failure) {
-      if (seq.current === mine) setHeld({ key, list: current, error: errorMessage(failure) });
-    } finally {
-      setPaging(false);
-    }
-  };
+  const pages = usePagedRead<ServeCompletionReceipt, ServeCompletionPage>(async (offset, revision) => {
+    const page = await store.call<ServeCompletionPage>("serve", "serve_completion_list", { package: "brain", operation, offset, limit: 50, ...(revision ? { revision } : {}) });
+    return { ...page, items: page.completions };
+  }, `brain-watches:${operation}:50`, state.completionGeneration, { pkg: "serve", operation: "serve_completion_list" });
+  const list = pages.page, error = pages.error;
   if (state.remote) return null;
   return (
     <section data-bot-watch="brain" aria-label="Bot watches" className="flex flex-col gap-1.5 rounded-lg border border-dashed p-2">
-      {!access.available ? <p className={watchHintClass}>{access.reason}</p>
-        : state.status.serve !== "open" ? <p className={watchHintClass}>Server reconnecting — Bot watch unavailable</p>
-        : error ? <p className="text-[0.72rem] text-pretty text-destructive">Bot watch unavailable: {error}</p>
-        : !list ? <p className="flex items-center gap-1.5 text-[0.72rem] text-muted-foreground"><Spinner className="size-3" />Reading watch receipts…</p>
-        : !list.completions.length ? <Empty icon={RssIcon} title="No Bot watch requested" hint={noBotWatch.brain} />
+      <ObservationStatus read={pages} />
+      {error ? <p className="text-[0.72rem] text-pretty text-destructive">Bot watch unavailable: {error}</p> : null}
+      {!list ? error || pages.unavailable ? null : <p className="flex items-center gap-1.5 text-[0.72rem] text-muted-foreground"><Spinner className="size-3" />Reading watch receipts…</p>
+        : !list.items.length ? <Empty icon={RssIcon} title="No Bot watch requested" hint={noBotWatch.brain} />
         : (
           <>
             {list.restarted ? <p role="status" className="text-[0.72rem] text-warning">History changed while paging, so paging started again from the first page.</p> : null}
-            <p className={watchHintClass}>Showing {list.completions.length} of {list.total} receipts{list.truncated ? " · more on later pages" : ""}</p>
+            <p className={watchHintClass}>Showing {list.items.length} of {list.total} receipts{list.truncated ? " · more on later pages" : ""}</p>
             <ul className="flex flex-col gap-1.5">
-              {list.completions.map((receipt) => <BrainReceipt key={receipt.id} receipt={receipt} operation={operation} canInspect={detailAccess.available} unavailableReason={detailAccess.available ? null : detailAccess.reason} />)}
+              {list.items.map((receipt) => <BrainReceipt key={receipt.id} receipt={receipt} operation={operation} canInspect={detailAccess.available} unavailableReason={detailAccess.available ? null : detailAccess.reason} />)}
             </ul>
             {list.nextOffset !== null ? (
-              <Button variant="ghost" size="sm" className="self-start" disabled={paging} onClick={() => void more()}>
-                {paging ? <Spinner data-icon="inline-start" /> : null}Load more
+              <Button variant="ghost" size="sm" className="self-start" disabled={!pages.canMore} onClick={() => void pages.more()}>
+                {pages.loading ? <Spinner data-icon="inline-start" /> : null}Load more
               </Button>
             ) : null}
           </>
@@ -553,12 +527,13 @@ function BrainReceipt({ receipt, operation, canInspect, unavailableReason }: { r
 function BrainReceiptDetail({ receipt, operation }: { receipt: ServeCompletionReceipt; operation: "submit" | "sources_sync" }) {
   const store = useStore();
   const detail = useObservedRead<ServeCompletionDetail>(`brain-detail:${receipt.id}`, `${receipt.state}:${receipt.lastDeliveredAt}`,
-    () => store.call<ServeCompletionDetail>("serve", "serve_completion_get", { id: receipt.id }));
+    () => store.call<ServeCompletionDetail>("serve", "serve_completion_get", { id: receipt.id }), { pkg: "serve", operation: "serve_completion_get" });
   const link = detail.data?.linkStatus === "resolved" ? detail.data.link : null;
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-dashed bg-background/60 p-2">
-      {detail.error ? <p className="text-xs text-destructive">Detail unavailable: {detail.error}</p>
-        : !detail.data ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3" />Reading detail…</p>
+      <ObservationStatus read={detail} />
+      {detail.error ? <p className="text-xs text-destructive">Detail unavailable: {detail.error}</p> : null}
+      {!detail.data ? !detail.error && !detail.unavailable ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3" />Reading detail…</p> : null
         : link ? (
           <dl className="flex flex-col">
             <Row label="Link">{completionLinkStatusLabels.resolved.label}</Row>
@@ -581,17 +556,18 @@ function SubmissionObservation({ receipt }: { receipt: ServeCompletionReceipt })
   const state = useStack();
   const store = useStore();
   const access = localOperation(state, "brain", "submission_completion");
-  const usable = access.available && Boolean(receipt.botId && receipt.threadId && receipt.recordId);
-  const read = useObservedRead<BrainSubmissionObservation>(usable ? `brain-submit:${receipt.recordId}` : null, state.brainJobs.at,
-    () => store.call<BrainSubmissionObservation>("brain", "submission_completion", { botId: receipt.botId, threadId: receipt.threadId, requestId: receipt.recordId }));
+  const usable = Boolean(receipt.botId && receipt.threadId && receipt.recordId);
+  const read = useObservedRead<BrainSubmissionObservation>(usable ? JSON.stringify(["brain-submit", receipt.botId, receipt.threadId, receipt.recordId]) : null, state.brainJobs.at,
+    () => store.call<BrainSubmissionObservation>("brain", "submission_completion", { botId: receipt.botId, threadId: receipt.threadId, requestId: receipt.recordId }), { pkg: "brain", operation: "submission_completion" });
   if (!access.available) return <p className={watchHintClass}>{access.reason}</p>;
-  if (read.error) return <p className="text-[0.72rem] text-pretty text-destructive">Observation unavailable: {read.error}</p>;
-  if (read.loading || !read.data) return <p className="text-[0.72rem] text-muted-foreground">Reading observation…</p>;
+  if (!read.data) return <><ObservationStatus read={read} /><p className="text-[0.72rem] text-muted-foreground">{read.error ? `Observation unavailable: ${read.error}` : "Reading observation…"}</p></>;
   const view = brainSubmissionView(read.data.result);
   const documentId = read.data.result?.kind === "job" ? read.data.result.document_id : read.data.result?.kind === "already_indexed" ? read.data.result.document_id : null;
   return (
     <div className="flex flex-col gap-1">
       <span className={watchLabelClass}>Settlement</span>
+      <ObservationStatus read={read} />
+      {read.error ? <p className="text-xs text-destructive">Observation unavailable: {read.error}</p> : null}
       <p className={cn("text-xs text-pretty", view.tone === "warning" ? "text-warning" : view.tone === "destructive" ? "text-destructive" : "text-muted-foreground")}>{view.label}</p>
       {documentId !== null ? (
         <NodeLink node={{ kind: "research-document", id: String(documentId) }} label={`Document #${documentId}`} className="self-start text-[0.72rem] font-medium">Document #{documentId}</NodeLink>
@@ -608,10 +584,10 @@ function SourcesObservation({ receipt }: { receipt: ServeCompletionReceipt }) {
   const state = useStack();
   const store = useStore();
   const access = localOperation(state, "brain", "sources_sync_completion");
-  const usable = access.available && Boolean(receipt.botId && receipt.threadId && receipt.recordId);
+  const usable = Boolean(receipt.botId && receipt.threadId && receipt.recordId);
   const observeAt = state.brainSources.at;
-  const base = useObservedRead<BrainSourcesObservation>(usable ? `brain-sources:${receipt.recordId}` : null, observeAt,
-    () => store.call<BrainSourcesObservation>("brain", "sources_sync_completion", { botId: receipt.botId, threadId: receipt.threadId, requestId: receipt.recordId, offset: 0 }));
+  const base = useObservedRead<BrainSourcesObservation>(usable ? JSON.stringify(["brain-sources", receipt.botId, receipt.threadId, receipt.recordId, 50]) : null, observeAt,
+    () => store.call<BrainSourcesObservation>("brain", "sources_sync_completion", { botId: receipt.botId, threadId: receipt.threadId, requestId: receipt.recordId, offset: 0 }), { pkg: "brain", operation: "sources_sync_completion" });
   const [extra, setExtra] = useState<{ at: number | null; runs: SourcesRuns; nextOffset: number | null | undefined; truncated: boolean; error: string | null }>({ at: observeAt, runs: [], nextOffset: undefined, truncated: false, error: null });
   const [paging, setPaging] = useState(false);
   const applied = extra.at === observeAt ? extra : { at: observeAt, runs: [] as SourcesRuns, nextOffset: undefined, truncated: false, error: null };
@@ -635,12 +611,13 @@ function SourcesObservation({ receipt }: { receipt: ServeCompletionReceipt }) {
     }
   };
   if (!access.available) return <p className={watchHintClass}>{access.reason}</p>;
-  if (base.error) return <p className="text-[0.72rem] text-pretty text-destructive">Observation unavailable: {base.error}</p>;
-  if (base.loading || !base.data) return <p className="text-[0.72rem] text-muted-foreground">Reading observation…</p>;
+  if (!base.data) return <><ObservationStatus read={base} /><p className="text-[0.72rem] text-muted-foreground">{base.error ? `Observation unavailable: ${base.error}` : "Reading observation…"}</p></>;
   const view = brainSourcesView(result);
   return (
     <div className="flex flex-col gap-1">
       <span className={watchLabelClass}>Settlement</span>
+      <ObservationStatus read={base} />
+      {base.error ? <p className="text-xs text-destructive">Observation unavailable: {base.error}</p> : null}
       <p className={cn("text-xs text-pretty", view.tone === "muted" ? "text-muted-foreground" : "text-foreground")}>{view.label}</p>
       {view.lines.map((line) => <p key={line} className="pl-1 text-[0.7rem] text-muted-foreground">{line}</p>)}
       {runs.length ? (
@@ -663,7 +640,7 @@ function SourcesObservation({ receipt }: { receipt: ServeCompletionReceipt }) {
       ) : null}
       {applied.error ? <p className="text-[0.72rem] text-destructive">Paging unavailable: {applied.error}</p> : null}
       {nextOffset !== null ? (
-        <Button variant="ghost" size="sm" className="self-start" disabled={paging} onClick={() => void loadNext()}>
+        <Button variant="ghost" size="sm" className="self-start" disabled={paging || base.loading || base.stale || !!base.unavailable} onClick={() => void loadNext()}>
           {paging ? <Spinner data-icon="inline-start" /> : null}Load next 50
         </Button>
       ) : null}

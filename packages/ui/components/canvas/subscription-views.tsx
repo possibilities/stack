@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { EyeIcon, EyeOffIcon, HistoryIcon, RssIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogMedia, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -15,6 +15,7 @@ import { errorMessage } from "./auth-actions";
 import { CopyButton, Empty, NodeLink, StatusDot, type Tone } from "./primitives";
 import { useNow, useStack, useStore } from "./provider";
 import { useShowWorker, useShowWorkerTurn } from "./worker-windows";
+import { ObservationStatus, useKeyedRead, useRevealedRead } from "./owner-reads";
 
 const hintClass = "text-[0.72rem] text-pretty text-muted-foreground";
 const labelClass = "text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase";
@@ -81,17 +82,10 @@ function CompletionRow({ receipt, canInspect, unavailableReason }: { receipt: Se
   const { bots } = useStack();
   const now = useNow(30_000);
   const [open, setOpen] = useState(false);
-  const [detail, setDetail] = useState<{ data: ServeCompletionDetail | null; error: string | null } | null>(null);
-  const [reading, setReading] = useState(false);
-  const readDetail = () => {
-    setReading(true);
-    store.call<ServeCompletionDetail>("serve", "serve_completion_get", { id: receipt.id })
-      .then((data) => setDetail({ data, error: null }), (error) => setDetail({ data: null, error: errorMessage(error) }))
-      .finally(() => setReading(false));
-  };
   const signature = `${receipt.state}:${receipt.lastDeliveredAt}:${receipt.lastDeliveryKind}:${receipt.subscriptionPresent}`;
-  // An expanded detail belongs to the receipt state it was read under; a changed row re-reads it.
-  useEffect(() => { if (open) readDetail(); }, [open, receipt.id, signature, store]);
+  const detail = useKeyedRead(() => store.call<ServeCompletionDetail>("serve", "serve_completion_get", { id: receipt.id }), open ? receipt.id : null,
+    signature, { pkg: "serve", operation: "serve_completion_get" });
+  const reading = detail.loading, readDetail = detail.refresh;
   const knownBot = bots.data?.some((bot) => bot.id === receipt.botId);
   const stateLabel = completionReceiptLabels[receipt.state];
   const watch = completionWatch(receipt);
@@ -128,12 +122,14 @@ function CompletionRow({ receipt, canInspect, unavailableReason }: { receipt: Se
       </div>
       {open ? (
         <div className="ml-3.5 flex flex-col gap-1 rounded-md border border-dashed bg-background/60 p-2">
+          <ObservationStatus read={detail} />
           {detail?.error ? (
             <div className="flex items-center gap-2 text-xs">
               <p className="min-w-0 flex-1 break-words text-destructive">Detail unavailable: {detail.error}</p>
               <Button size="xs" variant="ghost" disabled={reading} onClick={readDetail}>Read detail again</Button>
             </div>
-          ) : detail?.data ? (
+          ) : null}
+          {detail.data ? (
             detail.data.receipt ? (
               <dl className="flex flex-col gap-1">
                 <DetailField label="Receipt">
@@ -158,7 +154,7 @@ function CompletionRow({ receipt, canInspect, unavailableReason }: { receipt: Se
             ) : (
               <p className="text-xs text-muted-foreground">{completionLinkStatusLabels[detail.data.linkStatus].label}. {completionLinkStatusLabels[detail.data.linkStatus].description}</p>
             )
-          ) : <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3" />Reading detail…</p>}
+          ) : !detail.error && !detail.unavailable ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3" />Reading detail…</p> : null}
         </div>
       ) : null}
     </div>
@@ -192,6 +188,7 @@ export function HistoryView({ run }: { run(work: Promise<void>): void }) {
         </NativeSelect>
       </div>
       {!access.available ? <p className={hintClass}>{access.reason}</p> : null}
+      <ObservationStatus read={completions} />
       {data?.restarted ? <p role="status" className="text-xs text-warning">History changed while paging, so paging started again from the first page.</p> : null}
       {data ? (
         <>
@@ -233,26 +230,14 @@ function OccurrenceTarget({ row }: { row: ServeOccurrenceRow }) {
 
 function OccurrenceRow({ row, onRemove, canInspect, canRemove }: { row: ServeOccurrenceRow; onRemove(row: ServeOccurrenceRow): void; canInspect: boolean; canRemove: boolean }) {
   const store = useStore();
-  const [inspection, setInspection] = useState<{ revision: string; value: ServeOccurrenceDetail | null } | null>(null);
-  const [reading, setReading] = useState(false);
-  // Revealed arguments and receipts belong to the intent revision they were read at; a changed row drops them.
-  const shown = inspection !== null && inspection.revision === row.revision;
-  const inspect = () => {
-    setReading(true);
-    store.call<{ subscription: ServeOccurrenceDetail | null }>("serve", "serve_occurrence_get", { id: row.id })
-      .then(({ subscription }) => setInspection({ revision: subscription?.revision ?? row.revision, value: subscription }), (error) => toast.error(errorMessage(error)))
-      .finally(() => setReading(false));
-  };
-  // While the inspection is open, receipt-count, truncation and cursor movement re-read it; the open read's
-  // own landing is not a change.
-  const observed = useRef<string | null>(null);
   const receiptsSignature = `${row.receiptCount}:${row.receiptsTruncated}:${row.cursor}`;
-  useEffect(() => {
-    if (!shown) { observed.current = null; return; }
-    if (observed.current !== null && observed.current !== receiptsSignature) inspect();
-    observed.current = receiptsSignature;
-  }, [shown, receiptsSignature]);
-  const detail = shown ? inspection!.value : null;
+  const inspection = useRevealedRead(async () => {
+    const { subscription } = await store.call<{ subscription: ServeOccurrenceDetail | null }>("serve", "serve_occurrence_get", { id: row.id });
+    if (subscription && subscription.revision !== row.revision) throw new Error("This occurrence intent changed. Inspect the current row again.");
+    return subscription;
+  }, JSON.stringify([row.id, row.revision]), receiptsSignature, { pkg: "serve", operation: "serve_occurrence_get" });
+  const { shown, loading: reading } = inspection;
+  const detail = inspection.data;
   return (
     <div data-occurrence={row.id} className="flex flex-col gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted/70">
       <div className="flex min-w-0 items-center gap-2 text-xs">
@@ -267,7 +252,7 @@ function OccurrenceRow({ row, onRemove, canInspect, canRemove }: { row: ServeOcc
         <span>{row.receiptCount} receipt{row.receiptCount === 1 ? "" : "s"}{row.receiptsTruncated ? " · only the latest 128 are inspectable" : ""}</span>
       </div>
       <div className="flex items-center gap-1 pl-2.5">
-        <Button size="xs" variant="ghost" disabled={reading || !canInspect} onClick={() => shown ? setInspection(null) : inspect()} aria-expanded={shown}>
+        <Button size="xs" variant="ghost" disabled={reading || !canInspect} onClick={() => shown ? inspection.hide() : inspection.reveal()} aria-expanded={shown}>
           {reading ? <Spinner /> : shown ? <EyeOffIcon /> : <EyeIcon />}{shown ? "Hide inspection" : "Inspect…"}
         </Button>
         <Button size="xs" variant="ghost" className="text-destructive hover:text-destructive" disabled={!canRemove} onClick={() => onRemove(row)}>
@@ -277,6 +262,8 @@ function OccurrenceRow({ row, onRemove, canInspect, canRemove }: { row: ServeOcc
       </div>
       {shown ? (
         <div className="ml-3.5 flex flex-col gap-1.5 rounded-md border border-dashed bg-background/60 p-2 text-xs">
+          <ObservationStatus read={inspection} />
+          {inspection.error ? <p className="text-destructive">Inspection unavailable: {inspection.error}</p> : null}
           {detail ? (
             <>
               <span className={labelClass}>Source arguments · may be sensitive</span>
@@ -305,7 +292,7 @@ function OccurrenceRow({ row, onRemove, canInspect, canRemove }: { row: ServeOcc
               ) : <p className="text-muted-foreground">No receipts retained.</p>}
               <p className="text-muted-foreground">{detail.deliveries.length} of {detail.receiptCount} receipts shown</p>
             </>
-          ) : <p className="text-muted-foreground">This occurrence subscription no longer exists.</p>}
+          ) : inspection.hasRead ? <p className="text-muted-foreground">This occurrence subscription no longer exists.</p> : reading ? <p className="text-muted-foreground">Reading inspection…</p> : null}
         </div>
       ) : null}
     </div>
@@ -349,6 +336,7 @@ export function OccurrencesView({ run }: { run(work: Promise<void>): void }) {
         <PackageSubscriptionFilter package={occurrenceFilter.package} disabled={!access.available} onChange={(next) => run(store.filterOccurrences({ ...occurrenceFilter, package: next }))} />
       </div>
       {!access.available ? <p className={hintClass}>{access.reason}</p> : null}
+      <ObservationStatus read={occurrences} />
       {data?.restarted ? <p role="status" className="text-xs text-warning">Occurrence subscriptions changed while paging, so paging started again from the first page.</p> : null}
       {data ? data.subscriptions.length ? (
         <div className="-mx-1 flex flex-col">

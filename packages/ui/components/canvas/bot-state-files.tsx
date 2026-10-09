@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ChevronLeftIcon, FileIcon, FolderIcon, LinkIcon, OctagonAlertIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { StateFlowView } from "./state-flow";
 import { BotAction, hintClass, labelClass, MoreButton, Pill, ReadError, useBotAction, useBotPages, useBotRead, ViewHeader, type BotScope } from "./bot-state-shared";
 import { useNow, useStore } from "./provider";
+import { ObservationStatus, useKeyedRead, type ReadOwner } from "./owner-reads";
 
 export const chunk = 65_536;
 
@@ -29,16 +30,17 @@ export function PreviewBody({ read, preview }: { read: StateFileRead; preview: P
 }
 
 /** Explicit, revision-fenced reading of one file; a changed file is reported, never silently re-read. */
-export function useFilePreview(read: (key: string, revision?: string) => Promise<StateFileRead>) {
-  const [state, setState] = useState<{ key: string; read: StateFileRead | null; error: string | null; loading: boolean } | null>(null);
+export function useFilePreview(read: (key: string, revision?: string) => Promise<StateFileRead>, subject: string, owner: ReadOwner) {
+  const [selection, setSelection] = useState<{ subject: string; key: string; revision?: string } | null>(null);
+  const selected = selection?.subject === subject ? selection : null;
+  useLayoutEffect(() => { if (selection && selection.subject !== subject) setSelection(null); }, [selection, subject]);
+  const result = useKeyedRead(() => read(selected!.key, selected!.revision), selected ? JSON.stringify([subject, selected.key, selected.revision, chunk]) : null, 0, owner);
   return {
-    state,
+    state: selected ? { ...result, key: selected.key, read: result.data, error: result.error ?? result.unavailable } : null,
     open(key: string, revision?: string) {
-      setState({ key, read: null, error: null, loading: true });
-      read(key, revision).then((value) => setState((held) => held?.key === key ? { key, read: value, error: null, loading: false } : held),
-        (error: unknown) => setState((held) => held?.key === key ? { key, read: null, error: error instanceof Error ? error.message : String(error), loading: false } : held));
+      setSelection({ subject, key, revision });
     },
-    close() { setState(null); },
+    close() { setSelection(null); },
   };
 }
 
@@ -78,10 +80,10 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
   const [path, setPath] = useState(".");
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<"paths" | "all">("paths");
-  const pages = useBotPages<StateFile>((offset, revision) => store.call<StateFilePage>("bots", "bot_workspace_list", { botId: scope.botId, path, offset, limit: 100, ...(revision ? { revision } : {}) })
-    .then((page) => ({ items: page.entries, revision: page.revision, nextOffset: page.nextOffset })), `${scope.incarnation}:${path}`, scope.observe);
+  const pages = useBotPages<StateFile, StateFilePage>((offset, revision) => store.call<StateFilePage>("bots", "bot_workspace_list", { botId: scope.botId, path, offset, limit: 100, ...(revision ? { revision } : {}) })
+    .then((page) => ({ ...page, items: page.entries })), `${scope.incarnation}:${path}:100`, scope.observe, { pkg: "bots", operation: "bot_workspace_list" });
   const preview = useFilePreview((file, revision) => store.call<StateFileRead>("bots", "bot_workspace_read",
-    { botId: scope.botId, path: file, offset: 0, length: chunk, ...(revision ? { revision } : {}) }));
+    { botId: scope.botId, path: file, offset: 0, length: chunk, ...(revision ? { revision } : {}) }), `${scope.incarnation}:${path}`, { pkg: "bots", operation: "bot_workspace_read" });
   const action: BotStateAction = { kind: "workspace_clear", selection: mode === "all" ? { all: true } : { paths: selected.length ? selected : ["."] } };
   const controls = useBotAction(scope, action, !owned ? "This workspace is not Stack-owned." : mode === "paths" && !selected.length ? "Select entries to clear first." : null);
   const idle = controls.flow.phase === "idle";
@@ -100,6 +102,7 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
         <code className="min-w-0 truncate font-mono text-[0.7rem]">{path === "." ? "./" : `./${path}/`}</code>
       </div>
       <ReadError error={pages.error} what="Workspace listing" />
+      <ObservationStatus read={pages} />
       {pages.page ? pages.page.items.length ? (
         <ul aria-label="Workspace files" className="-mx-1 flex max-h-72 flex-col overflow-auto">
           {pages.page.items.map((file) => (
@@ -110,12 +113,13 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
           ))}
         </ul>
       ) : <p className="text-xs text-muted-foreground">This directory is empty.</p> : pages.loading ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner />Listing…</p> : null}
-      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} onMore={pages.more} restarted={pages.page.restarted} /> : null}
+      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} canMore={pages.canMore} onMore={pages.more} restarted={pages.page.restarted} /> : null}
       {preview.state ? (
         <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">
           <span className="flex items-center gap-2 text-xs"><span className="min-w-0 truncate font-mono">{preview.state.key}</span>
             <Button size="xs" variant="ghost" className="ml-auto" onClick={preview.close}>Close</Button></span>
           {preview.state.loading ? <Spinner /> : null}
+          <ObservationStatus read={preview.state} />
           {preview.state.error ? <p className="text-xs text-destructive">{/revision changed/.test(preview.state.error) ? "This file changed since it was listed. Refresh the listing to read it again." : preview.state.error}</p> : null}
           {preview.state.read ? <PreviewBody read={preview.state.read} preview={decodeChunk(preview.state.read)} /> : null}
         </div>
@@ -141,8 +145,8 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
 /** Bot-private uploads. Removal retires the UUID; attachment associations and copied bytes remain. */
 export function UploadsView({ scope }: { scope: BotScope }) {
   const store = useStore();
-  const pages = useBotPages<StateFile>((offset, revision) => store.call<StateFilePage>("bots", "chat_upload_list", { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) })
-    .then((page) => ({ items: absentStore(page) ? [] : page.entries, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
+  const pages = useBotPages<StateFile, StateFilePage>((offset, revision) => store.call<StateFilePage>("bots", "chat_upload_list", { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) })
+    .then((page) => ({ ...page, items: absentStore(page) ? [] : page.entries })), `${scope.incarnation}:100`, scope.observe, { pkg: "bots", operation: "chat_upload_list" });
   const [open, setOpen] = useState<string | null>(null);
   // Keep the selected detail mounted when its own removal invalidates the list.
   // The receipt belongs to that exact UUID, even after no upload row remains.
@@ -152,6 +156,7 @@ export function UploadsView({ scope }: { scope: BotScope }) {
     <div className="flex flex-col gap-2">
       <ViewHeader title="Uploads" loading={pages.loading} onRefresh={pages.refresh} />
       <ReadError error={pages.error} what="Upload storage" />
+      <ObservationStatus read={pages} />
       {pages.page ? rows.length ? (
         <ul aria-label="Uploads" className="-mx-1 flex flex-col gap-1">
           {rows.map(({ id, file }) => {
@@ -168,19 +173,20 @@ export function UploadsView({ scope }: { scope: BotScope }) {
           })}
         </ul>
       ) : <p className="text-xs text-muted-foreground">No uploads are stored for this Bot.</p> : null}
-      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} onMore={pages.more} restarted={pages.page.restarted} /> : null}
+      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} canMore={pages.canMore} onMore={pages.more} restarted={pages.page.restarted} /> : null}
     </div>
   );
 }
 
 function UploadDetail({ scope, id, listed }: { scope: BotScope; id: string; listed: boolean }) {
   const store = useStore();
-  const status = useBotRead(() => store.call<BotUpload>("bots", "chat_upload_status", { botId: scope.botId, id }), `${scope.incarnation}:${id}`, scope.observe);
-  const preview = useFilePreview(() => store.call<StateFileRead>("bots", "chat_upload_read", { botId: scope.botId, id, offset: 0, length: chunk }));
+  const status = useBotRead(() => store.call<BotUpload>("bots", "chat_upload_status", { botId: scope.botId, id }), `${scope.incarnation}:${id}`, scope.observe, { pkg: "bots", operation: "chat_upload_status" });
+  const preview = useFilePreview(() => store.call<StateFileRead>("bots", "chat_upload_read", { botId: scope.botId, id, offset: 0, length: chunk }), `${scope.incarnation}:${id}`, { pkg: "bots", operation: "chat_upload_read" });
   const upload = listed ? status.data : null;
   return (
     <div className="flex flex-col gap-1.5 pl-5 text-xs">
       <ReadError error={status.error} what="Upload status" />
+      <ObservationStatus read={status} />
       {!listed ? <p className={hintClass}>This upload is no longer in the current listing. Its maintenance receipt remains inspectable below.</p> : null}
       {upload ? (
         <dl className="grid grid-cols-[5rem_1fr] gap-x-2">
@@ -193,6 +199,7 @@ function UploadDetail({ scope, id, listed }: { scope: BotScope; id: string; list
       {upload?.path ? (
         preview.state ? (
           <>
+            <ObservationStatus read={preview.state} />
             {preview.state.error ? <p className="text-destructive">{preview.state.error}</p> : null}
             {preview.state.read ? <PreviewBody read={preview.state.read} preview={decodeChunk(preview.state.read)} /> : <Spinner />}
           </>
@@ -212,7 +219,7 @@ export function LogView({ scope }: { scope: BotScope }) {
   const [chunks, setChunks] = useState<{ key: string; reads: StateFileRead[] } | null>(null);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const first = useBotRead(() => store.call<StateFileRead>("bots", "bot_log_read", { botId: scope.botId, offset: 0, length: chunk }), scope.incarnation, scope.observe);
+  const first = useBotRead(() => store.call<StateFileRead>("bots", "bot_log_read", { botId: scope.botId, offset: 0, length: chunk }), `${scope.incarnation}:${chunk}`, scope.observe, { pkg: "bots", operation: "bot_log_read" });
   const held = first.data && chunks?.key === first.data.revision ? chunks.reads : first.data ? [first.data] : [];
   const last = held.at(-1);
   const more = () => {
@@ -229,6 +236,7 @@ export function LogView({ scope }: { scope: BotScope }) {
     <div className="flex flex-col gap-2">
       <ViewHeader title="Log" loading={first.loading} onRefresh={first.refresh} />
       <ReadError error={first.error} what="Log" />
+      <ObservationStatus read={first} />
       {notice ? <p role="status" className="text-xs text-warning">{notice}</p> : null}
       {first.data ? (
         <>
@@ -247,13 +255,14 @@ export function LogView({ scope }: { scope: BotScope }) {
 /** Retired runtime credential copies, as metadata. Discarding one can lose the only unreconciled credential refresh. */
 export function RecoveryView({ scope }: { scope: BotScope }) {
   const store = useStore();
-  const pages = useBotPages<StateFile>((offset, revision) => store.call<StateFilePage>("bots", "bot_recovery_list", { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) })
-    .then((page) => ({ items: absentStore(page) ? [] : page.entries, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
+  const pages = useBotPages<StateFile, StateFilePage>((offset, revision) => store.call<StateFilePage>("bots", "bot_recovery_list", { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) })
+    .then((page) => ({ ...page, items: absentStore(page) ? [] : page.entries })), `${scope.incarnation}:100`, scope.observe, { pkg: "bots", operation: "bot_recovery_list" });
   return (
     <div className="flex flex-col gap-2">
       <ViewHeader title="Credential recovery" loading={pages.loading} onRefresh={pages.refresh} />
       <p className={hintClass}>Metadata only. The credential files themselves are never read here.</p>
       <ReadError error={pages.error} what="Recovery storage" />
+      <ObservationStatus read={pages} />
       {pages.page ? pages.page.items.length ? (
         <ul aria-label="Recovery directories" className="flex flex-col gap-2">
           {pages.page.items.map((file) => (
@@ -270,7 +279,7 @@ export function RecoveryView({ scope }: { scope: BotScope }) {
           ))}
         </ul>
       ) : <p className="text-xs text-muted-foreground">No credential recovery copies are stored for this Bot.</p> : null}
-      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} onMore={pages.more} restarted={pages.page.restarted} /> : null}
+      {pages.page ? <MoreButton nextOffset={pages.page.nextOffset} loading={pages.loading} canMore={pages.canMore} onMore={pages.more} restarted={pages.page.restarted} /> : null}
     </div>
   );
 }

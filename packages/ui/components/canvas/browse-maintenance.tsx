@@ -10,7 +10,7 @@ import { profileName, siteDataOrigins, volumeSelection, type SiteDataCategory } 
 import { localOperations } from "@/lib/stack/state";
 import { stateOperations } from "@/lib/stack/maintenance";
 import type { BrowserProfile, BrowserVolume, BrowserVolumePage, StateReceipt } from "@/lib/stack/types";
-import { useKeyedRead, usePagedRead } from "./owner-reads";
+import { ObservationStatus, useKeyedRead, usePagedRead } from "./owner-reads";
 import { useNow, useStack, useStore } from "./provider";
 import { MaintenanceDisclosure, StateFlowView, StateReceiptView, useStateFlow } from "./state-flow";
 
@@ -80,13 +80,13 @@ function ProfileFence({ profile, requestId }: { profile: BrowserProfile; request
   const state = useStack();
   const store = useStore();
   const now = useNow(15_000);
-  const receipt = useKeyedRead(() => store.call<{ receipt: StateReceipt | null }>("browse", "browse_state_receipt_get", { requestId }).then((value) => value.receipt), `${profile.id}:${requestId}`, state.browserProfiles.at ?? 0);
+  const receipt = useKeyedRead(() => store.call<{ receipt: StateReceipt | null }>("browse", "browse_state_receipt_get", { requestId }).then((value) => value.receipt), `${profile.id}:${requestId}`, state.browserProfiles.at ?? 0, { pkg: "browse", operation: "browse_state_receipt_get" });
   const [confirmingGeneration, setConfirmingGeneration] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const access = localOperations(state, "browse", ["browse_state_receipt_get", "browse_state_fence_release"]);
   const inspected = receipt.data?.subject?.id === profile.id && ["partial", "unknown", "completed"].includes(receipt.data.status);
-  const disabled = pending || receipt.loading || !!receipt.error || !inspected || state.status.browse !== "open";
+  const disabled = pending || receipt.loading || receipt.stale || !!receipt.error || !inspected || state.status.browse !== "open";
   const release = async () => {
     if (confirmingGeneration === null || confirmingGeneration !== profile.generation || disabled || !access.available) return;
     setPending(true); setError(null);
@@ -100,6 +100,7 @@ function ProfileFence({ profile, requestId }: { profile: BrowserProfile; request
     <p className="text-xs font-medium">Profile maintenance remains fenced · generation {profile.generation}</p>
     <code className="break-all text-xs">Request {requestId}</code>
     {receipt.error ? <p role="alert" className="text-xs text-destructive">Receipt unavailable: {receipt.error}</p> : null}
+    <ObservationStatus read={receipt} />
     {receipt.data ? <><StateReceiptView receipt={receipt.data} now={now} />
       <ul aria-label="Exact remaining or uncertain resources" className="flex flex-col gap-1 text-xs">
         {receipt.data.outcomes.filter((row) => row.outcome !== "removed").map((row, index) => <li key={`${index}:${row.resource}`} className="break-all"><code>{row.resource}</code> · {row.outcome}{row.detail ? ` · ${row.detail}` : ""}</li>)}
@@ -128,21 +129,22 @@ function Volumes() {
   const state = useStack();
   const store = useStore();
   const [selected, setSelected] = useState<string[]>([]);
-  const pages = usePagedRead<BrowserVolume>(async (offset, revision) => {
+  const pages = usePagedRead<BrowserVolume, BrowserVolumePage>(async (offset, revision) => {
     const page = await store.call<BrowserVolumePage>("browse", "browser_volume_list", { offset, limit: 100, ...(revision ? { revision } : {}) });
-    return { items: page.volumes, revision: page.revision, nextOffset: page.nextOffset };
-  }, "browse:volumes", state.browserToolchain.at ?? 0);
+    return { ...page, items: page.volumes };
+  }, "browse:volumes:100", state.browserToolchain.at ?? 0, { pkg: "browse", operation: "browser_volume_list" });
   const rows = pages.page?.items ?? [];
   const controls = useStateFlow({ operations: stateOperations(store.call, "browse", browseMaintenanceOperations.volume, { volumeIds: selected }),
     recoveryKey: "browse:volume:ids", policy: "receipt-only", prerequisite: () => unavailable,
     onReceipt: (receipt, selection) => { pages.refresh(); if (receipt.status === "completed" && selection) setSelected([]); } });
   const locked = controls.flow.phase !== "idle";
-  const unavailable = pages.error || pages.loading ? "Refresh the volume inventory before preparing."
+  const unavailable = pages.error || pages.loading || pages.stale ? "Refresh the volume inventory before preparing."
     : !volumeSelection(rows, selected) ? "Select up to 100 exact unreferenced, unmounted owned volumes; review changed selections." : null;
   return <MaintenanceDisclosure title="Volumes" aside="Maintenance · bytes unmeasured" active={locked}>
     <p className={hint}>Only verified Stack names and role/session/lease tags are listed; foreign volumes are excluded. Every Backend receipt (including incomplete/disposable leases) and every provider mount blocks collection. No implicit session closure or VM launch. Bytes are unmeasured, not zero; backups remain independent.</p>
     <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.browse !== "open"} onClick={pages.refresh}>Refresh volumes</Button>
     {pages.error ? <p role="alert" className="text-xs text-destructive">Volume inventory unavailable: {pages.error}</p> : null}
+    <ObservationStatus read={pages} />
     {pages.page?.restarted ? <p className={hint}>The inventory changed while paging; showing the first page again.</p> : null}
     <ul aria-label="Owned browser volumes" className="flex max-h-64 flex-col gap-2 overflow-auto">
       {rows.map((row) => <li key={row.id} className="flex min-w-0 flex-col gap-1 text-xs">
@@ -154,7 +156,7 @@ function Volumes() {
       </li>)}
     </ul>
     {!rows.length && !pages.error ? <p className={hint}>{pages.page ? "No verified owned volumes." : "Reading volumes…"}</p> : null}
-    {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.browse !== "open"} onClick={pages.more}>Load more volumes</Button> : null}
+    {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={!pages.canMore || locked} onClick={pages.more}>Load more volumes</Button> : null}
     <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} volumes`} applyLabel="Collect these volumes" />
   </MaintenanceDisclosure>;
 }

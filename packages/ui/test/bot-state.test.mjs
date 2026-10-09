@@ -14,7 +14,7 @@ registerHooks({
   },
 });
 
-const { absentStore, botBlockers, botStateKey, botStateOperations, coveredBy, decodeChunk, firstPage, nextPage, purgeable, quarantined, queueBodyLimit, queueUnclearable, retiredGenerations, toggleSelection, workspaceOwned } = await import("../lib/stack/bot-state.ts");
+const { absentStore, botBlockers, botStateKey, botStateOperations, coveredBy, decodeChunk, purgeable, quarantined, queueBodyLimit, queueUnclearable, retiredGenerations, toggleSelection, workspaceOwned } = await import("../lib/stack/bot-state.ts");
 
 const b64 = (text) => Buffer.from(text).toString("base64");
 const entry = (category, extra = {}) => ({ id: `bot:alpha:${category}`, ownerPackage: "bots", subject: { kind: "bot", id: "alpha" }, kind: "workspace", authority: "authoritative",
@@ -40,19 +40,9 @@ test("recovery slots belong to one incarnation and one decision", () => {
   assert.equal(botStateKey("inc-1", { kind: "session_reset", history: "purge" }), botStateKey("inc-1", reset), "one reset decision per incarnation, whichever history choice");
 });
 
-test("paging restarts on a changed listing and propagates other failures", async () => {
-  let revision = "a";
-  const read = async (offset, pinned) => {
-    if (pinned && pinned !== revision) throw new Error("directory revision changed; restart paging");
-    return { items: [`${revision}${offset}`], revision, nextOffset: offset === 0 ? 1 : null };
-  };
-  const first = await firstPage(read);
-  assert.deepEqual((await nextPage(read, first)).items, ["a0", "a1"]);
-  revision = "b";
-  const restarted = await nextPage(read, first);
-  assert.deepEqual([restarted.items, restarted.restarted], [["b0"], true]);
-  await assert.rejects(nextPage(async () => { throw new Error("bots WebSocket is not connected"); }, first), /not connected/);
+test("absent Bot storage remains distinct from an unavailable read", () => {
   assert.equal(absentStore({ revision: "absent" }), true);
+  assert.equal(absentStore({ revision: "r1" }), false);
 });
 
 test("file chunks decode to plain text or binary metadata, never markup", () => {

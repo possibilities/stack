@@ -27,6 +27,7 @@ import { WorkerSettingsTab } from "./worker-settings";
 import { WorkContextLink } from "./hud-shared";
 import { WorkerMaintenance, WorkerSessionMaintenance, workerStateOperations } from "./worker-maintenance";
 import { BotWatch, useObservedRead } from "./watch-receipts";
+import { ObservationStatus } from "./owner-reads";
 
 type Tab = "conversation" | "changes" | "files" | "turns" | "tools" | "records" | "session" | "settings";
 const tabs: Array<[Tab, string]> = [["conversation", "Conversation"], ["changes", "Changes"], ["files", "Files"], ["turns", "Turns"], ["tools", "Tools"], ["records", "Records"], ["session", "Session"], ["settings", "Settings"]];
@@ -639,18 +640,19 @@ function TurnObservation({ receipts, signature }: { receipts: ServeCompletionRec
   const store = useStore();
   const receipt = receipts[0];
   const access = localOperation(state, "worker", "worker_turn_observation");
-  const usable = access.available && Boolean(receipt?.botId && receipt?.threadId && receipt?.recordId);
-  const read = useObservedRead<WorkerTurnObservation>(usable ? `turn-observation:${receipt!.recordId}` : null, signature,
-    () => store.call<WorkerTurnObservation>("worker", "worker_turn_observation", { botId: receipt!.botId, threadId: receipt!.threadId, requestId: receipt!.recordId }));
+  const usable = Boolean(receipt?.botId && receipt?.threadId && receipt?.recordId);
+  const read = useObservedRead<WorkerTurnObservation>(usable ? JSON.stringify(["turn-observation", receipt!.botId, receipt!.threadId, receipt!.recordId]) : null, signature,
+    () => store.call<WorkerTurnObservation>("worker", "worker_turn_observation", { botId: receipt!.botId, threadId: receipt!.threadId, requestId: receipt!.recordId }), { pkg: "worker", operation: "worker_turn_observation" });
   const observation = read.data;
   if (!access.available) return <p className="text-[0.72rem] text-pretty text-muted-foreground">{access.reason}</p>;
-  if (read.error) return <p className="text-[0.72rem] text-pretty text-destructive">Observation unavailable: {read.error}</p>;
-  if (read.loading || !observation) return <p className="text-[0.72rem] text-muted-foreground">Reading observation…</p>;
+  const freshness = <><ObservationStatus read={read} />{read.error ? <p className="text-xs text-destructive">Observation unavailable: {read.error}</p> : null}</>;
+  if (!observation) return <>{freshness}{!read.error && !read.unavailable ? <p className="text-[0.72rem] text-muted-foreground">Reading observation…</p> : null}</>;
   if (observation.result) {
     const result = observation.result;
     return (
       <div className="flex flex-col gap-1 rounded-lg bg-muted/40 px-2 py-1.5">
         <span className="text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase">Completion</span>
+        {freshness}
         <dl className="flex flex-col">
           <Row label="Outcome">{workerObservationPhaseLabels[result.phase].label}{result.stopReason ? ` · ${result.stopReason}` : ""}</Row>
           {result.issue ? <Row label="Issue" className="text-warning"><span className="whitespace-normal break-words">{result.issue}</span></Row> : null}
@@ -667,6 +669,7 @@ function TurnObservation({ receipts, signature }: { receipts: ServeCompletionRec
     return (
       <div className="flex flex-col gap-1 rounded-lg bg-muted/40 px-2 py-1.5">
         <span className="text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase">Attention</span>
+        {freshness}
         <dl className="flex flex-col">
           <Row label="Phase">{workerObservationPhaseLabels[update.phase].label}</Row>
           <Row label="Pending permissions">{update.pendingCount ? `${update.pendingCount} pending permission${update.pendingCount === 1 ? "" : "s"}` : "none"}</Row>
@@ -682,7 +685,7 @@ function TurnObservation({ receipts, signature }: { receipts: ServeCompletionRec
       </div>
     );
   }
-  return <p className="text-[0.72rem] text-muted-foreground">Not admitted yet.</p>;
+  return <>{freshness}<p className="text-[0.72rem] text-muted-foreground">Not admitted yet.</p></>;
 }
 
 function TurnsTab({ worker, generation, focusTurnId }: { worker: WorkerSession; generation: number; focusTurnId?: string | null }) {

@@ -1,48 +1,74 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { firstPage, nextPage, type Page, type PageRead } from "@/lib/stack/state";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { emptyObservation, pagedObservation, ReadObservation, type ObservationSnapshot, type PageRead } from "@/lib/stack/observation";
+import { localOperation, revisionChanged } from "@/lib/stack/state";
+import { useStack } from "./provider";
 
-/* Owner reads shared by the state and maintenance views: keyed so another subject's data never shows, fenced so an
- * older answer never replaces a newer one, and re-run on the owner's invalidation. */
+export type ReadOwner = { pkg: string; operation: string; enabled?: boolean; revisionRefused?(error: unknown): boolean };
+type Query<R> = { key: string; read: R };
 
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-
-/** One read, re-run when its key or invalidation changes. An older answer never replaces a newer one. */
-export function useKeyedRead<T>(read: () => Promise<T>, key: string, observe: number): { data: T | null; error: string | null; loading: boolean; refresh(): void } {
-  const [state, setState] = useState<{ key: string; data: T | null; error: string | null }>({ key, data: null, error: null });
-  const [loading, setLoading] = useState(false);
-  const token = useRef(0);
-  const latest = useRef(read);
-  latest.current = read;
-  const run = useCallback(() => {
-    const mine = ++token.current;
-    setLoading(true);
-    latest.current().then((data) => { if (mine === token.current) setState({ key, data, error: null }); },
-      (error: unknown) => { if (mine === token.current) setState((held) => ({ key, data: held.key === key ? held.data : null, error: message(error) })); })
-      .finally(() => { if (mine === token.current) setLoading(false); });
-  }, [key]);
-  useEffect(() => { run(); return () => { token.current++; }; }, [run, observe]);
-  // Data read for another key is never shown, even for the render before the new read starts.
-  return { data: state.key === key ? state.data : null, error: state.key === key ? state.error : null, loading, refresh: run };
+/** Readiness is independent of identity. Owners declare their read operation, not duplicate transport checks. */
+export function useReadUnavailable(owner: ReadOwner): string | null {
+  const state = useStack();
+  const access = localOperation(state, owner.pkg, owner.operation);
+  return !access.available ? access.reason : state.status[owner.pkg] !== "open" ? `The ${owner.pkg} connection is not open.` : null;
 }
 
-/** Bounded pages of one observation; continuing after the owner changed it starts again from the first page. */
-export function usePagedRead<T>(read: PageRead<T>, key: string, observe: number) {
-  const [state, setState] = useState<{ key: string; page: Page<T> | null; error: string | null }>({ key, page: null, error: null });
-  const [loading, setLoading] = useState(false);
-  const token = useRef(0);
-  const latest = useRef(read);
-  latest.current = read;
-  const load = useCallback((more: Page<T> | null) => {
-    const mine = ++token.current;
-    setLoading(true);
-    (more ? nextPage(latest.current, more) : firstPage(latest.current)).then((page) => { if (mine === token.current) setState({ key, page, error: null }); },
-      (error: unknown) => { if (mine === token.current) setState((held) => ({ key, page: held.key === key ? held.page : null, error: message(error) })); })
-      .finally(() => { if (mine === token.current) setLoading(false); });
-  }, [key]);
-  useEffect(() => { load(null); return () => { token.current++; }; }, [load, observe]);
-  const page = state.key === key ? state.page : null;
-  return { page, error: state.key === key ? state.error : null, loading, refresh: () => load(null), more: () => { if (page) load(page); } };
+/** Commit bindings outside render, before acquiring demand. A render for another query masks the old
+ * snapshot immediately; Activity cleanup only releases demand, and is reversible. */
+function useObservation<R, V>(observation: ReadObservation<Query<R>, V>, read: R, key: string | null, observe: unknown, unavailable: string | null) {
+  const committed = useRef<{ key: string | null; observe: unknown; unavailable: string | null } | null>(null);
+  useLayoutEffect(() => {
+    const prior = committed.current;
+    observation.configure(key === null ? null : { key, read }, unavailable);
+    committed.current = { key, observe, unavailable };
+    if (prior?.key === key && prior.unavailable === unavailable && !Object.is(prior.observe, observe)) void observation.invalidate();
+  });
+  useLayoutEffect(() => observation.activate(), [observation]);
+  const snapshot = useSyncExternalStore(observation.subscribe, observation.getSnapshot, observation.getSnapshot);
+  const current = snapshot.key === key ? snapshot : emptyObservation<V>(key, unavailable);
+  // A readiness loss is also reflected in the render before the binding commit.
+  return { ...current, unavailable, stale: current.stale || (unavailable !== null && current.evidence !== null),
+    canMore: current.canMore && unavailable === null, refresh: observation.refresh, more: observation.more };
 }
 
+/** Single reads use precisely the same identity, acceptance and demand lifecycle as paged reads. */
+export function useKeyedRead<T>(read: () => Promise<T>, key: string | null, observe: unknown, owner: ReadOwner) {
+  const [observation] = useState(() => new ReadObservation<Query<() => Promise<T>>, T>({ key: (query) => query.key, read: (query) => query.read() }));
+  const identity = key === null || owner.enabled === false ? null : JSON.stringify([owner.pkg, owner.operation, key]);
+  const result = useObservation(observation, read, identity, observe, useReadUnavailable(owner));
+  return { ...result, data: result.evidence?.value ?? null, hasRead: result.evidence !== null,
+    loading: result.pending !== null, reload: result.refresh };
+}
+
+/** Sensitive details need a fresh explicit reveal for each intent identity. Ordinary invalidation
+ * refreshes an open disclosure; a changed intent drops consent as well as fencing its answer. */
+export function useRevealedRead<T>(read: () => Promise<T>, intent: string, observe: unknown, owner: ReadOwner) {
+  const [consent, setConsent] = useState<string | null>(null);
+  const committedIntent = useRef(intent);
+  useLayoutEffect(() => { if (committedIntent.current !== intent) { committedIntent.current = intent; setConsent(null); } }, [intent]);
+  const shown = consent === intent;
+  const result = useKeyedRead(read, shown ? intent : null, observe, owner);
+  return { ...result, shown, reveal: () => { if (shown) void result.refresh(); else setConsent(intent); }, hide: () => setConsent(null) };
+}
+
+/** Only genuinely revision-fenced owner pages use this adapter. Full latest-page metadata is typed
+ * alongside accumulated items; no cast or first-page metadata cache is needed by a consumer. */
+export function usePagedRead<T, Details extends object = object>(read: PageRead<T, Details>, key: string | null, observe: unknown, owner: ReadOwner) {
+  const [observation] = useState(() => pagedObservation({
+    key: (query: Query<PageRead<T, Details>>) => query.key,
+    read: (query, offset, revision) => query.read(offset, revision),
+    append: (held, page) => ({ ...page, items: [...held.items, ...page.items] }),
+    revisionRefused: owner.revisionRefused ?? revisionChanged,
+  }));
+  const identity = key === null || owner.enabled === false ? null : JSON.stringify([owner.pkg, owner.operation, key]);
+  const result = useObservation(observation, read, identity, observe, useReadUnavailable(owner));
+  return { ...result, page: result.evidence?.value ?? null, loading: result.pending !== null };
+}
+
+/** Existing views use the same freshness vocabulary while retaining their owner-specific errors. */
+export function ObservationStatus({ read }: { read: Pick<ObservationSnapshot<unknown>, "stale" | "pending" | "unavailable"> }) {
+  const text = [read.unavailable, read.stale ? `Showing stale evidence${read.pending ? " · refreshing…" : "; refresh before relying on it."}` : null].filter(Boolean).join(" · ");
+  return text ? <p role="status" className="text-xs text-pretty text-muted-foreground">{text}</p> : null;
+}

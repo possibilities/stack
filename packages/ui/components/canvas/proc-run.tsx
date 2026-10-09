@@ -19,6 +19,7 @@ import { CopyButton, NodeLink, Row, StatusDot } from "./primitives";
 import { OwnerChip, ProcPlaceholder, procUnavailable, useProcSnapshot } from "./proc-shared";
 import { useNow, useProcWindows, useStack, useStore, useWorkbench } from "./provider";
 import { BotWatch, useObservedRead } from "./watch-receipts";
+import { ObservationStatus } from "./owner-reads";
 import { Window } from "./window";
 
 const pageSize = 100;
@@ -157,16 +158,17 @@ function ExitWatch({ run, generation }: { run: ProcRunDetail; generation: number
   const state = useStack();
   const store = useStore();
   const access = localOperation(state, "proc", "proc_run_completion");
-  const read = useObservedRead<ProcRunObservation>(access.available ? `run-completion:${run.id}` : null, `${generation}:${run.state}`,
-    () => store.call<ProcRunObservation>("proc", "proc_run_completion", { id: run.id }));
+  const read = useObservedRead<ProcRunObservation>(`run-completion:${run.id}`, `${generation}:${run.state}`,
+    () => store.call<ProcRunObservation>("proc", "proc_run_completion", { id: run.id }), { pkg: "proc", operation: "proc_run_completion" });
   const result = read.data?.result ?? null;
   const view = result ? procExitLabels[result.state as keyof typeof procExitLabels] ?? { label: result.state, description: "" } : null;
   return (
     <section aria-label="Exit watch" className="flex shrink-0 flex-col gap-1.5 border-b border-border/60 px-3.5 py-2.5">
       <h3 className="text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase">Exit watch</h3>
+      <ObservationStatus read={read} />
+      {read.error ? <p className="text-[0.72rem] text-pretty text-destructive">Exit observation unavailable: {read.error}</p> : null}
       {!access.available ? <p className="text-[0.72rem] text-pretty text-muted-foreground">{access.reason}</p>
-        : read.error ? <p className="text-[0.72rem] text-pretty text-destructive">Exit observation unavailable: {read.error}</p>
-        : read.loading || !read.data ? <p className="flex items-center gap-1.5 text-[0.72rem] text-muted-foreground"><Spinner className="size-3" />Reading exit…</p>
+        : !read.data ? !read.error && !read.unavailable ? <p className="flex items-center gap-1.5 text-[0.72rem] text-muted-foreground"><Spinner className="size-3" />Reading exit…</p> : null
         : !result || !view ? <p className="text-[0.72rem] text-pretty text-muted-foreground">No exit observed yet — the run is starting or running.</p>
         : (
           <>

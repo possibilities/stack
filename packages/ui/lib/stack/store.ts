@@ -21,7 +21,8 @@ import { initialLedger, SourceLedger, type LedgerState } from "./source";
 import { initialInbox, WatchInbox, type InboxState, type WatchCreateInput } from "./source-watches";
 import type { ReceiverCreateInput } from "./source-setup";
 import type { GithubDelivery, GithubDeliveryPage, GithubEndpoint, GithubFilter, GithubRemoteReceiptPage, GithubSetup, GithubStatus, GithubWatch, GithubWatchRead } from "./types";
-import { continueCompletions, continueInventory, continueOccurrences, continueSubscriptions, loadCompletions, loadInventory, loadOccurrences, loadSubscriptions, localOperation, type CompletionFilter, type CompletionList, type OccurrenceFilter, type OccurrenceList, type StateInventory, type StateSelection, type SubscriptionFilter, type SubscriptionList } from "./state";
+import { completionsObservation, inventoryObservation, occurrencesObservation, subscriptionsObservation, localOperation, type CompletionFilter, type CompletionList, type OccurrenceFilter, type OccurrenceList, type StateInventory, type StateSelection, type SubscriptionFilter, type SubscriptionList } from "./state";
+import { observationResource, type ObservedResource } from "./observation";
 import { checkSettled, developerModeOn, type HarnessCheck } from "./developer";
 import type { HarnessCheckAdmission, HarnessReleases, ServeSettings } from "./types";
 
@@ -92,20 +93,20 @@ export type StackState = Snapshot & {
   /** This page's latest Check now, until a snapshot shows that check finished. Cleared with the developer feature. */
   harnessCheck: HarnessCheck | null;
   /** Loaded pages of `serve_state_list` for `stateSelection`. Local operator only; a remote session never reads it. */
-  stateInventory: Resource<StateInventory>;
+  stateInventory: ObservedResource<StateInventory>;
   stateSelection: StateSelection;
   /** Loaded durable Bot watches, including operation-declared one-shot completion metadata, for `subscriptionFilter`. Read arguments are excluded. Local only. */
-  subscriptions: Resource<SubscriptionList>;
+  subscriptions: ObservedResource<SubscriptionList>;
   subscriptionFilter: SubscriptionFilter;
   /** Retained completion receipts for `completionFilter`; they outlive their watches. Local only; read only while watched. */
-  completions: Resource<CompletionList>;
+  completions: ObservedResource<CompletionList>;
   completionFilter: CompletionFilter;
   /** Bumped on serve (re)connect and `serve_subscriptions_changed`; mounted watch views re-read their exact receipts. */
   completionGeneration: number;
   /** A request for the Subscriptions window to open its History view; the sequence marks each request. */
   historyRequest: { seq: number } | null;
   /** Typed occurrence subscriptions for `occurrenceFilter`; arguments and receipts need the explicit per-row inspection. Local only; read only while watched. */
-  occurrences: Resource<OccurrenceList>;
+  occurrences: ObservedResource<OccurrenceList>;
   occurrenceFilter: OccurrenceFilter;
   /** The Bot Fleet's state window shows. Local only. */
   botStateId: string | null;
@@ -403,10 +404,10 @@ export class StackStore {
       roleLaunch: { data: null, error: null, at: null }, roleInternal: { data: null, error: null, at: null }, roleShims: { data: null, error: null, at: null },
       codexTools: { data: null, error: null, at: null },
       serveSettings: { data: null, error: null, at: null }, harnessReleases: { data: null, error: null, at: null }, harnessCheck: null,
-      stateInventory: { data: null, error: null, at: null }, stateSelection: { owners: null, measure: false },
-      subscriptions: { data: null, error: null, at: null }, subscriptionFilter: {}, serveStateGeneration: 0,
-      completions: { data: null, error: null, at: null }, completionFilter: {}, completionGeneration: 0, historyRequest: null,
-      occurrences: { data: null, error: null, at: null }, occurrenceFilter: {},
+      stateInventory: observationResource(this.inventoryRead.getSnapshot()), stateSelection: { owners: null, measure: false },
+      subscriptions: observationResource(this.subscriptionRead.getSnapshot()), subscriptionFilter: {}, serveStateGeneration: 0,
+      completions: observationResource(this.completionRead.getSnapshot()), completionFilter: {}, completionGeneration: 0, historyRequest: null,
+      occurrences: observationResource(this.occurrenceRead.getSnapshot()), occurrenceFilter: {},
       botStateId: null, botStateGenerations: {}, xcomGeneration: 0,
       roleContext: {}, roleContextShown: {}, roleHarness: null,
       signalStatus: { data: null, error: null, at: null }, signalGeneration: 0, signalRecords: { items: {}, messages: {}, runs: {} },
@@ -434,6 +435,14 @@ export class StackStore {
     };
     this.sourceLedgerSession.subscribe(() => this.set({ sourceLedger: this.sourceLedgerSession.getState() }));
     this.sourceInboxSession.subscribe(() => this.set({ sourceInbox: this.sourceInboxSession.getState() }));
+    this.inventoryRead.subscribe(() => this.set({ stateInventory: observationResource(this.inventoryRead.getSnapshot()) }));
+    this.subscriptionRead.subscribe(() => this.set({ subscriptions: observationResource(this.subscriptionRead.getSnapshot()) }));
+    this.completionRead.subscribe(() => this.set({ completions: observationResource(this.completionRead.getSnapshot()) }));
+    this.occurrenceRead.subscribe(() => this.set({ occurrences: observationResource(this.occurrenceRead.getSnapshot()) }));
+    this.inventoryRead.configure(this.state.stateSelection, "Store is stopped.");
+    this.subscriptionRead.configure(this.state.subscriptionFilter, "Store is stopped.");
+    this.completionRead.configure(this.state.completionFilter, "Store is stopped.");
+    this.occurrenceRead.configure(this.state.occurrenceFilter, "Store is stopped.");
     this.serverState = this.state;
     for (const account of snapshot.workerAccounts.data ?? []) if (this.catalogAccountAvailable(account.id)) this.catalogAvailable.add(account.id);
   }
@@ -478,6 +487,11 @@ export class StackStore {
   onDestinationMoved(handler: ((next: Destination) => void) | null): void { this.moved = handler; }
 
   start({ packages, scopedBots = true }: StackConnections = {}): void {
+    this.observationsRunning = true;
+    this.syncServeObservations();
+    // Inventory and Watches intentionally have Store-owned background demand. History/Occurrences
+    // keep view-owned leases; passive resource projections above never acquire demand.
+    this.backgroundObservations ??= [this.inventoryRead.activate(), this.subscriptionRead.activate()];
     this.scopedBots = scopedBots;
     const { endpoints } = this.state;
     const enabled = packages && new Set(packages);
@@ -515,12 +529,12 @@ export class StackStore {
       // Subscription-set and retained-receipt transitions have their own payload-free topic.
       if (topic === "serve_subscriptions_changed") {
         this.set({ completionGeneration: this.state.completionGeneration + 1 });
-        void this.refreshSubscriptions();
-        if (this.completionWatchers > 0) void this.refreshCompletions();
-        if (this.occurrenceWatchers > 0) void this.refreshOccurrences();
+        void this.subscriptionRead.invalidate();
+        void this.completionRead.invalidate();
+        void this.occurrenceRead.invalidate();
       }
     }, this.state.remote ? ["pids_changed", "codex_tools_changed", "resources_changed"] : ["pids_changed", "codex_tools_changed", "resources_changed", "serve_state_changed", "serve_settings_changed", "serve_subscriptions_changed"],
-    { silent: ["resources_changed"], onStatus: (status) => { if (status !== "open") this.forgetServeSettings(); } });
+    { silent: ["resources_changed"], onStatus: (status) => { if (status !== "open") { this.forgetServeSettings(); this.syncServeObservations(); } } });
     open("auth", () => { this.refresh("accounts"); this.refresh("workerAccounts"); this.refresh("login"); this.refresh("workerLogins"); }, (topic) => {
       this.refresh("accounts");
       if (topic === "worker_accounts_changed") this.refresh("workerAccounts");
@@ -606,6 +620,10 @@ export class StackStore {
   }
 
   stop(): void {
+    this.observationsRunning = false;
+    this.syncServeObservations();
+    for (const release of this.backgroundObservations ?? []) release();
+    this.backgroundObservations = null;
     this.sourceLedgerSession.dispose();
     this.sourceInboxSession.dispose();
     this.closeSourceWatchChannel();
@@ -1675,20 +1693,32 @@ export class StackStore {
     this.set({ workerAttempts });
   };
 
-  private stateSeq = 0;
-  private subscriptionSeq = 0;
-  private completionSeq = 0;
-  private occurrenceSeq = 0;
-  private completionWatchers = 0;
-  private occurrenceWatchers = 0;
+  private readonly inventoryRead = inventoryObservation((name, args) => this.call("serve", name, args));
+  private readonly subscriptionRead = subscriptionsObservation((name, args) => this.call("serve", name, args));
+  private readonly completionRead = completionsObservation((name, args) => this.call("serve", name, args));
+  private readonly occurrenceRead = occurrencesObservation((name, args) => this.call("serve", name, args));
+  private observationsRunning = false;
+  private backgroundObservations: (() => void)[] | null = null;
+
+  private syncServeObservations(): void {
+    for (const [read, operation] of [
+      [this.inventoryRead, "serve_state_list"], [this.subscriptionRead, "serve_subscription_list"],
+      [this.completionRead, "serve_completion_list"], [this.occurrenceRead, "serve_occurrence_list"],
+    ] as const) {
+      const access = localOperation(this.state, "serve", operation);
+      read.setUnavailable(!this.observationsRunning ? "Store is stopped." : !access.available ? access.reason
+        : this.main.get("serve")?.status !== "open" ? "The serve connection is not open." : null);
+    }
+  }
 
   private invalidateServeState(): void {
     if (this.state.remote) return;
     this.set({ serveStateGeneration: this.state.serveStateGeneration + 1, completionGeneration: this.state.completionGeneration + 1 });
-    void this.refreshStateInventory();
-    void this.refreshSubscriptions();
-    if (this.completionWatchers > 0) void this.refreshCompletions();
-    if (this.occurrenceWatchers > 0) void this.refreshOccurrences();
+    void this.inventoryRead.invalidate();
+    void this.subscriptionRead.invalidate();
+    void this.completionRead.invalidate();
+    void this.occurrenceRead.invalidate();
+    this.syncServeObservations();
   }
 
   /** Show one Bot in Fleet's state window. */
@@ -1700,83 +1730,43 @@ export class StackStore {
 
   /** Choose owners and measurement; held pages belong to the previous selection and are dropped at once. */
   selectStateInventory = (selection: StateSelection): Promise<void> => {
-    this.set({ stateSelection: selection, stateInventory: { data: null, error: null, at: null } });
-    return this.refreshStateInventory();
+    const captured = { ...selection, owners: selection.owners ? [...selection.owners] : null };
+    this.inventoryRead.setQuery(captured);
+    this.set({ stateSelection: captured });
+    return this.inventoryRead.refresh();
   };
 
   /** Re-read the first page of the current selection. A result from an older read never replaces a newer one. */
-  refreshStateInventory = async (): Promise<void> => {
-    if (this.state.remote) return;
-    const seq = ++this.stateSeq, selection = this.state.stateSelection;
-    try {
-      const data = await loadInventory((name, args) => this.call("serve", name, args), selection);
-      if (seq === this.stateSeq) this.set({ stateInventory: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.stateSeq) this.set({ stateInventory: { ...this.state.stateInventory, error: callMessage(error) } });
-    }
-  };
+  refreshStateInventory = (): Promise<void> => this.inventoryRead.refresh();
 
   /** The next page of the held observation, restarting from the first page when the observation changed. */
-  moreStateInventory = async (): Promise<void> => {
-    const held = this.state.stateInventory.data;
-    if (!held || held.nextOffset === null || this.state.remote) return;
-    const seq = ++this.stateSeq;
-    try {
-      const data = await continueInventory((name, args) => this.call("serve", name, args), held);
-      if (seq === this.stateSeq) this.set({ stateInventory: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.stateSeq) this.set({ stateInventory: { ...this.state.stateInventory, error: callMessage(error) } });
-    }
-  };
+  moreStateInventory = (): Promise<void> => this.inventoryRead.more();
 
   filterSubscriptions = (filter: SubscriptionFilter): Promise<void> => {
-    this.set({ subscriptionFilter: filter, subscriptions: { data: null, error: null, at: null } });
-    return this.refreshSubscriptions();
+    const captured = { ...filter };
+    this.subscriptionRead.setQuery(captured);
+    this.set({ subscriptionFilter: captured });
+    return this.subscriptionRead.refresh();
   };
 
-  refreshSubscriptions = async (): Promise<void> => {
-    if (this.state.remote) return;
-    const seq = ++this.subscriptionSeq, filter = this.state.subscriptionFilter;
-    try {
-      const data = await loadSubscriptions((name, args) => this.call("serve", name, args), filter);
-      if (seq === this.subscriptionSeq) this.set({ subscriptions: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.subscriptionSeq) this.set({ subscriptions: { ...this.state.subscriptions, error: callMessage(error) } });
-    }
-  };
+  refreshSubscriptions = (): Promise<void> => this.subscriptionRead.refresh();
 
-  moreSubscriptions = async (): Promise<void> => {
-    const held = this.state.subscriptions.data;
-    if (!held || held.nextOffset === null || this.state.remote) return;
-    const seq = ++this.subscriptionSeq;
-    try {
-      const data = await continueSubscriptions((name, args) => this.call("serve", name, args), held);
-      if (seq === this.subscriptionSeq) this.set({ subscriptions: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.subscriptionSeq) this.set({ subscriptions: { ...this.state.subscriptions, error: callMessage(error) } });
-    }
-  };
+  moreSubscriptions = (): Promise<void> => this.subscriptionRead.more();
 
   /**
    * Reference-counted watch of retained completion receipts: the first watcher reads, notices and
    * reconnects refresh while watched, and unwatching keeps the held pages.
    */
-  watchCompletions = (): (() => void) => {
-    this.completionWatchers += 1;
-    if (this.completionWatchers === 1) void this.refreshCompletions();
-    return () => { this.completionWatchers = Math.max(0, this.completionWatchers - 1); };
-  };
+  watchCompletions = (): (() => void) => this.completionRead.activate();
 
   /** Reference-counted watch of typed occurrence subscriptions, with the same lifetime as watchCompletions. */
-  watchOccurrences = (): (() => void) => {
-    this.occurrenceWatchers += 1;
-    if (this.occurrenceWatchers === 1) void this.refreshOccurrences();
-    return () => { this.occurrenceWatchers = Math.max(0, this.occurrenceWatchers - 1); };
-  };
+  watchOccurrences = (): (() => void) => this.occurrenceRead.activate();
 
   filterCompletions = (filter: CompletionFilter): Promise<void> => {
-    this.set({ completionFilter: filter, completions: { data: null, error: null, at: null } });
-    return this.completionWatchers > 0 ? this.refreshCompletions() : Promise.resolve();
+    const captured = { ...filter };
+    this.completionRead.setQuery(captured);
+    this.set({ completionFilter: captured });
+    return this.completionRead.refresh();
   };
 
   /** Point the Subscriptions window's History view at this filter; the sequence marks each request. */
@@ -1785,56 +1775,20 @@ export class StackStore {
     return this.filterCompletions(filter);
   };
 
-  refreshCompletions = async (): Promise<void> => {
-    if (this.state.remote) return;
-    const seq = ++this.completionSeq, filter = this.state.completionFilter;
-    try {
-      const data = await loadCompletions((name, args) => this.call("serve", name, args), filter);
-      if (seq === this.completionSeq) this.set({ completions: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.completionSeq) this.set({ completions: { ...this.state.completions, error: callMessage(error) } });
-    }
-  };
+  refreshCompletions = (): Promise<void> => this.completionRead.refresh();
 
-  moreCompletions = async (): Promise<void> => {
-    const held = this.state.completions.data;
-    if (!held || held.nextOffset === null || this.state.remote) return;
-    const seq = ++this.completionSeq;
-    try {
-      const data = await continueCompletions((name, args) => this.call("serve", name, args), held);
-      if (seq === this.completionSeq) this.set({ completions: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.completionSeq) this.set({ completions: { ...this.state.completions, error: callMessage(error) } });
-    }
-  };
+  moreCompletions = (): Promise<void> => this.completionRead.more();
 
   filterOccurrences = (filter: OccurrenceFilter): Promise<void> => {
-    this.set({ occurrenceFilter: filter, occurrences: { data: null, error: null, at: null } });
-    return this.occurrenceWatchers > 0 ? this.refreshOccurrences() : Promise.resolve();
+    const captured = { ...filter };
+    this.occurrenceRead.setQuery(captured);
+    this.set({ occurrenceFilter: captured });
+    return this.occurrenceRead.refresh();
   };
 
-  refreshOccurrences = async (): Promise<void> => {
-    if (this.state.remote) return;
-    const seq = ++this.occurrenceSeq, filter = this.state.occurrenceFilter;
-    try {
-      const data = await loadOccurrences((name, args) => this.call("serve", name, args), filter);
-      if (seq === this.occurrenceSeq) this.set({ occurrences: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.occurrenceSeq) this.set({ occurrences: { ...this.state.occurrences, error: callMessage(error) } });
-    }
-  };
+  refreshOccurrences = (): Promise<void> => this.occurrenceRead.refresh();
 
-  moreOccurrences = async (): Promise<void> => {
-    const held = this.state.occurrences.data;
-    if (!held || held.nextOffset === null || this.state.remote) return;
-    const seq = ++this.occurrenceSeq;
-    try {
-      const data = await continueOccurrences((name, args) => this.call("serve", name, args), held);
-      if (seq === this.occurrenceSeq) this.set({ occurrences: { data, error: null, at: Date.now() } });
-    } catch (error) {
-      if (seq === this.occurrenceSeq) this.set({ occurrences: { ...this.state.occurrences, error: callMessage(error) } });
-    }
-  };
+  moreOccurrences = (): Promise<void> => this.occurrenceRead.more();
 
   /**
    * Remove one exact subscription at the revision the operator saw. A lost acknowledgement may still have removed
@@ -1842,13 +1796,14 @@ export class StackStore {
    */
   removeSubscription = (id: string, expectedRevision: string): Promise<{ id: string; removed: boolean }> =>
     this.call<{ id: string; removed: boolean }>("serve", "serve_subscription_remove", { id, expectedRevision }).finally(() => {
-      void this.refreshSubscriptions();
-      if (this.completionWatchers > 0) void this.refreshCompletions();
-      if (this.occurrenceWatchers > 0) void this.refreshOccurrences();
+      void this.subscriptionRead.invalidate();
+      void this.completionRead.invalidate();
+      void this.occurrenceRead.invalidate();
     });
 
   private set(patch: Partial<StackState>): void {
     this.state = { ...this.state, ...patch };
+    if (patch.catalog || patch.remote) this.syncServeObservations();
     for (const listener of this.listeners) listener();
   }
 
