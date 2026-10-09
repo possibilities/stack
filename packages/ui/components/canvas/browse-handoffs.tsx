@@ -10,7 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { browseCallError, browseLocalReason, groupHandoffs, handoffContentSelection, handoffOutcomes, handoffStates, heldBy, intentFor, loadIntent, profileName, saveIntent } from "@/lib/stack/browse";
 import { browseReportText } from "@/lib/stack/completion";
 import { shortId } from "@/lib/stack/derive";
-import { localOperation, localOperations, stateOperations } from "@/lib/stack/state";
+import { localOperation, localOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import { primaryViewer, type HandoffActionState } from "@/lib/stack/browse-viewers";
 import type { BrowserHandoff, BrowserHandoffAction, BrowserHandoffObservation, BrowserProfile } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
@@ -298,7 +299,7 @@ function HandoffCompletion({ handoff }: { handoff: BrowserHandoff }) {
 
 function HandoffHistory({ rows, profiles }: { rows: BrowserHandoff[]; profiles: Map<string, BrowserProfile> }) {
   const state = useStack();
-  return localOperations(state, "browse", Object.values(browseMaintenanceOperations.handoff)).available
+  return localOperations(state, "browse", [browseMaintenanceOperations.handoff.receipt]).available
     ? <MaintainedHistory rows={rows} profiles={profiles} /> : <HistoryRows rows={rows} profiles={profiles} />;
 }
 
@@ -308,17 +309,17 @@ function MaintainedHistory({ rows, profiles }: { rows: BrowserHandoff[]; profile
   const [selected, setSelected] = useState<string[]>([]);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const controls = useStateFlow({ operations: stateOperations(store.call, "browse", browseMaintenanceOperations.handoff, { ids: selected }),
-    recoveryKey: "browse:handoff:ids", observe: state.browserHandoffs.at,
-    onReceipt: (receipt) => { if (receipt.status !== "running") store.refreshBrowse(); if (receipt.status === "completed") setSelected([]); } });
+    recoveryKey: "browse:handoff:ids", policy: "identical-retry", prerequisite: () => unavailable,
+    onReceipt: (receipt, selection) => { if (receipt.status !== "running") store.refreshBrowse(); if (receipt.status === "completed" && selection) setSelected([]); } });
   const locked = controls.flow.phase !== "idle";
-  const unavailable = state.status.browse !== "open" ? "The Browse connection is not open." : state.browserHandoffs.error ? "Refresh handoffs before preparing."
+  const unavailable = state.browserHandoffs.error ? "Refresh handoffs before preparing."
     : !handoffContentSelection(rows, selected) ? "Select up to 100 resolved handoffs with retained content; review any changed selection." : null;
   return <>
     {!maintenanceOpen && !locked ? <HistoryRows rows={rows} profiles={profiles} /> : null}
     <MaintenanceDisclosure active={locked} aside="resolved handoff content" onOpenChange={setMaintenanceOpen}>
       <p className="text-xs text-pretty text-muted-foreground">Redacts exact resolved messages, notes and issues in the Browse ledger. IDs, target/profile/controller identity, outcome, timing and permanent admission/action digests stay. Open handoffs cannot be selected. Screenshots and live control URLs were never persisted here; caller/upstream copies and backups remain independent.</p>
       {maintenanceOpen || locked ? <HistoryRows rows={rows} profiles={profiles} selection={{ ids: selected, locked, select: (id) => setSelected((held) => held.includes(id) ? held.filter((value) => value !== id) : [...held, id]) }} /> : null}
-      <StateFlowView controls={controls} label={`Prepare clearing ${selected.length} handoff bodies`} applyLabel="Clear handoff content" unavailable={unavailable} />
+      <StateFlowView controls={controls} label={`Prepare clearing ${selected.length} handoff bodies`} applyLabel="Clear handoff content" />
     </MaintenanceDisclosure>
   </>;
 }

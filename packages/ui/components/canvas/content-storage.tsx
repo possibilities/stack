@@ -10,7 +10,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { relativeTime } from "@/lib/stack/derive";
 import { publicationSelection } from "@/lib/stack/content";
 import { formatBytes } from "@/lib/stack/resources";
-import { localOperation, localOperations, measured, stateOperations, type Page } from "@/lib/stack/state";
+import { localOperation, localOperations, measured, type Page } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import type { ContentPublication, ContentPublicationPage, StateFile } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "./auth-actions";
@@ -71,7 +72,7 @@ const publicationOperations = { plan: "content_publication_plan", apply: "conten
 
 function Publications() {
   const state = useStack();
-  if (!localOperations(state, "content", ["content_publication_list", ...Object.values(publicationOperations)]).available) return null;
+  if (!localOperations(state, "content", ["content_publication_list", publicationOperations.receipt]).available) return null;
   return <PublicationCollection />;
 }
 
@@ -88,10 +89,10 @@ function PublicationCollection() {
   const page = pages.page as (Page<ContentPublication> & Pick<ContentPublicationPage, "retained">) | null;
   const selection = publicationSelection(page?.items ?? [], selected);
   const flow = useStateFlow({ operations: stateOperations(store.call, "content", publicationOperations, { ids: selection ?? [] }),
-    recoveryKey: "content:publication_clear:claims", observe: state.contentGeneration,
-    onReceipt: (receipt) => { if (receipt.status !== "running") pages.refresh(); if (receipt.status === "completed") setSelected([]); } });
+    recoveryKey: "content:publication_clear:claims", policy: "receipt-only", prerequisite: () => unavailable,
+    onReceipt: (receipt, captured) => { if (receipt.status !== "running") pages.refresh(); if (receipt.status === "completed" && captured) setSelected([]); } });
   const locked = flow.flow.phase !== "idle";
-  const unavailable = state.status.content !== "open" ? "The Content connection is not open." : pages.error || pages.loading || !page ? "Refresh temporary publications before preparing."
+  const unavailable = pages.error || pages.loading || !page ? "Refresh temporary publications before preparing."
     : !selection ? "Select up to 100 unblocked claims; review changed selections." : null;
   return <Section title="Temporary publications">
     <MaintenanceDisclosure active={locked} aside="Exact claims">
@@ -118,7 +119,7 @@ function PublicationCollection() {
         {page.retained.map((text, index) => <p key={index} className={hint}>{text}</p>)}
       </> : null}
       {page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" disabled={pages.loading} onClick={pages.more}>Load more publications</Button> : null}
-      <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} temporary publication${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these temporaries" unavailable={unavailable} receiptOnlyRecovery />
+      <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} temporary publication${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these temporaries" />
     </MaintenanceDisclosure>
   </Section>;
 }
@@ -193,7 +194,8 @@ function Blobs() {
       return { ...entry, digest, reference: page.references.find((row) => row.digest === digest) ?? null };
     }) })) : Promise.resolve({ items: [], revision: "none", nextOffset: null }), `blobs:${prefix}`, state.contentGeneration);
   const flow = useStateFlow({ operations: stateOperations(store.call, "content", { plan: "content_storage_plan", apply: "content_storage_collect", receipt: "content_state_receipt_get" }, { digests: selected }),
-    recoveryKey: "content:storage", onReceipt: (receipt) => { if (receipt.status === "completed") setSelected([]); } });
+    recoveryKey: "content:storage", policy: "identical-retry", prerequisite: !selected.length ? "Select unreferenced blobs first." : null,
+    onReceipt: (receipt, captured) => { if (receipt.status === "completed" && captured) setSelected([]); } });
   const locked = flow.flow.phase !== "idle";
   const referenced = (blob: Blob) => Boolean(blob.reference && (blob.reference.items.length || blob.reference.stages.length));
   return (
@@ -226,8 +228,7 @@ function Blobs() {
         </ul>
       ) : <Empty icon={HardDriveIcon} title={`No blobs under ${prefix}`} /> : null}
       {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" className="self-start" onClick={pages.more}>Load more</Button> : null}
-      <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} blob${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these blobs"
-        unavailable={state.status.content !== "open" ? "The content connection is not open." : !selected.length ? "Select unreferenced blobs first." : null} />
+      <StateFlowView controls={flow} label={`Prepare collecting ${selected.length} blob${selected.length === 1 ? "" : "s"}`} applyLabel="Collect these blobs" />
     </Section>
   );
 }

@@ -42,6 +42,23 @@ reads are socket-only. Local operator schedules retain their existing authority.
    per-resource `outcomes`. A completed receipt covers only its declared scope.
 5. Refresh affected reads. Native file writers may not emit Stack events.
 
+Canvas implements this protocol in the headless `lib/stack/maintenance.ts`
+module. Owner bindings declare explicit per-action recovery policy; the renderer
+uses the module's action availability and cannot override it. Preparation checks
+plan, apply and receipt exposure together. Recovery checks receipt access
+independently, so losing apply authority does not conceal a still-readable receipt.
+The exact destination-scoped request is saved and read back before dispatch;
+conflicting commands cannot erase it while an effect is pending. Known receipts
+remain visible through failed or missing rereads and never become retry permission.
+
+Recovery, reconnect and actual owner notices schedule unresolved receipt reads,
+with coalesced follow-up reads and no polling. Resource refresh timestamps do not
+schedule maintenance observation. Activity suspension preserves saved uncertainty
+and last evidence, fences late presentation results and resumes observation when
+ready. Discard, permitted close and Source payload recovery's local Forget are
+distinct from suspension. See
+[ADR 0179](adr/0179-canvas-maintenance-and-observation-lifetimes.md).
+
 One plan can be admitted only once, even under a different request UUID. Repeated
 identical requests return the original result, including after restart. Database
 payload cleanup commits its receipt with its effects. Filesystem cleanup persists

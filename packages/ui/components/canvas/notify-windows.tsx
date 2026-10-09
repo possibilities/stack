@@ -1,6 +1,6 @@
 "use client";
 
-import { localOperation, stateOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import { StateFlowView, useStateFlow } from "./state-flow";
 import { memo, useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -56,9 +56,9 @@ export function InboxWindow() {
   const [clearing, setClearing] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
   const clear = useStateFlow({ operations: stateOperations(store.call, "notify", { plan: "notification_history_plan", apply: "notification_history_clear", receipt: "notify_state_receipt_get" }, { ids: chosen }),
-    recoveryKey: "notify:history", onReceipt: (receipt) => { if (receipt.status === "completed") setChosen([]); } });
+    recoveryKey: "notify:history", policy: "identical-retry", prerequisite: !chosen.length ? "Select dismissed notifications first." : null,
+    onReceipt: (receipt, selection) => { if (receipt.status === "completed" && selection) setChosen([]); } });
   const clearLocked = clear.flow.phase !== "idle";
-  const clearAccess = localOperation(stack, "notify", "notification_history_plan");
   // Only dismissed records whose content is still held can be selected; open ones are dismissed first.
   const clearable = (record: Notification) => Boolean(record.dismissedAt) && !record.contentClearedAt;
 
@@ -112,8 +112,7 @@ export function InboxWindow() {
             clearing ? (
               <div className="flex flex-col gap-1.5 rounded-lg border border-dashed p-2">
                 <p className="text-[0.68rem] text-pretty text-muted-foreground">Clears titles, messages, source and group labels, links, actions, prompts and responses for up to 100 selected dismissed notifications. The original outcome and the digests that stop a send or dismissal from repeating stay. Nothing is answered.</p>
-                <StateFlowView controls={clear} label={`Prepare clearing ${chosen.length} notification${chosen.length === 1 ? "" : "s"}`} applyLabel="Clear this content"
-                  unavailable={!clearAccess.available ? clearAccess.reason : status.notify !== "open" ? "The notify connection is not open." : !chosen.length ? "Select dismissed notifications first." : null} />
+                <StateFlowView controls={clear} label={`Prepare clearing ${chosen.length} notification${chosen.length === 1 ? "" : "s"}`} applyLabel="Clear this content" />
                 <Button size="xs" variant="ghost" className="self-start" disabled={clearLocked} onClick={() => { setClearing(false); setChosen([]); }}>Done</Button>
               </div>
             ) : <Button size="xs" variant="ghost" className="self-start text-muted-foreground" onClick={() => setClearing(true)}>Select to clear content…</Button>

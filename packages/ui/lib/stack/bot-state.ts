@@ -1,4 +1,4 @@
-import { stateOperations, type StateOperations } from "./state";
+import { stateOperations, type StateOperations } from "./maintenance";
 import type { StateEntry, StateFile, StateFileRead } from "./types";
 
 /**

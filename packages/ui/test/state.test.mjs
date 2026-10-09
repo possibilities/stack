@@ -14,17 +14,14 @@ registerHooks({
   },
 });
 
-const { applyInput, clearRecovery, continueInventory, continueSubscriptions, groupByOwner, linkNeedsSelection, loadInventory, loadSubscriptions,
-  listRecoveries, localOperation, localOperations, measured, ownerGaps, planReadiness, readRecovery, relationshipNode, saveRecovery, StateFlowController, stateOperations } = await import("../lib/stack/state.ts");
-const { ScopedStorage } = await import("../lib/stack/destination.ts");
+const { applyInput, continueInventory, continueSubscriptions, groupByOwner, linkNeedsSelection, loadInventory, loadSubscriptions,
+  localOperation, localOperations, measured, ownerGaps, planReadiness, relationshipNode } = await import("../lib/stack/state.ts");
 
 const entry = (id, owner, extra = {}) => ({ id, ownerPackage: owner, subject: null, kind: "storage", authority: "authoritative", location: "server", ownership: "stack",
   revision: null, observedAt: "2026-09-30T00:00:00.000Z", coverage: "partial", items: null, bytes: null, sensitivity: "content", relationships: [], reads: [], actions: [],
   retention: "Kept", regeneration: "None", issues: [], ...extra });
 const plan = (extra = {}) => ({ id: "11111111-1111-4111-8111-111111111111", ownerPackage: "infer", subject: null, action: "history_clear", revision: "rev-1",
   createdAt: "2026-09-30T00:00:00.000Z", expiresAt: "2026-09-30T01:00:00.000Z", resources: ["request a"], blockedBy: [], retained: [], regeneration: [], ...extra });
-const receipt = (status) => ({ requestId: "22222222-2222-4222-8222-222222222222", planId: plan().id, ownerPackage: "infer", subject: null, action: "history_clear",
-  status, startedAt: "2026-09-30T00:10:00.000Z", completedAt: null, outcomes: [], retained: [], regeneration: [] });
 
 /** A serve_state_list stand-in: two pages per observation; the revision changes when `observation` does. */
 function inventoryOwner() {
@@ -144,151 +141,4 @@ test("blocked and expired plans cannot apply, and apply input binds the plan rev
   assert.equal(expired.canApply, false);
   assert.match(expired.reason, /expired/);
   assert.deepEqual(applyInput(plan(), "req", { botId: "alpha" }), { planId: plan().id, expectedRevision: "rev-1", requestId: "req", botId: "alpha" });
-});
-
-test("reload recovery keeps only identity strings", () => {
-  const { values, storage } = fakeStorage();
-  const input = applyInput(plan(), "req-1", { botId: "alpha" });
-  saveRecovery(storage, "bots:alpha:workspace", input);
-  assert.deepEqual(readRecovery(storage, "bots:alpha:workspace").input, input);
-  assert.deepEqual(Object.keys(JSON.parse(values.get(`${storage.prefix}state-flow.bots:alpha:workspace`)).input).sort(), ["botId", "expectedRevision", "planId", "requestId"]);
-  values.set(`${storage.prefix}state-flow.bad`, JSON.stringify({ input: { planId: "p", expectedRevision: "r", requestId: "q", body: { secret: 1 } } }));
-  assert.equal(readRecovery(storage, "bad"), null, "anything but identity strings is refused");
-  assert.deepEqual(listRecoveries(storage, "bots:").map((item) => item.key), ["bots:alpha:workspace"]);
-  clearRecovery(storage, "bots:alpha:workspace");
-  assert.equal(readRecovery(storage, "bots:alpha:workspace"), null);
-});
-
-test("owner callbacks call exactly the named operations of one owner", async () => {
-  const calls = [];
-  const ops = stateOperations(async (pkg, name, args) => { calls.push([pkg, name, args]); return name.endsWith("receipt_get") ? { receipt: null } : {}; },
-    "infer", { plan: "infer_history_plan", apply: "infer_history_clear", receipt: "infer_state_receipt_get" }, { requestIds: ["a"] });
-  await ops.prepare();
-  await ops.apply({ planId: "p", expectedRevision: "r", requestId: "q" });
-  assert.equal(await ops.readReceipt("q"), null);
-  assert.deepEqual(calls, [["infer", "infer_history_plan", { requestIds: ["a"] }], ["infer", "infer_history_clear", { planId: "p", expectedRevision: "r", requestId: "q" }],
-    ["infer", "infer_state_receipt_get", { requestId: "q" }]]);
-});
-
-/** A scripted owner: each call takes the next scripted answer (a value, an Error to throw, or a function of the input). */
-function scriptedOwner(script) {
-  const calls = [];
-  const next = async (kind, input) => {
-    calls.push([kind, input]);
-    const answer = script[kind].shift();
-    if (answer instanceof Error) throw answer;
-    return typeof answer === "function" ? answer(input) : answer;
-  };
-  return { calls, operations: { prepare: () => next("prepare"), apply: (input) => next("apply", input), readReceipt: (requestId) => next("receipt", requestId) } };
-}
-/** One destination's storage over an in-memory area; `values` holds the real, namespaced keys. */
-const fakeStorage = (serverId = "7f3c1d52-9a64-4be1-8c0a-2d5e6f708192") => {
-  const values = new Map();
-  const area = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); }, removeItem: (key) => { values.delete(key); },
-    key: (index) => [...values.keys()][index] ?? null, get length() { return values.size; } };
-  return { values, storage: new ScopedStorage({ serverId, authority: "local", origin: "http://127.0.0.1:8745" }, () => area) };
-};
-const clock = (now = Date.parse("2026-09-30T00:30:00.000Z")) => {
-  let n = 0;
-  return { now: () => now, uuid: () => `00000000-0000-4000-8000-00000000000${++n}` };
-};
-
-test("the flow refuses blocked and expired plans without calling apply", async () => {
-  for (const [label, prepared, now] of [["blocked", plan({ blockedBy: ["Stop Bot alpha first"] }), undefined], ["expired", plan(), Date.parse("2026-09-30T02:00:00.000Z")]]) {
-    const owner = scriptedOwner({ prepare: [prepared], apply: [], receipt: [] });
-    const flow = new StateFlowController({ operations: owner.operations }, clock(now));
-    await flow.prepare();
-    assert.equal(flow.getState().phase, "preview", label);
-    await flow.apply();
-    assert.equal(flow.getState().phase, "preview", `${label} plans stay in preview`);
-    assert.deepEqual(owner.calls.map(([kind]) => kind), ["prepare"], `${label} plans never reach apply`);
-  }
-});
-
-test("a lost apply uses its receipt or keeps the identical request for explicit retry", async (t) => {
-  for (const [label, answer, reason] of [
-    ["absent receipt", null, /The owner has no receipt for this request ID/],
-    ["unreadable receipt", new Error("bots WebSocket is not connected"), /Receipt read failed: bots WebSocket is not connected/],
-    ["partial receipt", { ...receipt("partial"), requestId: "00000000-0000-4000-8000-000000000001" }, null],
-  ]) await t.test(label, async () => {
-    const { values, storage } = fakeStorage();
-    try {
-      const answered = { ...receipt("completed"), requestId: "00000000-0000-4000-8000-000000000001" };
-      const owner = scriptedOwner({ prepare: [plan()], apply: [new Error("connection closed"), (input) => ({ ...answered, requestId: input.requestId })], receipt: [answer] });
-      const receipts = [];
-      const flow = new StateFlowController({ operations: owner.operations, extra: { botId: "alpha" }, recoveryKey: "bots:alpha:workspace", recovery: storage, onReceipt: (value) => receipts.push(value) }, clock());
-      await flow.prepare();
-      await flow.apply();
-      let state = flow.getState();
-      assert.deepEqual(state.input, { planId: plan().id, expectedRevision: "rev-1", requestId: "00000000-0000-4000-8000-000000000001", botId: "alpha" });
-      assert.deepEqual(owner.calls.map(([kind]) => kind), ["prepare", "apply", "receipt"], "no automatic replay or replan");
-      assert.equal(owner.calls.at(-1)[1], state.input.requestId, "receipt lookup uses the same request identity");
-      assert.ok(values.has(`${storage.prefix}state-flow.bots:alpha:workspace`), "the unsettled request survives a reload");
-      if (reason === null) {
-        assert.equal(state.phase, "receipt", "the owner's partial receipt takes precedence over a lost apply response");
-        assert.equal(state.receipt.status, "partial");
-        assert.equal(receipts.length, 1);
-        await flow.retry();
-        assert.equal(owner.calls.length, 3, "a known partial receipt is never replayed");
-        return;
-      }
-      assert.equal(state.phase, "uncertain");
-      assert.match(state.error, /connection closed/);
-      assert.match(state.error, reason);
-
-      await flow.retry();
-      state = flow.getState();
-      assert.equal(state.phase, "receipt");
-      const [first, second] = owner.calls.filter(([kind]) => kind === "apply").map(([, input]) => input);
-      assert.deepEqual(second, first, "the retry is the identical input under the same request UUID");
-      assert.deepEqual(owner.calls.filter(([kind]) => kind === "prepare").length, 1, "no automatic replan");
-      assert.equal(receipts.length, 1);
-      assert.equal(values.has(`${storage.prefix}state-flow.bots:alpha:workspace`), false, "a completed receipt needs no recovery");
-    } finally { /* in-memory storage needs no cleanup */ }
-  });
-});
-
-test("a running receipt is observed again; partial and unknown results stay recoverable until the operator leaves them", async () => {
-  const { values, storage } = fakeStorage();
-  try {
-    const owner = scriptedOwner({ prepare: [plan()], apply: [(input) => ({ ...receipt("running"), requestId: input.requestId })],
-      receipt: [(requestId) => ({ ...receipt("partial"), requestId, outcomes: [{ resource: "request a", outcome: "unknown", detail: "Interrupted" }] })] });
-    const flow = new StateFlowController({ operations: owner.operations, recoveryKey: "infer:history", recovery: storage }, clock());
-    await flow.prepare();
-    await flow.apply();
-    assert.equal(flow.getState().receipt.status, "running");
-    await flow.observe();
-    const state = flow.getState();
-    assert.equal(state.receipt.status, "partial");
-    assert.deepEqual(owner.calls.at(-1), ["receipt", state.input.requestId], "observation reads the same request's receipt");
-    assert.ok(values.has(`${storage.prefix}state-flow.infer:history`), "partial stays recoverable");
-    await flow.observe();
-    assert.equal(owner.calls.length, 3, "a settled receipt is not read again on invalidation");
-    flow.reset();
-    assert.equal(values.has(`${storage.prefix}state-flow.infer:history`), false);
-  } finally { /* in-memory storage needs no cleanup */ }
-});
-
-test("after a reload the saved request is read back rather than re-sent", async () => {
-  const { storage } = fakeStorage();
-  try {
-    saveRecovery(storage, "xcom:posts", { planId: plan().id, expectedRevision: "rev-1", requestId: "00000000-0000-4000-8000-00000000000a" });
-    const owner = scriptedOwner({ prepare: [], apply: [], receipt: [(requestId) => ({ ...receipt("unknown"), requestId })] });
-    const flow = new StateFlowController({ operations: owner.operations, recoveryKey: "xcom:posts", recovery: storage }, clock());
-    await flow.recover();
-    assert.equal(flow.getState().phase, "receipt");
-    assert.equal(flow.getState().receipt.status, "unknown");
-    assert.deepEqual(owner.calls, [["receipt", "00000000-0000-4000-8000-00000000000a"]]);
-  } finally { /* in-memory storage needs no cleanup */ }
-});
-
-test("a detached view ignores late answers, and a newer decision supersedes an older one", async () => {
-  const gate = Promise.withResolvers();
-  const owner = scriptedOwner({ prepare: [() => gate.promise.then(() => plan({ action: "old" })), plan({ action: "new" })], apply: [], receipt: [] });
-  const flow = new StateFlowController({ operations: owner.operations }, clock());
-  const old = flow.prepare();
-  await flow.prepare();
-  gate.resolve();
-  await old;
-  assert.equal(flow.getState().plan.action, "new");
 });

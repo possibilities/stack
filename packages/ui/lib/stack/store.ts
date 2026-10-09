@@ -385,6 +385,8 @@ export class StackStore {
   private releasesChannel: Channel | null = null;
   private releasesReading = false;
   private releasesDirty = false;
+  /** Real owner notices, independently of resource-read timestamps and the activity log. */
+  private ownerNotices = new Map<string, Set<() => void>>();
 
   constructor(snapshot: Snapshot) {
     const destination: Destination = { authority: snapshot.remote ? "remote" : "local", origin: null, serverId: snapshot.server.data?.serverId ?? null, ...snapshot.destination };
@@ -446,6 +448,15 @@ export class StackStore {
     return () => this.listeners.delete(listener);
   };
 
+  onOwnerNotice(owner: string, listener: () => void): () => void {
+    let listeners = this.ownerNotices.get(owner);
+    if (!listeners) { listeners = new Set(); this.ownerNotices.set(owner, listeners); }
+    listeners.add(listener);
+    return () => { listeners.delete(listener); if (!listeners.size) this.ownerNotices.delete(owner); };
+  }
+
+  private ownerNotice(owner: string): void { for (const listener of this.ownerNotices.get(owner) ?? []) listener(); }
+
   /**
    * Give the store this destination's storage, or none while the server has not named itself. Saved catalog fences
    * are read from it; a fence is never read from, or written to, any other destination.
@@ -481,10 +492,11 @@ export class StackStore {
           if (status === "closed" && this.state.remote) void this.syncRemote();
           options?.onStatus?.(status);
         },
-        onOpen,
+        onOpen: () => { onOpen(); this.ownerNotice(pkg); },
         onNotice: (topic) => {
           if (!silent.has(topic)) this.log(pkg, topic, null);
           onNotice?.(topic);
+          this.ownerNotice(pkg);
         },
       });
       if (topics) channel.subscribe(topics);
@@ -1431,11 +1443,13 @@ export class StackStore {
         this.bumpWorker(id);
         this.readWorkerStatus(id);
         this.readSettings(`worker:${id}`);
+        this.ownerNotice("worker");
       },
       onNotice: (topic) => {
         if (this.workerChannels.get(id) !== channel) return;
         this.bumpWorker(id);
         if (topic === "worker_changed") this.readWorkerStatus(id);
+        if (topic === "worker_changed") this.ownerNotice("worker");
         // Progress also carries native settings observations; reads coalesce while it streams.
         this.readSettings(`worker:${id}`);
       },
@@ -2325,13 +2339,14 @@ export class StackStore {
         },
         // onOpen also runs when the underlying socket subscription reconnects
         // without closing the browser WebSocket. Missed notices are not replayed.
-        onOpen: () => { if (this.scopedChannels.get(id) !== channel) return; this.invalidateBot(id); this.bumpBotState(id); this.readSettings(`bot:${id}`); },
+        onOpen: () => { if (this.scopedChannels.get(id) !== channel) return; this.invalidateBot(id); this.bumpBotState(id); this.readSettings(`bot:${id}`); this.ownerNotice(pkg); },
         onNotice: (topic) => {
           this.log(pkg, topic, id);
           if (topic === "bots_changed") {
             this.refresh("bots");
           }
           if (topic === "bot_state_changed" || topic === "bots_changed" || topic === "chat_queue_changed") this.bumpBotState(id);
+          if (topic === "bot_state_changed" || topic === "bots_changed" || topic === "chat_queue_changed") this.ownerNotice(pkg);
           // threads_changed is an invalidation, not proof the main thread changed; the read decides.
           if (topic === "bots_changed" || topic === "threads_changed") this.readSettings(`bot:${id}`);
         },

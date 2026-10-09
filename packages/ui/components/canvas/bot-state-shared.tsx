@@ -4,7 +4,7 @@ import { RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { botStateKey, botStateOperations, type BotStateAction } from "@/lib/stack/bot-state";
-import type { StateReceipt } from "@/lib/stack/types";
+import type { MaintenanceOptions } from "@/lib/stack/maintenance";
 import { cn } from "@/lib/utils";
 import { StateFlowView, useStateFlow, type StateFlowControls } from "./state-flow";
 import { useStack, useStore } from "./provider";
@@ -18,20 +18,20 @@ export const labelClass = "text-[0.68rem] font-medium tracking-[0.06em] text-mut
 export { useKeyedRead as useBotRead, usePagedRead as useBotPages } from "./owner-reads";
 
 /** The shared plan/receipt flow for one exact Bot action. The recovery slot is per incarnation and decision. */
-export function useBotAction(scope: BotScope, action: BotStateAction, onReceipt?: (receipt: StateReceipt) => void): StateFlowControls {
+export function useBotAction(scope: BotScope, action: BotStateAction, prerequisite: string | null = null, onReceipt?: MaintenanceOptions["onReceipt"]): StateFlowControls {
   const store = useStore();
   return useStateFlow<{ botId: string }>({ operations: botStateOperations(store.call, scope.botId, action), extra: { botId: scope.botId },
-    recoveryKey: botStateKey(scope.incarnation, action), observe: scope.observe, onReceipt });
+    recoveryKey: botStateKey(scope.incarnation, action), policy: "identical-retry", prerequisite, onReceipt });
 }
 
-export function BotAction({ scope, action, label, applyLabel, unavailable, children }: {
-  scope: BotScope; action: BotStateAction; label: string; applyLabel?: string; unavailable?: string | null; children?: React.ReactNode;
+export function BotAction({ scope, action, label, applyLabel, prerequisite, children }: {
+  scope: BotScope; action: BotStateAction; label: string; applyLabel?: string; prerequisite?: string | null; children?: React.ReactNode;
 }) {
-  const controls = useBotAction(scope, action);
+  const controls = useBotAction(scope, action, prerequisite);
   return (
     <div className="flex flex-col gap-1.5">
       {children}
-      <StateFlowView controls={controls} label={label} applyLabel={applyLabel} unavailable={unavailable ?? scope.unavailable} />
+      <StateFlowView controls={controls} label={label} applyLabel={applyLabel} />
     </div>
   );
 }

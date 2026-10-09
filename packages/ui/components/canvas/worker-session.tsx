@@ -281,7 +281,7 @@ function Chip({ icon: Icon, children, title, copy, label, tone }: { icon: React.
 function Summary({ worker, status, statusError }: { worker: WorkerSession; status: WorkerStatus | null; statusError: string | null }) {
   const state = useStack();
   const { workerAccounts, bots, roleCatalog, remote } = state;
-  const maintenance = localOperations(state, "worker", Object.values(workerStateOperations)).available;
+  const maintenance = localOperations(state, "worker", [workerStateOperations.receipt]).available;
   const now = useNow();
   const labels = workerAccountLabels(workerAccounts.data);
   const turn = status?.turn ?? null;

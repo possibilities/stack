@@ -261,7 +261,7 @@ export function InferenceWindow() {
           {selecting ? (
             <div className="flex flex-col gap-1.5 rounded-lg border border-dashed p-2">
               <p className="text-[0.68rem] text-pretty text-muted-foreground">{inferClearNote} Running requests cannot be selected.</p>
-              <StateFlowView controls={clear.controls} label={`Prepare clearing ${selected.length} request${selected.length === 1 ? "" : "s"}`} applyLabel="Clear these payloads" unavailable={clear.unavailable} />
+              <StateFlowView controls={clear.controls} label={`Prepare clearing ${selected.length} request${selected.length === 1 ? "" : "s"}`} applyLabel="Clear these payloads" />
             </div>
           ) : null}
           <ul className="flex flex-col gap-1.5">

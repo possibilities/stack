@@ -12,7 +12,7 @@ import { botBlockers, purgeable, queueBodyLimit, queueUnclearable, queueWords, r
 import { relativeTime, shortId } from "@/lib/stack/derive";
 import { orientationLabel, orientationMeaning, orientationPhase } from "@/lib/stack/orientation";
 import { formatBytes } from "@/lib/stack/resources";
-import { localOperation, localOperations } from "@/lib/stack/state";
+import { localOperation } from "@/lib/stack/state";
 import type { Bot, StateReceipt } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "./auth-actions";
@@ -267,7 +267,7 @@ function ConversationView({ scope, bot }: { scope: BotScope; bot: Bot }) {
   const [purging, setPurging] = useState<string | null>(null);
   const pages = useBotPages<BotHistoryGeneration>((offset, revision) => store.call<{ generations: BotHistoryGeneration[]; revision: string; nextOffset: number | null }>("bots", "bot_history_list",
     { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) }).then((page) => ({ items: page.generations, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
-  const reset = useBotAction(scope, { kind: "session_reset", history: history ?? "retain" });
+  const reset = useBotAction(scope, { kind: "session_reset", history: history ?? "retain" }, history ? null : "Choose whether to retain or purge the current history.");
   const idle = reset.flow.phase === "idle";
   return (
     <div className="flex flex-col gap-2.5">
@@ -309,8 +309,7 @@ function ConversationView({ scope, bot }: { scope: BotScope; bot: Bot }) {
           <label className="flex items-center gap-1.5"><input type="radio" name={`${scope.incarnation}-history`} checked={history === "retain"} disabled={!idle} onChange={() => setHistory("retain")} />Retain it as a retired generation</label>
           <label className="flex items-center gap-1.5"><input type="radio" name={`${scope.incarnation}-history`} checked={history === "purge"} disabled={!idle} onChange={() => setHistory("purge")} />Purge its Stack-owned history bytes</label>
         </div>
-        <StateFlowView controls={reset} label="Prepare conversation reset" applyLabel="Reset conversation"
-          unavailable={scope.unavailable ?? (history ? null : "Choose whether to retain or purge the current history.")} />
+        <StateFlowView controls={reset} label="Prepare conversation reset" applyLabel="Reset conversation" />
       </section>
     </div>
   );
@@ -322,7 +321,6 @@ function ConversationView({ scope, bot }: { scope: BotScope; bot: Bot }) {
  * stays unknown. Nothing here retries, resends or resolves an entry.
  */
 function QueueView({ scope }: { scope: BotScope }) {
-  const state = useStack();
   const store = useStore();
   const now = useNow(60_000);
   const pages = useBotPages<BotQueueEntry>((offset, revision) => store.call<{ entries: BotQueueEntry[]; revision: string; nextOffset: number | null }>("bots", "bot_queue_history",
@@ -333,10 +331,10 @@ function QueueView({ scope }: { scope: BotScope }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [generation, setGeneration] = useState<string | null>(null);
   // A completed receipt empties the selection it applied to; partial and unknown results keep it for inspection.
-  const byIds = useBotAction(scope, { kind: "queue_bodies_clear", selection: { ids: selected } }, (receipt) => { if (receipt.status === "completed") setSelected([]); });
-  const byGeneration = useBotAction(scope, { kind: "queue_bodies_clear", selection: { generation: generation ?? "" } }, (receipt) => { if (receipt.status === "completed") setGeneration(null); });
-  const access = localOperations(state, "bots", ["bot_state_plan", "bot_queue_bodies_clear", "bot_state_receipt_get"]);
-  const unavailable = scope.unavailable ?? (access.available ? null : access.reason);
+  const byIds = useBotAction(scope, { kind: "queue_bodies_clear", selection: { ids: selected } }, selected.length ? null : "Select entries to clear first.",
+    (receipt, selection) => { if (receipt.status === "completed" && selection) setSelected([]); });
+  const byGeneration = useBotAction(scope, { kind: "queue_bodies_clear", selection: { generation: generation ?? "" } }, generation ? null : "Choose a retired generation first.",
+    (receipt, selection) => { if (receipt.status === "completed" && selection) setGeneration(null); });
   const idle = byIds.flow.phase === "idle" && byGeneration.flow.phase === "idle";
   const entries = pages.page?.items ?? [];
   const counts = new Map<string, number>();
@@ -390,7 +388,7 @@ function QueueView({ scope }: { scope: BotScope }) {
         <section aria-label="Selected entries" className="flex flex-col gap-1.5">
           <span className={labelClass}>Selected entries · {selected.length}</span>
           <p className={hintClass}>Tick terminal entries above. At most {queueBodyLimit} per plan; pending, dispatching and already cleared entries can&rsquo;t be selected.</p>
-          <StateFlowView controls={byIds} label={`Prepare clearing bodies of ${selected.length} selected`} applyLabel="Clear these bodies" unavailable={unavailable ?? (selected.length ? null : "Select entries to clear first.")} />
+          <StateFlowView controls={byIds} label={`Prepare clearing bodies of ${selected.length} selected`} applyLabel="Clear these bodies" />
         </section>
         <section aria-label="Retired generation" className="flex flex-col gap-1.5 border-t border-dashed pt-2">
           <span className={labelClass}>A retired generation</span>
@@ -404,7 +402,7 @@ function QueueView({ scope }: { scope: BotScope }) {
           </NativeSelect>
           <ReadError error={generations.error} what="History generations" />
           <p className={hintClass}>Selects every entry recorded for that generation. Entries recorded before generations were attributed aren&rsquo;t included; tick those above.</p>
-          <StateFlowView controls={byGeneration} label="Prepare clearing this generation's bodies" applyLabel="Clear these bodies" unavailable={unavailable ?? (generation ? null : "Choose a retired generation first.")} />
+          <StateFlowView controls={byGeneration} label="Prepare clearing this generation's bodies" applyLabel="Clear these bodies" />
         </section>
       </MaintenanceDisclosure>
     </div>
@@ -457,4 +455,3 @@ function LaunchView({ scope }: { scope: BotScope }) {
     </div>
   );
 }
-

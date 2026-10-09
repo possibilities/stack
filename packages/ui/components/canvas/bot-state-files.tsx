@@ -83,7 +83,7 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
   const preview = useFilePreview((file, revision) => store.call<StateFileRead>("bots", "bot_workspace_read",
     { botId: scope.botId, path: file, offset: 0, length: chunk, ...(revision ? { revision } : {}) }));
   const action: BotStateAction = { kind: "workspace_clear", selection: mode === "all" ? { all: true } : { paths: selected.length ? selected : ["."] } };
-  const controls = useBotAction(scope, action);
+  const controls = useBotAction(scope, action, !owned ? "This workspace is not Stack-owned." : mode === "paths" && !selected.length ? "Select entries to clear first." : null);
   const idle = controls.flow.phase === "idle";
   // The preview reads under the listed revision, so a file changed since listing is refused rather than shown.
   const openFile = (file: StateFile) => { if (preview.state?.key === file.path) preview.close(); else preview.open(file.path, file.revision); };
@@ -131,8 +131,7 @@ export function WorkspaceView({ scope, owned, cwd }: { scope: BotScope; owned: b
           </div>
           {mode === "paths" && selected.length ? <ul className="flex flex-col font-mono text-[0.68rem] text-muted-foreground">{selected.map((item) => <li key={item} className="truncate">{item}</li>)}</ul> : null}
           <p className={hintClass}>The conversation, settings and other owners&rsquo; copies are unaffected. The plan binds these exact files; a file changed afterwards needs a new plan.</p>
-          <StateFlowView controls={controls} label={mode === "all" ? "Prepare whole-workspace clear" : "Prepare clear of selected entries"} applyLabel="Clear these files"
-            unavailable={scope.unavailable ?? (mode === "paths" && !selected.length ? "Select entries to clear first." : null)} />
+          <StateFlowView controls={controls} label={mode === "all" ? "Prepare whole-workspace clear" : "Prepare clear of selected entries"} applyLabel="Clear these files" />
         </div>
       ) : null}
     </div>

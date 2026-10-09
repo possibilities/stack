@@ -7,7 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { profileName, siteDataOrigins, volumeSelection, type SiteDataCategory } from "@/lib/stack/browse";
-import { localOperations, stateOperations } from "@/lib/stack/state";
+import { localOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import type { BrowserProfile, BrowserVolume, BrowserVolumePage, StateReceipt } from "@/lib/stack/types";
 import { useKeyedRead, usePagedRead } from "./owner-reads";
 import { useNow, useStack, useStore } from "./provider";
@@ -30,13 +31,11 @@ export function ProfileMaintenanceDialog({ profile, kind, onClose }: { profile: 
   const origins = siteDataOrigins(text);
   const controls = useStateFlow({ operations: stateOperations(store.call, "browse", browseMaintenanceOperations[kind],
     kind === "reset" ? { profileId: profile.id } : { profileId: profile.id, origins: origins.origins, categories }),
-    recoveryKey: `browse:${kind}:${profile.id}`, observe: state.browserProfiles.at,
+    recoveryKey: `browse:${kind}:${profile.id}`, policy: "receipt-only", prerequisite: () => unavailable,
     onReceipt: (receipt) => { if (receipt.status !== "running") store.refreshBrowse(); } });
   const locked = controls.flow.phase !== "idle";
   const busy = ["preparing", "applying", "checking"].includes(controls.flow.phase);
-  const access = localOperations(state, "browse", Object.values(browseMaintenanceOperations[kind]));
-  const unavailable = !access.available ? access.reason : state.status.browse !== "open" ? "The Browse connection is not open."
-    : !profile.id ? "Choose an exact profile." : profile.maintenanceRequestId ? "Profile maintenance is fenced; inspect its receipt and native resources before release."
+  const unavailable = !profile.id ? "Choose an exact profile." : profile.maintenanceRequestId ? "Profile maintenance is fenced; inspect its receipt and native resources before release."
     : state.browserProfiles.error || state.browserControllers.error || state.browserHandoffs.error ? "Refresh Browse; a required inventory read failed."
     : kind === "site" && profile.state !== "ready" ? "The exact running profile CDP must be ready. Planning never starts or navigates a browser."
     : kind === "site" ? origins.error ?? (!categories.length ? "Select cookies, storage and/or cache explicitly." : null) : null;
@@ -65,7 +64,7 @@ export function ProfileMaintenanceDialog({ profile, kind, onClose }: { profile: 
         <p className={hint}>Storage: local storage, IndexedDB, WebSQL, file systems and service workers. Cache means origin CacheStorage, not the HTTP cache. History is unsupported here; whole-profile reset is the explicitly destructive alternative.</p>
         <p className={hint}>Domain cookies are shared across matching subdomains and ports; the plan binds observed domain/path/partition identities without cookie values. Unselected partitions and origins remain. Native writers may recreate data; absence/quota checks are not an atomic write lock or comprehensive local-storage byte verification.</p>
       </> : null}
-      <StateFlowView controls={controls} label={`Prepare ${title.toLowerCase()}`} applyLabel={title} unavailable={unavailable} receiptOnlyRecovery />
+      <StateFlowView controls={controls} label={`Prepare ${title.toLowerCase()}`} applyLabel={title} />
       <DialogFooter><Button variant="ghost" disabled={busy} onClick={onClose}>Close dialog</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
@@ -121,7 +120,7 @@ function ProfileFence({ profile, requestId }: { profile: BrowserProfile; request
 
 export function BrowseVolumes() {
   const state = useStack();
-  if (!localOperations(state, "browse", ["browser_volume_list", ...Object.values(browseMaintenanceOperations.volume)]).available) return null;
+  if (!localOperations(state, "browse", ["browser_volume_list", browseMaintenanceOperations.volume.receipt]).available) return null;
   return <Volumes />;
 }
 
@@ -135,10 +134,10 @@ function Volumes() {
   }, "browse:volumes", state.browserToolchain.at ?? 0);
   const rows = pages.page?.items ?? [];
   const controls = useStateFlow({ operations: stateOperations(store.call, "browse", browseMaintenanceOperations.volume, { volumeIds: selected }),
-    recoveryKey: "browse:volume:ids", observe: state.browserToolchain.at,
-    onReceipt: (receipt) => { pages.refresh(); if (receipt.status === "completed") setSelected([]); } });
+    recoveryKey: "browse:volume:ids", policy: "receipt-only", prerequisite: () => unavailable,
+    onReceipt: (receipt, selection) => { pages.refresh(); if (receipt.status === "completed" && selection) setSelected([]); } });
   const locked = controls.flow.phase !== "idle";
-  const unavailable = state.status.browse !== "open" ? "The Browse connection is not open." : pages.error || pages.loading ? "Refresh the volume inventory before preparing."
+  const unavailable = pages.error || pages.loading ? "Refresh the volume inventory before preparing."
     : !volumeSelection(rows, selected) ? "Select up to 100 exact unreferenced, unmounted owned volumes; review changed selections." : null;
   return <MaintenanceDisclosure title="Volumes" aside="Maintenance · bytes unmeasured" active={locked}>
     <p className={hint}>Only verified Stack names and role/session/lease tags are listed; foreign volumes are excluded. Every Backend receipt (including incomplete/disposable leases) and every provider mount blocks collection. No implicit session closure or VM launch. Bytes are unmeasured, not zero; backups remain independent.</p>
@@ -156,6 +155,6 @@ function Volumes() {
     </ul>
     {!rows.length && !pages.error ? <p className={hint}>{pages.page ? "No verified owned volumes." : "Reading volumes…"}</p> : null}
     {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.browse !== "open"} onClick={pages.more}>Load more volumes</Button> : null}
-    <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} volumes`} applyLabel="Collect these volumes" unavailable={unavailable} receiptOnlyRecovery />
+    <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} volumes`} applyLabel="Collect these volumes" />
   </MaintenanceDisclosure>;
 }

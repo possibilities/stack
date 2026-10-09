@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { localOperations, stateOperations } from "@/lib/stack/state";
+import { localOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import type { WorkerBranch, WorkerBranchPage, WorkerSession } from "@/lib/stack/types";
 import { workerBranchSelection, workerNativeDisclosure, workerNativePreconditions, type WorkerStateKind } from "@/lib/stack/worker-maintenance";
 import { useAuthActions } from "./auth-actions";
@@ -18,7 +19,7 @@ const titles: Record<WorkerStateKind, string> = { git_reset: "Reset worktree", t
 
 export function WorkerSessionMaintenance({ worker }: { worker: WorkerSession }) {
   const state = useStack();
-  if (state.remote || !localOperations(state, "worker", Object.values(workerStateOperations)).available) return null;
+  if (state.remote || !localOperations(state, "worker", [workerStateOperations.receipt]).available) return null;
   return <Section title="Maintenance">
     {(["transcript", "native_session", "branch", "catalog"] as const).filter((kind) => kind === "catalog" || worker.phase === "closed")
       .map((kind) => <WorkerMaintenance key={kind} worker={worker} kind={kind} />)}
@@ -27,7 +28,7 @@ export function WorkerSessionMaintenance({ worker }: { worker: WorkerSession }) 
 
 export function WorkerMaintenance({ worker, kind }: { worker: WorkerSession; kind: WorkerStateKind }) {
   const state = useStack();
-  if (state.remote || !localOperations(state, "worker", Object.values(workerStateOperations)).available || (kind !== "catalog" && worker.phase !== "closed")) return null;
+  if (state.remote || !localOperations(state, "worker", [workerStateOperations.receipt]).available || (kind !== "catalog" && worker.phase !== "closed")) return null;
   return <WorkerMaintenanceFlow worker={worker} kind={kind} />;
 }
 
@@ -46,19 +47,21 @@ function WorkerMaintenanceFlow({ worker, kind }: { worker: WorkerSession; kind: 
   });
   const operations = stateOperations(store.call, "worker", workerStateOperations,
     { ids: [worker.id], kind, allowUnmerged: kind === "branch" && allowUnmerged ? [worker.id] : [] });
+  const unmet = conditions.find((condition) => condition.state !== "Met");
   // The catalog fence is saved before the apply is recorded or sent; if it cannot be, nothing is sent.
   const controls = useStateFlow({ operations, guard: () => kind === "catalog" ? store.holdWorkerCatalog(worker.accountId) : null,
-    recoveryKey: `worker:${kind}:${worker.id}`, observe: state.workerGenerations[worker.id] ?? 0 });
+    recoveryKey: `worker:${kind}:${worker.id}`, policy: "receipt-only", prerequisite: (flow) => {
+      const plan = "plan" in flow ? flow.plan : null;
+      return !worker.id ? "Choose an exact Worker."
+        : kind !== "catalog" && worker.phase !== "closed" ? "Worker must be closed; nothing here closes it."
+        : kind === "transcript" && worker.contentClearedAt !== null ? "Transcript content is already cleared."
+        : kind === "native_session" && unmet ? `${unmet.state}: ${unmet.label}. Resolve this separately before preparing.`
+        : kind === "native_session" && plan && !workerNativeDisclosure(plan) ? "The plan discloses no exact native IDs. Purge is unavailable."
+        : kind === "git_reset" && (!worker.cwd || !worker.branch || !worker.baseCommit) ? "An exact owned worktree, branch and recorded base are required." : null;
+    } });
   const locked = controls.flow.phase !== "idle";
   const plan = "plan" in controls.flow ? controls.flow.plan : null;
   const nativeDisclosure = kind === "native_session" && plan ? workerNativeDisclosure(plan) : null;
-  const unmet = conditions.find((condition) => condition.state !== "Met");
-  const unavailable = state.status.worker !== "open" ? "The worker connection is not open." : !worker.id ? "Choose an exact Worker."
-    : kind !== "catalog" && worker.phase !== "closed" ? "Worker must be closed; nothing here closes it."
-    : kind === "transcript" && worker.contentClearedAt !== null ? "Transcript content is already cleared."
-    : kind === "native_session" && unmet ? `${unmet.state}: ${unmet.label}. Resolve this separately before preparing.`
-    : kind === "native_session" && plan && !nativeDisclosure ? "The plan discloses no exact native IDs. Purge is unavailable."
-    : kind === "git_reset" && (!worker.cwd || !worker.branch || !worker.baseCommit) ? "An exact owned worktree, branch and recorded base are required." : null;
   return <MaintenanceDisclosure title={kind === "git_reset" ? "Maintenance" : titles[kind]} active={locked} aside={kind === "git_reset" ? titles[kind] : "Worker maintenance"}>
     {kind === "git_reset" ? <>
       <p className={hint}>Resets only this closed Worker&rsquo;s owned linked worktree to its recorded base. All uncommitted tracked changes and index state are lost; exact non-Role untracked files are cleared. Review the changed files above and the owner&rsquo;s diff summary in this plan.</p>
@@ -94,7 +97,7 @@ function WorkerMaintenanceFlow({ worker, kind }: { worker: WorkerSession; kind: 
       <p className={hint}>Clears account-wide derived Stack <code>catalog.json</code>, in-memory model observations and retry cache. Sibling Workers on this account lose the same shared catalog, not their sessions or settings. In-flight discovery blocks clearing.</p>
       <p className={hint}>Regeneration requires a later explicit native catalog observation. Clearing never signs in, launches a Worker, admits a turn or observes models automatically.</p>
     </>}
-    <StateFlowView controls={controls} label={`Prepare ${titles[kind].toLowerCase()}`} applyLabel={titles[kind]} unavailable={unavailable} receiptOnlyRecovery />
+    <StateFlowView controls={controls} label={`Prepare ${titles[kind].toLowerCase()}`} applyLabel={titles[kind]} />
   </MaintenanceDisclosure>;
 }
 
@@ -105,7 +108,7 @@ export function BranchConsequences() {
 /** Claims outlive the Worker record and collection. This read is deliberately independent of list filters. */
 export function RetainedWorkerBranches() {
   const state = useStack();
-  if (state.remote || !localOperations(state, "worker", ["worker_state_branches", ...Object.values(workerStateOperations)]).available) return null;
+  if (state.remote || !localOperations(state, "worker", ["worker_state_branches", workerStateOperations.receipt]).available) return null;
   return <RetainedBranches />;
 }
 
@@ -127,11 +130,11 @@ function RetainedBranches() {
   const rows = pages.page?.items ?? [];
   const selection = workerBranchSelection(rows, selected, allowUnmerged);
   const controls = useStateFlow({ operations: stateOperations(store.call, "worker", workerStateOperations, selection ?? { ids: [], kind: "branch", allowUnmerged: [] }),
-    recoveryKey: "worker:branch:ids", observe: state.workerSessions.at,
-    onReceipt: (receipt) => { pages.refresh(); if (receipt.status === "completed") { setSelected([]); setAllowUnmerged([]); } },
+    recoveryKey: "worker:branch:ids", policy: "receipt-only", prerequisite: () => unavailable,
+    onReceipt: (receipt, captured) => { pages.refresh(); if (receipt.status === "completed" && captured) { setSelected([]); setAllowUnmerged([]); } },
   });
   const locked = controls.flow.phase !== "idle";
-  const unavailable = state.status.worker !== "open" ? "The worker connection is not open." : pages.error ? "Refresh retained branches before preparing."
+  const unavailable = pages.error ? "Refresh retained branches before preparing."
     : !selected.length ? "Select up to 100 recorded branches by Worker ID." : !selection ? "The selected claims changed; discard the plan and review the selection." : null;
   const select = (id: string) => {
     setSelected((held) => held.includes(id) ? held.filter((value) => value !== id) : [...held, id]);
@@ -160,7 +163,7 @@ function RetainedBranches() {
       </ul>
       {!rows.length ? <p className={hint}>{pages.page ? "No recorded Worker branches." : "Reading retained branches…"}</p> : null}
       {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.worker !== "open"} onClick={pages.more}>Load more branches</Button> : null}
-      <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} branches`} applyLabel="Collect these branches" unavailable={unavailable} receiptOnlyRecovery />
+      <StateFlowView controls={controls} label={`Prepare collecting ${selected.length} branches`} applyLabel="Collect these branches" />
     </MaintenanceDisclosure>
   </Section>;
 }

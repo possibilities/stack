@@ -17,7 +17,7 @@ const { WorkerWindowStore } = await import("../lib/stack/worker-windows.ts");
 const { ProcWindowStore } = await import("../lib/stack/proc-windows.ts");
 const { ViewerWindowStore } = await import("../lib/stack/browse-viewers.ts");
 const { HudViewStore } = await import("../lib/stack/hud-view.ts");
-const { saveRecovery, readRecovery, listRecoveries, StateFlowController } = await import("../lib/stack/state.ts");
+const { saveRecovery, readRecovery, listRecoveries, MaintenanceController } = await import("../lib/stack/maintenance.ts");
 const { begin, readJournal, destinationKeyValue } = await import("../lib/stack/source-setup.ts");
 const { loadIntent, saveIntent } = await import("../lib/stack/browse.ts");
 const { notificationDraftKey } = await import("../lib/stack/notify-compose.ts");
@@ -35,6 +35,11 @@ function area() {
     key: (index) => [...values.keys()][index] ?? null, get length() { return values.size; } };
 }
 const scoped = (shared, extra) => new ScopedStorage(identity(extra), () => shared);
+const maintenanceNames = { plan: "xcom_posts_plan", apply: "xcom_posts_clear", receipt: "xcom_state_receipt_get" };
+const maintenanceMetadata = { owner: "xcom", names: maintenanceNames, selection: { ids: ["1"] } };
+const maintenanceOptions = (operations, recoveryKey, recovery) => ({ operations, recoveryKey, recovery, policy: "identical-retry",
+  environment: { local: true, connected: true, exposed: Object.values(operations.names) } });
+const maintenanceSettled = () => new Promise((resolve) => setImmediate(resolve));
 
 test("an identity is complete only with a UUID the server named and an origin, and normalizes both", () => {
   assert.deepEqual(identity(), { serverId: alpha, authority: "local", origin });
@@ -124,7 +129,7 @@ test("every browser store restores only its own destination's arrangement and is
   assert.equal(unknown.chats.getWindows()[0].botId, "bot-2", "in-memory use still works");
 });
 
-test("a state flow saves, reads and lists requests only in its own destination, and never with none", async () => {
+test("a state flow saves, reads and lists requests only in its own destination, and never with none", async (t) => {
   const shared = area();
   const a = scoped(shared), b = scoped(shared, { serverId: beta });
   const input = { planId: "p", expectedRevision: "r", requestId: "00000000-0000-4000-8000-000000000001" };
@@ -141,32 +146,39 @@ test("a state flow saves, reads and lists requests only in its own destination, 
   assert.equal(shared.values.size, writes, "with no destination nothing is written");
 
   const calls = [];
-  const operations = { prepare: async () => { throw new Error("not planned"); }, apply: async () => { throw new Error("not applied"); }, readReceipt: async (requestId) => { calls.push(requestId); return null; } };
-  const wrong = new StateFlowController({ operations, recoveryKey: "xcom:posts", recovery: b });
-  await wrong.recover();
+  const operations = { ...maintenanceMetadata, prepare: async () => { throw new Error("not planned"); }, apply: async () => { throw new Error("not applied"); }, readReceipt: async (requestId) => { calls.push(requestId); return null; } };
+  const wrong = new MaintenanceController(maintenanceOptions(operations, "xcom:posts", b));
+  t.after(wrong.activate());
+  await maintenanceSettled();
   assert.deepEqual(calls, [], "no recovery is dispatched for a request another destination saved");
-  const none = new StateFlowController({ operations, recoveryKey: "xcom:posts" });
-  await none.recover();
+  const none = new MaintenanceController(maintenanceOptions(operations, "xcom:posts", null));
+  t.after(none.activate());
+  await maintenanceSettled();
   assert.deepEqual(calls, [], "none is dispatched while the destination is unknown");
-  const right = new StateFlowController({ operations, recoveryKey: "xcom:posts", recovery: a });
-  await right.recover();
+  const right = new MaintenanceController(maintenanceOptions(operations, "xcom:posts", a));
+  const release = right.activate(); t.after(release);
+  await maintenanceSettled();
   assert.deepEqual(calls, [input.requestId], "this destination's request is read back, by its own id, once");
-  right.update({ operations, recovery: b });
-  await right.recover();
-  assert.deepEqual(calls, [input.requestId], "only an idle flow recovers");
+  release();
+  right.invalidate();
+  await maintenanceSettled();
+  assert.deepEqual(calls, [input.requestId], "the old destination's released controller cannot observe after its tree is replaced");
+  assert.deepEqual(readRecovery(a, "xcom:posts").input, input, "leaving the destination preserves its uncertainty");
 });
 
-test("a recovery that appears after the destination is named is read once, not before", async () => {
+test("a recovery that appears after the destination is named is read once, not before", async (t) => {
   const shared = area();
   const a = scoped(shared);
   saveRecovery(a, "worker:branch:ids", { planId: "p", expectedRevision: "r", requestId: "00000000-0000-4000-8000-000000000002" });
   const calls = [];
-  const operations = { prepare: async () => { throw new Error("x"); }, apply: async () => { throw new Error("x"); }, readReceipt: async (requestId) => { calls.push(requestId); return null; } };
-  const flow = new StateFlowController({ operations, recoveryKey: "worker:branch:ids", recovery: null });
-  await flow.recover();
+  const operations = { ...maintenanceMetadata, prepare: async () => { throw new Error("x"); }, apply: async () => { throw new Error("x"); }, readReceipt: async (requestId) => { calls.push(requestId); return null; } };
+  const options = maintenanceOptions(operations, "worker:branch:ids", null);
+  const flow = new MaintenanceController(options);
+  t.after(flow.activate());
+  await maintenanceSettled();
   assert.deepEqual(calls, []);
-  flow.update({ operations, recovery: a });
-  await flow.recover();
+  flow.update({ ...options, recovery: a });
+  await maintenanceSettled();
   assert.deepEqual(calls, ["00000000-0000-4000-8000-000000000002"]);
 });
 
@@ -321,62 +333,64 @@ test("saved catalog fences are read from this destination only, and implicit dis
 /** A scripted owner whose apply and receipt reads are counted, so a refusal can be shown to send nothing. */
 function countingOwner(plan) {
   const calls = { prepare: 0, apply: 0, receipt: 0 };
-  return { calls, operations: { prepare: async () => { calls.prepare++; return plan; }, apply: async (input) => { calls.apply++; return { status: "completed", requestId: input.requestId, outcomes: [], completedAt: null }; },
+  return { calls, operations: { ...maintenanceMetadata, prepare: async () => { calls.prepare++; return plan; }, apply: async (input) => { calls.apply++; return {
+    status: "completed", requestId: input.requestId, planId: input.planId, ownerPackage: plan.ownerPackage, subject: plan.subject, action: plan.action,
+    outcomes: [], retained: [], regeneration: [], startedAt: plan.createdAt, completedAt: plan.createdAt }; },
     readReceipt: async () => { calls.receipt++; return null; } } };
 }
-const flowPlan = { id: "plan-1", revision: "rev-1", action: "clear", subject: { kind: "x", id: "1" }, blockedBy: [], expiresAt: new Date(Date.now() + 600_000).toISOString(), createdAt: new Date().toISOString(),
+const flowPlan = { id: "plan-1", ownerPackage: "xcom", revision: "rev-1", action: "clear", subject: { kind: "x", id: "1" }, blockedBy: [], expiresAt: new Date(Date.now() + 600_000).toISOString(), createdAt: new Date().toISOString(),
   entries: [], retained: [], regeneration: [], resources: [] };
 const sequential = (n) => { let i = 0; return { now: () => Date.now(), uuid: () => `00000000-0000-4000-8000-${String(++i + n).padStart(12, "0")}` }; };
 
-test("a state flow with a recovery slot prepares, applies, retries and reads nothing until its destination has storage", async () => {
+test("a state flow prepares, applies, retries and reads nothing until its destination has storage", async (t) => {
   const owner = countingOwner(flowPlan);
-  const flow = new StateFlowController({ operations: owner.operations, recoveryKey: "xcom:posts", recovery: null }, sequential(10));
-  assert.equal(flow.getBlock(), waitingForIdentity);
-  await flow.prepare(); await flow.apply(); await flow.retry(); await flow.readReceipt();
+  const options = maintenanceOptions(owner.operations, "xcom:posts", null);
+  const flow = new MaintenanceController(options, sequential(10));
+  t.after(flow.activate());
+  assert.equal(flow.getSnapshot().actions.prepare.reason, waitingForIdentity);
+  await flow.prepare(); await flow.apply(); await flow.retryIdentical(); await flow.readReceipt();
   assert.deepEqual(owner.calls, { prepare: 0, apply: 0, receipt: 0 }, "nothing is asked of the owner");
   assert.equal(flow.getState().phase, "idle");
-  const unslotted = new StateFlowController({ operations: owner.operations }, sequential(20));
-  assert.equal(unslotted.getBlock(), null, "a flow that records nothing is not held back");
-  await unslotted.prepare();
-  assert.equal(owner.calls.prepare, 1);
-  flow.update({ operations: owner.operations, recovery: scoped(area()) });
-  assert.equal(flow.getBlock(), null, "named, it proceeds");
+  flow.update({ ...options, recovery: scoped(area()) });
+  assert.equal(flow.getSnapshot().actions.prepare.enabled, true, "named, it proceeds");
   await flow.prepare();
-  assert.equal(owner.calls.prepare, 2);
+  assert.equal(owner.calls.prepare, 1);
 });
 
-test("an apply is refused, sending nothing, when its request cannot be recorded first", async () => {
+test("an apply is refused, sending nothing, when its request cannot be recorded first", async (t) => {
   const shared = area();
   const owner = countingOwner(flowPlan);
-  const flow = new StateFlowController({ operations: owner.operations, recoveryKey: "worker:branch:ids", recovery: scoped(shared) }, sequential(30));
+  const options = maintenanceOptions(owner.operations, "worker:branch:ids", scoped(shared));
+  const flow = new MaintenanceController(options, sequential(30));
+  t.after(flow.activate());
   await flow.prepare();
   assert.equal(flow.getState().phase, "preview");
   // The destination's storage goes away between the plan and the apply.
-  flow.update({ operations: owner.operations, recovery: null });
+  flow.update({ ...options, recovery: null });
   await flow.apply();
   assert.equal(owner.calls.apply, 0, "no apply without a recoverable record");
   assert.equal(flow.getState().phase, "preview");
-  assert.equal(flow.getState().refused, waitingForIdentity);
+  assert.equal(flow.getSnapshot().actions.apply.reason, waitingForIdentity);
   // Storage that refuses the write blocks the dispatch too.
   const refusing = new ScopedStorage(identity(), () => ({ ...area(), setItem() { throw new Error("quota"); } }));
-  flow.update({ operations: owner.operations, recovery: refusing });
+  flow.update({ ...options, recovery: refusing });
   await flow.apply();
   assert.equal(owner.calls.apply, 0);
   assert.equal(flow.getState().refused, notRecorded);
   // Storage that accepts but does not hold it is the same refusal.
   const forgetful = new ScopedStorage(identity(), () => ({ ...area(), setItem() {} }));
-  flow.update({ operations: owner.operations, recovery: forgetful });
+  flow.update({ ...options, recovery: forgetful });
   await flow.apply();
   assert.equal(owner.calls.apply, 0);
   assert.equal(flow.getState().refused, notRecorded);
   // A guard that refuses (the catalog fence could not be saved) sends nothing and records nothing.
   const good = scoped(shared);
-  flow.update({ operations: owner.operations, recovery: good, guard: () => waitingForIdentity });
+  flow.update({ ...options, recovery: good, guard: () => waitingForIdentity });
   await flow.apply();
   assert.equal(owner.calls.apply, 0);
   assert.equal(flow.getState().refused, waitingForIdentity);
   assert.deepEqual(good.keys("state-flow."), [], "a refused apply leaves no record");
-  flow.update({ operations: owner.operations, recovery: good });
+  flow.update({ ...options, recovery: good });
   await flow.apply();
   assert.equal(owner.calls.apply, 1, "recorded, it is sent once");
   assert.equal(good.keys("state-flow.").length, 0, "a completed receipt retires its record");

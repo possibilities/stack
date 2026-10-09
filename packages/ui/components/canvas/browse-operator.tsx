@@ -112,8 +112,8 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => goTo({ kind: "browser-viewer", id: viewers.open(profile.id) })}><EyeIcon />Open in a new viewer</DropdownMenuItem>
-                  {localOperations(state, "browse", Object.values(browseMaintenanceOperations.reset)).available ? <DropdownMenuItem onClick={() => setMaintenance("reset")}>Reset profile…</DropdownMenuItem> : null}
-                  {localOperations(state, "browse", Object.values(browseMaintenanceOperations.site)).available ? <DropdownMenuItem onClick={() => setMaintenance("site")}>Clear site data…</DropdownMenuItem> : null}
+                  {localOperations(state, "browse", [browseMaintenanceOperations.reset.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("reset")}>Reset profile…</DropdownMenuItem> : null}
+                  {localOperations(state, "browse", [browseMaintenanceOperations.site.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("site")}>Clear site data…</DropdownMenuItem> : null}
                   <DropdownMenuItem variant="destructive" disabled={Boolean(block)} title={block ?? undefined} onClick={() => setDeleting(true)}><Trash2Icon />{block ?? "Delete profile…"}</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>

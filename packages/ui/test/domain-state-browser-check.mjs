@@ -72,6 +72,8 @@ content.publicationRevision = "publications-r1";
 content.historyRevision = "history-r1";
 content.historyCalls = [];
 content.publicationCalls = [];
+content.receiptReads = [];
+content.receiptRead = null;
 // Xcom: scanning, not paused; the sync finishes a few reads after pausing.
 const xcom = { owner: journalOwner("xcom"), paused: false, running: true, finishAfter: 0,
   posts: [1, 2, 3].map((n) => ({ tweet_id: `17000000000000000${n}`, author_id: `a${n}`, author_handle: `author${n}`, created_at: at(), archived_at: at(), source_uri: `https://x.com/i/${n}`, content: `Post number ${n}`, article_title: null })) };
@@ -194,7 +196,7 @@ const handlers = {
   content_storage_plan: ({ digests }) => content.owner.plan("collection_blobs", { digests }, { resources: digests.map((digest) => `blob ${digest}`), retained: ["Vault Git history, named Artifacts, remotes and backups"] }),
   content_storage_collect: (input) => content.owner.apply(input, (payload) => JSON.stringify(payload), (payload) => ({ status: "partial",
     outcomes: payload.digests.map((digest) => ({ resource: digest, outcome: "unknown", detail: "Removal interrupted; inspect .stack-clear quarantine" })) })),
-  content_state_receipt_get: (input) => content.owner.receipt(input),
+  content_state_receipt_get: (input) => { content.receiptReads.push(input); return content.receiptRead ? content.receiptRead(input) : content.owner.receipt(input); },
   content_publication_list: ({ offset = 0, revision }) => {
     if (revision && revision !== content.publicationRevision) throw new Error("Publication inventory changed; restart paging");
     return { entries: content.publications.slice(offset, offset + 2), nextOffset: offset + 2 < content.publications.length ? offset + 2 : null,
@@ -421,15 +423,43 @@ try {
     const beforeRecovery = content.publicationCalls.length;
     await seedRecovery(page, origin, "content:publication_clear:claims", input);
     await page.reload();
-    // Initial recovery can precede the socket connection; explicit receipt observation resolves
-    // that transport uncertainty without retrying effects or creating a new plan.
+    // Recovery waits for receipt discovery and connection, then observes automatically.
     await publications.getByRole("checkbox", { name: `Select publication ${publicationIds.uncertain}` }).waitFor();
-    await publications.getByRole("button", { name: /^Read receipt(?: again)?$/ }).focus(); await page.keyboard.press("Enter");
     await publications.getByRole("region", { name: "content receipt unknown" }).waitFor();
     assert.equal(await publications.getByRole("button", { name: /Send identical request|Prepare a new plan|Close receipt/ }).count(), 0);
-    await publications.getByRole("button", { name: "Read receipt again" }).focus(); await page.keyboard.press("Enter");
+    await publications.getByRole("button", { name: "Read receipt again" }).click();
     await publications.getByRole("region", { name: "content receipt unknown" }).waitFor();
     assert.equal(content.publicationCalls.length, beforeRecovery, "recovery reads receipts without planning or replay");
+    content.receiptRead = () => { throw new Error("fixture receipt read unavailable"); };
+    await publications.getByRole("button", { name: "Read receipt again" }).click();
+    await publications.getByText(/The retained receipt above remains the last confirmed evidence/).waitFor();
+    assert.equal(await publications.getByRole("region", { name: "content receipt unknown" }).count(), 1);
+    assert.equal(await publications.getByRole("button", { name: /Send identical request|Prepare a new plan|Close receipt/ }).count(), 0);
+
+    // A hidden bench's effect cleanup is reversible. Its old missing answer cannot
+    // erase known admission, and return owes a new exact receipt read without replay.
+    const oldRead = Promise.withResolvers(), resumedRead = Promise.withResolvers();
+    const oldStarted = Promise.withResolvers(), resumedStarted = Promise.withResolvers();
+    let activationReads = 0;
+    content.receiptRead = () => { if (++activationReads === 1) { oldStarted.resolve(); return oldRead.promise; } resumedStarted.resolve(); return resumedRead.promise; };
+    await publications.getByRole("button", { name: "Read receipt again" }).click();
+    await oldStarted.promise;
+    await publications.getByText("Reading this request’s receipt again…", { exact: true }).waitFor();
+    const switchSpace = async (name) => {
+      await page.getByRole("button", { name: /^Spaces ·/ }).click();
+      await page.getByRole("menuitem", { name: new RegExp(`^${name}`) }).click();
+      await page.getByRole("button", { name: `Spaces · ${name}`, exact: true }).waitFor();
+    };
+    await switchSpace("System");
+    oldRead.resolve({ receipt: null });
+    await switchSpace("Content");
+    await Promise.race([resumedStarted.promise, wait(15_000).then(() => { throw new Error("Activity return did not resume receipt observation"); })]);
+    resumedRead.resolve(content.owner.receipt(input));
+    content.receiptRead = null;
+    await publications.getByText("Reading this request’s receipt again…", { exact: true }).waitFor({ state: "hidden" });
+    assert.equal(await publications.getByRole("region", { name: "content receipt unknown" }).count(), 1);
+    assert.equal(await publications.getByText(/The retained receipt above remains/).count(), 0);
+    assert.equal(content.publicationCalls.length, beforeRecovery, "Activity resumes receipt observation without a plan or effect");
     await shot("content-publications-unknown-light", storage);
     await page.emulateMedia({ colorScheme: "dark" }); await shot("content-publications-unknown-dark", storage);
     await page.emulateMedia({ colorScheme: "light" });
@@ -446,14 +476,19 @@ try {
     await history.getByText(/4 commits scanned/).waitFor();
     assert.ok(await storage.locator("[data-scroll]").evaluate((body) => body.scrollWidth <= body.clientWidth), "narrow history has no horizontal overflow");
     await shot("content-history-narrow", storage);
-    // Each live transport selection is independent; absence of any operation hides the flow.
+    // Plan/apply authority is independent of still-permitted exact receipt recovery.
     const contentTransport = catalog.find((doc) => doc.name === "content").transports[0];
     const selectedOperations = contentTransport.operations;
     for (const missing of ["content_publication_list", "content_publication_plan", "content_publication_clear", "content_state_receipt_get"]) {
       contentTransport.operations = selectedOperations.filter((name) => name !== missing);
       await page.reload();
       await storage.getByRole("list", { name: "Upload stages", exact: true }).waitFor();
-      assert.equal(await publications.count(), 0, `publication flow hidden without ${missing}`);
+      if (["content_publication_list", "content_state_receipt_get"].includes(missing)) assert.equal(await publications.count(), 0, `publication flow hidden without ${missing}`);
+      else {
+        await publications.getByRole("region", { name: "content receipt unknown" }).waitFor();
+        assert.equal(await publications.getByRole("button", { name: "Read receipt again" }).isEnabled(), true, `receipt remains readable without ${missing}`);
+        assert.equal(await publications.getByRole("button", { name: /Send identical request|Prepare a new plan|Close receipt/ }).count(), 0);
+      }
       assert.equal(await history.locator("summary").count(), 1, "read-only history exposure is independent");
     }
     contentTransport.operations = selectedOperations.filter((name) => name !== "content_vault_history_plan");

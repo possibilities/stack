@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { chatIdentity, historyItems, historyKey, historyLimit, type HistoryChoice, type HistoryScope } from "@/lib/stack/hud";
-import { localOperation, localOperations, stateOperations } from "@/lib/stack/state";
+import { localOperation, localOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import type { WorkFocus, WorkItem } from "@/lib/stack/types";
 import { shortId } from "@/lib/stack/derive";
 import { Choice, MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
@@ -23,14 +24,14 @@ export function RetireFocus({ target }: { target: Target }) {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const controls = useStateFlow({ operations: stateOperations(store.call, "hud", { plan: "work_focus_retire_plan", apply: "work_focus_retire", receipt: "hud_state_receipt_get" }, { target }),
-    recoveryKey: `hud:focus:${target.botId}/${target.mainThreadId}/${target.threadId}` });
-  const access = localOperation(state, "hud", "work_focus_retire_plan");
+    recoveryKey: `hud:focus:${target.botId}/${target.mainThreadId}/${target.threadId}`, policy: "identical-retry" });
+  const access = localOperation(state, "hud", "hud_state_receipt_get");
   if (state.remote || !access.available) return null;
   if (!open && controls.flow.phase === "idle") return <Button size="xs" variant="ghost" className="text-muted-foreground" onClick={() => setOpen(true)}>Remove retired focus…</Button>;
   return (
     <div className="flex w-full flex-col gap-1.5 rounded-lg border border-dashed p-2">
       <p className={hint}>Removes only this retired Chat&rsquo;s saved focus record. The work item, its history and Worker links stay. Without the record, a saved &ldquo;no focus&rdquo; no longer blocks inheritance.</p>
-      <StateFlowView controls={controls} label="Prepare removal" applyLabel="Remove this focus" unavailable={state.status.hud !== "open" ? "The hud connection is not open." : null} />
+      <StateFlowView controls={controls} label="Prepare removal" applyLabel="Remove this focus" />
       {controls.flow.phase === "idle" ? <Button size="xs" variant="ghost" className="self-start" onClick={() => setOpen(false)}>Cancel</Button> : null}
     </div>
   );
@@ -77,7 +78,7 @@ export function RetiredFocusSection() {
   );
 }
 
-const historyOperations = ["hud_history_plan", "hud_history_clear", "hud_state_receipt_get"] as const;
+const historyOperations = ["hud_state_receipt_get"] as const;
 const scopes: [HistoryScope, string, string][] = [
   ["journal_bodies", "Journal bodies",
     "Clears collaboration notes, results, decisions, references and the before and after values of edits. The item's title, objective, metadata and state stay, and its journal keeps accepting entries."],
@@ -93,26 +94,25 @@ const scopes: [HistoryScope, string, string][] = [
 export function WorkHistory({ item }: { item: WorkItem }) {
   const state = useStack();
   const store = useStore();
-  const { hudTree, hudGeneration, status, remote } = state;
+  const { hudTree, remote } = state;
   const [scope, setScope] = useState<HistoryScope | null>(null);
   const [choice, setChoice] = useState<HistoryChoice>("item");
   const rows = hudTree.data?.rows;
   const items = useMemo(() => historyItems(rows ?? [], item, choice, hudTree.data?.complete ?? false), [rows, item, choice, hudTree.data?.complete]);
   const controls = useStateFlow({
     operations: stateOperations(store.call, "hud", { plan: "hud_history_plan", apply: "hud_history_clear", receipt: "hud_state_receipt_get" }, { items: items.ids, scope: scope ?? "journal_bodies" }),
-    recoveryKey: historyKey(item.id), observe: hudGeneration,
+    recoveryKey: historyKey(item.id), policy: "identical-retry", prerequisite: () => unavailable,
     // A completed receipt empties the selection it applied to; partial and unknown ones keep it for inspection.
-    onReceipt: (receipt) => { if (receipt.status === "completed") { setScope(null); setChoice("item"); } },
+    onReceipt: (receipt, selection) => { if (receipt.status === "completed" && selection) { setScope(null); setChoice("item"); } },
   });
   const access = localOperations(state, "hud", historyOperations);
-  if (remote || !access.available) return null;
   const idle = controls.flow.phase === "idle";
-  const unavailable = status.hud !== "open" ? "The hud connection is not open."
-    : !scope ? "Choose what to clear."
+  const unavailable = !scope ? "Choose what to clear."
     : items.partial ? "The Work tree is only partly loaded, so this subtree can't be listed exactly. Load the rest of the tree in Work first."
     : items.overLimit ? `This selection has ${items.ids.length} items. One plan selects at most ${historyLimit}; choose a smaller subtree.`
     : !items.ids.length ? "Nothing to clear: everything selected is already a tombstone."
     : null;
+  if (remote || !access.available) return null;
   const children = rows?.find((row) => row.item.id === item.id)?.childCount ?? 0;
   const count = `${items.ids.length} item${items.ids.length === 1 ? "" : "s"}`;
   return (
@@ -132,7 +132,7 @@ export function WorkHistory({ item }: { item: WorkItem }) {
         </p>
       ) : null}
       <StateFlowView controls={controls} label={`Prepare clearing ${count}`}
-        applyLabel={scope === "item_and_journal" ? "Tombstone these items" : "Clear these journals"} unavailable={unavailable} />
+        applyLabel={scope === "item_and_journal" ? "Tombstone these items" : "Clear these journals"} />
     </MaintenanceDisclosure>
   );
 }

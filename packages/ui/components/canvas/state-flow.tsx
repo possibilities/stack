@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ClipboardListIcon, RefreshCwIcon, RotateCwIcon, WrenchIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { relativeTime } from "@/lib/stack/derive";
 import { formatDuration } from "@/lib/stack/resources";
-import { planReadiness, receiptTone, receiptWords, StateFlowController, type StateFlow, type StateFlowOptions } from "@/lib/stack/state";
+import { planReadiness, receiptTone, receiptWords } from "@/lib/stack/state";
+import { MaintenanceController, type MaintenanceOptions, type MaintenanceSnapshot, type StateFlow } from "@/lib/stack/maintenance";
 import type { StateOutcome, StatePlan, StateReceipt } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { CopyButton, StatusDot, type Tone } from "./primitives";
-import { useDestination, useNow } from "./provider";
+import { useDestination, useNow, useStack, useStore } from "./provider";
 
 /*
  * The shared owner maintenance flow (docs/state-control.md, ADR 0135): prepare → preview → apply → receipt.
@@ -112,84 +113,67 @@ export function StateReceiptView({ receipt, now }: { receipt: StateReceipt; now:
   );
 }
 
-export type StateFlowControls = {
-  flow: StateFlow;
+export type StateFlowControls = MaintenanceSnapshot & {
   prepare(): void;
   apply(): void;
   retry(): void;
   readReceipt(): void;
-  reset(): void;
-  /** Why no decision can be made yet: the server has not named itself, so there is nowhere to record a request first. */
-  waiting: string | null;
+  discardPlan(): void;
+  closeReceipt(): void;
+  forget(): void;
 };
 
-/**
- * Owner-agnostic state for one maintenance selection (a `StateFlowController`). The owner's callbacks are the only
- * calls it makes. `observe` is any owner invalidation, such as an event generation: a running receipt is read
- * again when it changes; nothing polls.
- */
-export function useStateFlow<Extra extends Record<string, string> = Record<string, never>>({ observe, ...options }: Omit<StateFlowOptions<Extra>, "recovery"> & { observe?: unknown }): StateFlowControls {
-  // The flow saves and recovers requests only in this destination's storage; with none yet, nothing is saved or recovered.
+export type StateFlowOptions<Extra extends Record<string, string> = Record<string, never>> = Omit<MaintenanceOptions<Extra>, "recovery" | "environment"> & {
+  prerequisite?: string | null | ((flow: StateFlow) => string | null);
+};
+
+/** Destination-bound React adapter. Owner notices and Activity demand are independent of passive subscription. */
+export function useStateFlow<Extra extends Record<string, string> = Record<string, never>>({ prerequisite, ...options }: StateFlowOptions<Extra>): StateFlowControls {
   const { local: recovery } = useDestination();
-  const controller = useMemo(() => new StateFlowController<Extra>({ ...options, recovery }), [options.recoveryKey]);
-  controller.update({ ...options, recovery });
-  const flow = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
-  // Unmounting only drops in-flight results; a saved request stays recoverable.
-  useEffect(() => () => controller.detach(), [controller]);
-  // A saved request is read back once this destination is known, and only into an idle flow.
-  useEffect(() => { void controller.recover(); }, [controller, recovery]);
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    void controller.observe();
-  }, [observe, controller]);
+  const { remote, catalog, status } = useStack();
+  const store = useStore();
+  useNow(15_000); // Commit current expiry availability without polling an owner.
+  const owner = options.operations.owner;
+  const environment = { local: !remote, connected: status[owner] === "open",
+    exposed: catalog.data ? catalog.data.find((doc) => doc.name === owner)?.transports.find((transport) => transport.type === "websocket")?.operations ?? [] : null };
+  const binding = JSON.stringify([owner, options.operations.names, options.recoveryKey, options.policy, options.extra ?? {}]);
+  const controller = useMemo(() => new MaintenanceController<Extra>({ ...options, recovery, environment }), [binding, store]); // eslint-disable-line react-hooks/exhaustive-deps
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  useLayoutEffect(() => {
+    controller.update({ ...options, recovery, environment: { ...environment,
+      prerequisite: typeof prerequisite === "function" ? prerequisite(controller.getState()) : prerequisite } });
+  });
+  useEffect(() => controller.activate(), [controller]);
+  useEffect(() => store.onOwnerNotice(owner, controller.invalidate), [store, owner, controller]);
   return {
-    flow,
+    ...snapshot,
     prepare: () => void controller.prepare(),
     apply: () => void controller.apply(),
-    retry: () => void controller.retry(),
+    retry: () => void controller.retryIdentical(),
     readReceipt: () => void controller.readReceipt(),
-    reset: () => controller.reset(),
-    waiting: controller.getBlock(),
+    discardPlan: controller.discardPlan,
+    closeReceipt: controller.closeReceipt,
+    forget: controller.forget,
   };
 }
 
-/**
- * The whole flow for one owner selection: a prepare control, the plan preview with its apply control, and the
- * receipt or uncertainty afterwards. `unavailable` disables preparing with its reason (remote, disconnected,
- * nothing selected). Downstream views pass their owner's explicit operations.
- */
-export function StateMaintenance<Extra extends Record<string, string> = Record<string, never>>({ label, applyLabel = "Apply this plan", unavailable, className, ...options }: Omit<StateFlowOptions<Extra>, "recovery"> & { observe?: unknown } & {
-  /** The decision being prepared, e.g. "Prepare workspace clear". */
-  label: string;
-  applyLabel?: string;
-  unavailable?: string | null;
-  className?: string;
-}) {
-  const controls = useStateFlow(options);
-  return <StateFlowView controls={controls} label={label} applyLabel={applyLabel} unavailable={unavailable} className={className} />;
-}
-
-export function StateFlowView({ controls, label, applyLabel = "Apply this plan", unavailable: unavailableReason, className, receiptOnlyRecovery = false }: {
-   controls: StateFlowControls; label: string; applyLabel?: string; unavailable?: string | null; className?: string;
-   /** External effects must be inspected, not rearmed, after an uncertain admission or an unsettled receipt. */
-   receiptOnlyRecovery?: boolean;
+export function StateFlowView({ controls, label, applyLabel = "Apply this plan", className }: {
+  controls: StateFlowControls; label: string; applyLabel?: string; className?: string;
 }) {
   const now = useNow(15_000);
-  const { flow, waiting } = controls;
-  // Until the server has named itself nothing is recorded, so nothing is prepared, applied, resent or read.
-  const unavailable = waiting ?? unavailableReason;
-  const prepareButton = (text: string, variant: "outline" | "ghost" = "outline") => (
-    <Button size="sm" variant={variant} disabled={!!unavailable} title={unavailable ?? undefined} onClick={controls.prepare}>
+  const { flow, actions, reading, readError, error } = controls;
+  const actionProps = (action: keyof typeof actions) => ({ disabled: !actions[action].enabled, title: actions[action].reason ?? undefined });
+  const prepareButton = (text: string, variant: "outline" | "ghost" = "outline") => actions.prepare.visible ? (
+    <Button size="sm" variant={variant} {...actionProps("prepare")} onClick={controls.prepare}>
       <ClipboardListIcon data-icon="inline-start" />{text}
     </Button>
-  );
+  ) : null;
   return (
     <div className={cn("flex flex-col gap-2", className)} aria-live="polite">
       {flow.phase === "idle" ? (
         <div className="flex flex-col gap-1">
           <div>{prepareButton(label)}</div>
-          {unavailable ? <p className="text-xs text-muted-foreground">{unavailable}</p> : null}
+          {actions.prepare.visible && actions.prepare.reason ? <p className="text-xs text-muted-foreground">{actions.prepare.reason}</p> : null}
         </div>
       ) : null}
       {flow.phase === "preparing" ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner />Preparing a plan…</p> : null}
@@ -197,23 +181,20 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
         <Alert variant="destructive">
           <AlertTitle>No plan</AlertTitle>
           <AlertDescription>{flow.error}</AlertDescription>
-          <div className="mt-1.5 flex gap-1.5">{prepareButton("Prepare again")}<Button size="sm" variant="ghost" onClick={controls.reset}>Cancel</Button></div>
+          <div className="mt-1.5 flex gap-1.5">{prepareButton("Prepare again")}{actions.discardPlan.visible ? <Button size="sm" variant="ghost" {...actionProps("discardPlan")} onClick={controls.discardPlan}>Cancel</Button> : null}</div>
         </Alert>
       ) : null}
-      {flow.phase === "preview" ? (() => {
-        const readiness = planReadiness(flow.plan, now);
-        return (
-          <>
-            <StatePlanReview plan={flow.plan} now={now} />
-            {readiness.reason || unavailable || flow.refused ? <p role="status" className="text-xs text-destructive">{flow.refused ?? readiness.reason ?? unavailable}</p> : null}
-            <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="destructive" disabled={!readiness.canApply || !!unavailable} title={readiness.reason ?? unavailable ?? undefined} onClick={controls.apply}>{applyLabel}</Button>
-              {readiness.expired || readiness.blocked ? prepareButton("Prepare a new plan", "ghost") : null}
-              <Button size="sm" variant="ghost" onClick={controls.reset}><XIcon data-icon="inline-start" />Discard plan</Button>
-            </div>
-          </>
-        );
-      })() : null}
+      {flow.phase === "preview" ? (
+        <>
+          <StatePlanReview plan={flow.plan} now={now} />
+          {actions.apply.reason || flow.refused ? <p role="status" className="text-xs text-destructive">{flow.refused ?? actions.apply.reason}</p> : null}
+          <div className="flex flex-wrap gap-1.5">
+            {actions.apply.visible ? <Button size="sm" variant="destructive" {...actionProps("apply")} onClick={controls.apply}>{applyLabel}</Button> : null}
+            {prepareButton("Prepare a new plan", "ghost")}
+            {actions.discardPlan.visible ? <Button size="sm" variant="ghost" {...actionProps("discardPlan")} onClick={controls.discardPlan}><XIcon data-icon="inline-start" />Discard plan</Button> : null}
+          </div>
+        </>
+      ) : null}
       {flow.phase === "applying" || flow.phase === "checking" ? (
         <>
           {flow.plan ? <StatePlanReview plan={flow.plan} now={now} /> : null}
@@ -229,7 +210,7 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
             <AlertTitle>Result not confirmed</AlertTitle>
             <AlertDescription className="flex flex-col gap-1">
               <span>{flow.error}</span>
-              <span>{receiptOnlyRecovery ? "Inspect the exact resources and read this request’s receipt again. No resend or new plan is offered while the result is unconfirmed." : "The request may not have reached the owner. Read its receipt again, or send exactly the same request again; the owner admits one request ID once. Choosing differently needs a new plan."}</span>
+              <span>{actions.retry.visible ? "The request may not have reached the owner. Read its receipt again, or send exactly the same request again; the owner admits one request ID once. Choosing differently needs a new plan." : "Inspect the exact resources and read this request’s receipt again. No resend or new plan is offered while the result is unconfirmed."}</span>
             </AlertDescription>
           </Alert>
           <div className="flex flex-col rounded-lg border bg-background/60 p-2.5">
@@ -239,22 +220,25 @@ export function StateFlowView({ controls, label, applyLabel = "Apply this plan",
             {Object.entries(flow.input).filter(([name]) => !["requestId", "planId", "expectedRevision"].includes(name)).map(([name, value]) => <Identity key={name} label={name} value={String(value)} />)}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" variant="outline" disabled={!!waiting} title={waiting ?? undefined} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt</Button>
-            {!receiptOnlyRecovery ? <Button size="sm" variant="outline" disabled={!!unavailable} onClick={controls.retry}><RotateCwIcon data-icon="inline-start" />Send identical request</Button> : null}
-            {!receiptOnlyRecovery ? prepareButton("Prepare a new plan", "ghost") : null}
+            {actions.readReceipt.visible ? <Button size="sm" variant="outline" {...actionProps("readReceipt")} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt</Button> : null}
+            {actions.retry.visible ? <Button size="sm" variant="outline" {...actionProps("retry")} onClick={controls.retry}><RotateCwIcon data-icon="inline-start" />Send identical request</Button> : null}
+            {prepareButton("Prepare a new plan", "ghost")}
           </div>
         </>
       ) : null}
       {flow.phase === "receipt" ? (
         <>
           <StateReceiptView receipt={flow.receipt} now={now} />
+          {reading ? <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner />Reading this request’s receipt again…</p> : null}
+          {readError ? <p role="status" className="text-xs text-destructive">{readError} The retained receipt above remains the last confirmed evidence.</p> : null}
           <div className="flex flex-wrap gap-1.5">
-            {flow.receipt.status === "running" || (receiptOnlyRecovery && (flow.receipt.status === "partial" || flow.receipt.status === "unknown")) ? <Button size="sm" variant="outline" disabled={!!waiting} title={waiting ?? undefined} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt again</Button> : null}
-            {flow.receipt.status === "blocked" || (!receiptOnlyRecovery && (flow.receipt.status === "partial" || flow.receipt.status === "unknown")) ? prepareButton("Prepare a new plan", "ghost") : null}
-            {!receiptOnlyRecovery || flow.receipt.status === "completed" || flow.receipt.status === "blocked" ? <Button size="sm" variant="ghost" onClick={controls.reset}>Close receipt</Button> : null}
+            {actions.readReceipt.visible ? <Button size="sm" variant="outline" {...actionProps("readReceipt")} onClick={controls.readReceipt}><RefreshCwIcon data-icon="inline-start" />Read receipt again</Button> : null}
+            {prepareButton("Prepare a new plan", "ghost")}
+            {actions.closeReceipt.visible ? <Button size="sm" variant="ghost" {...actionProps("closeReceipt")} onClick={controls.closeReceipt}>Close receipt</Button> : null}
           </div>
         </>
       ) : null}
+      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

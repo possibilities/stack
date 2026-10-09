@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { localOperations, stateOperations } from "@/lib/stack/state";
+import { localOperations } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import type { RoleLaunch } from "@/lib/stack/types";
 import { usePagedRead } from "./owner-reads";
 import { Time } from "./primitives";
@@ -10,7 +11,7 @@ import { useStack, useStore } from "./provider";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
 import { Section } from "./window";
 
-const operations = ["role_launch_list", "role_launch_plan", "role_launch_clear", "roles_state_receipt_get"];
+const operations = ["role_launch_list", "roles_state_receipt_get"];
 const hint = "text-[0.68rem] text-pretty text-muted-foreground";
 
 export function RoleLaunchDirectories() {
@@ -27,12 +28,12 @@ function LaunchDirectories() {
     .then((page) => ({ items: page.launches, revision: page.revision, nextOffset: page.nextOffset })), "roles:launches", state.roleCatalog.at ?? 0);
   const controls = useStateFlow({
     operations: stateOperations(store.call, "roles", { plan: "role_launch_plan", apply: "role_launch_clear", receipt: "roles_state_receipt_get" }, { ids: selected }),
-    recoveryKey: "roles:launch_clear:ids", observe: state.roleCatalog.at,
-    onReceipt: (receipt) => { pages.refresh(); if (receipt.status === "completed") setSelected([]); },
+    recoveryKey: "roles:launch_clear:ids", policy: "identical-retry", prerequisite: () => unavailable,
+    onReceipt: (receipt, selection) => { pages.refresh(); if (receipt.status === "completed" && selection) setSelected([]); },
   });
   const locked = controls.flow.phase !== "idle";
   const rows = pages.page?.items ?? [];
-  const unavailable = state.status.roles !== "open" ? "The roles connection is not open." : pages.error ? "Refresh the launch directories before preparing."
+  const unavailable = pages.error ? "Refresh the launch directories before preparing."
     : !selected.length ? "Select retained launch directories to clear."
     : selected.some((id) => !rows.some((row) => row.id === id && row.state === "retained")) ? "The selected launches changed; close the flow and review the current selection." : null;
   return <Section title="Launch directories" aside={<Button size="xs" variant="ghost" disabled={pages.loading || state.status.roles !== "open"} onClick={pages.refresh}>Refresh launches</Button>}>
@@ -52,7 +53,7 @@ function LaunchDirectories() {
       </ul>
       {pages.page && !rows.length ? <p className={hint}>No launch directories.</p> : null}
       {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.roles !== "open"} onClick={pages.more}>Load more launches</Button> : null}
-      <StateFlowView controls={controls} label={`Prepare clearing ${selected.length} launch directories`} applyLabel="Clear these launch directories" unavailable={unavailable} />
+      <StateFlowView controls={controls} label={`Prepare clearing ${selected.length} launch directories`} applyLabel="Clear these launch directories" />
     </MaintenanceDisclosure>
   </Section>;
 }

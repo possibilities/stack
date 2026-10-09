@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { localOperation, stateOperations } from "@/lib/stack/state";
+import { localOperation } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import { errorMessage } from "./auth-actions";
 import { Choice, StateFlowView, useStateFlow } from "./state-flow";
 import { Row } from "./primitives";
@@ -71,7 +72,7 @@ export function XcomStateWindow() {
       </Window>
     );
   }
-  const unavailable = !connected ? "The xcom connection is not open." : !data ? "Reading Xcom status…" : !data.paused ? "Pause Xcom first."
+  const unavailable = error ? "Refresh Xcom status before preparing." : !data ? "Reading Xcom status…" : !data.paused ? "Pause Xcom first."
     : data.sync.running ? "Wait for the running sync to finish." : null;
   return (
     <Window id="xcom-state" title="Xcom" subtitle="archive maintenance" icon={ArchiveIcon} accent="server" status={status.xcom} endpoint={endpoints.xcom} error={error} empty={!data}>
@@ -106,10 +107,11 @@ export function XcomStateWindow() {
   );
 }
 
-function useXcomFlow(selection: Record<string, unknown>, slot: string, onDone: (completed: boolean) => void) {
+function useXcomFlow(selection: Record<string, unknown>, slot: string, prerequisite: string | null, onDone: (completed: boolean) => void) {
   const store = useStore();
   return useStateFlow({ operations: stateOperations(store.call, "xcom", { plan: "xcom_history_plan", apply: "xcom_history_clear", receipt: "xcom_state_receipt_get" }, selection),
-    recoveryKey: `xcom:${slot}`, onReceipt: (receipt) => onDone(receipt.status === "completed") });
+    recoveryKey: `xcom:${slot}`, policy: "identical-retry", prerequisite,
+    onReceipt: (receipt, captured) => onDone(receipt.status === "completed" && captured !== null) });
 }
 
 function useRows<T>(operation: string, generation: number) {
@@ -127,7 +129,9 @@ function PostsClear({ unavailable, generation, onDone }: { unavailable: string |
   const [ids, setIds] = useState<string[]>([]);
   const [reimport, setReimport] = useState<"allow" | "suppress" | null>(null);
   const [authors, setAuthors] = useState<"retain" | "remove" | null>(null);
-  const flow = useXcomFlow({ kind: "posts", ids, reimport: reimport ?? "allow", orphanAuthors: authors ?? "retain" }, "posts", (completed) => { onDone(); if (completed) setIds([]); void load(0); });
+  const flow = useXcomFlow({ kind: "posts", ids, reimport: reimport ?? "allow", orphanAuthors: authors ?? "retain" }, "posts",
+    unavailable ?? (!ids.length ? "Select posts first." : !reimport || !authors ? "Choose reimport and author handling." : null),
+    (completed) => { onDone(); if (completed) setIds([]); void load(0); });
   const locked = flow.flow.phase !== "idle";
   return (
     <div className="flex flex-col gap-1.5">
@@ -150,8 +154,7 @@ function PostsClear({ unavailable, generation, onDone }: { unavailable: string |
         options={[["allow", "Archive them again"], ["suppress", "Keep them out of the archive"]]} />
       <Choice<"retain" | "remove"> label="Authors left with no posts" value={authors} disabled={locked} onChange={setAuthors}
         options={[["retain", "Keep their records"], ["remove", "Remove them"]]} />
-      <StateFlowView controls={flow} label={`Prepare removing ${ids.length} post${ids.length === 1 ? "" : "s"}`} applyLabel="Remove these posts"
-        unavailable={unavailable ?? (!ids.length ? "Select posts first." : !reimport || !authors ? "Choose reimport and author handling." : null)} />
+      <StateFlowView controls={flow} label={`Prepare removing ${ids.length} post${ids.length === 1 ? "" : "s"}`} applyLabel="Remove these posts" />
     </div>
   );
 }
@@ -159,7 +162,8 @@ function PostsClear({ unavailable, generation, onDone }: { unavailable: string |
 function ArticlesClear({ unavailable, generation, onDone }: { unavailable: string | null; generation: number; onDone(): void }) {
   const { rows, error, load } = useRows<Article>("xcom_articles_pending", generation);
   const [ids, setIds] = useState<string[]>([]);
-  const flow = useXcomFlow({ kind: "article_attempts", ids }, "article_attempts", (completed) => { onDone(); if (completed) setIds([]); void load(0); });
+  const flow = useXcomFlow({ kind: "article_attempts", ids }, "article_attempts", unavailable ?? (!ids.length ? "Select articles first." : null),
+    (completed) => { onDone(); if (completed) setIds([]); void load(0); });
   const locked = flow.flow.phase !== "idle";
   return (
     <div className="flex flex-col gap-1.5">
@@ -179,20 +183,19 @@ function ArticlesClear({ unavailable, generation, onDone }: { unavailable: strin
       </ul>
       {rows && !rows.items.length ? <p className={hint}>No unfetched articles.</p> : null}
       {rows?.next != null ? <Button size="xs" variant="ghost" className="self-start" onClick={() => void load(rows.next!)}>Load more</Button> : null}
-      <StateFlowView controls={flow} label={`Prepare clearing ${ids.length} attempt record${ids.length === 1 ? "" : "s"}`} applyLabel="Clear these attempts"
-        unavailable={unavailable ?? (!ids.length ? "Select articles first." : null)} />
+      <StateFlowView controls={flow} label={`Prepare clearing ${ids.length} attempt record${ids.length === 1 ? "" : "s"}`} applyLabel="Clear these attempts" />
     </div>
   );
 }
 
 function CheckpointClear({ unavailable, onDone }: { unavailable: string | null; onDone(): void }) {
   const [scan, setScan] = useState<"head" | "backfill" | null>(null);
-  const flow = useXcomFlow({ kind: "checkpoint", scan: scan ?? "head" }, "checkpoint", () => onDone());
+  const flow = useXcomFlow({ kind: "checkpoint", scan: scan ?? "head" }, "checkpoint", unavailable ?? (!scan ? "Choose a scan." : null), () => onDone());
   return (
     <div className="flex flex-col gap-1.5">
       <p className={hint}>Resets where one scan resumes. After you resume Xcom, that scan starts over and may fetch and spend again. Archived posts are unchanged.</p>
       <Choice<"head" | "backfill"> label="Scan" value={scan} disabled={flow.flow.phase !== "idle"} onChange={setScan} options={[["head", "Newest-first (head)"], ["backfill", "Backfill"]]} />
-      <StateFlowView controls={flow} label="Prepare checkpoint reset" applyLabel="Reset this checkpoint" unavailable={unavailable ?? (!scan ? "Choose a scan." : null)} />
+      <StateFlowView controls={flow} label="Prepare checkpoint reset" applyLabel="Reset this checkpoint" />
     </div>
   );
 }

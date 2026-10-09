@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { accountLabels, providerTitle, shortId, workerAccountLabels } from "@/lib/stack/derive";
-import { localOperation, stateOperations } from "@/lib/stack/state";
+import { localOperation } from "@/lib/stack/state";
+import { stateOperations } from "@/lib/stack/maintenance";
 import { StateFlowView, useStateFlow } from "./state-flow";
 import { useStack, useStore } from "./provider";
 import { Section } from "./window";
@@ -19,14 +20,14 @@ const same = (a: Choice, b: Choice) => a.id === b.id && a.scope === b.scope;
 export function UsageClearSection() {
   const state = useStack();
   const store = useStore();
-  const { usage, accounts, workerAccounts, remote, status } = state;
+  const { usage, accounts, workerAccounts, remote } = state;
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<Choice[]>([]);
   const controls = useStateFlow({
     operations: stateOperations(store.call, "usage", { plan: "usage_observations_plan", apply: "usage_observations_clear", receipt: "usage_state_receipt_get" }, { accounts: chosen }),
-    recoveryKey: "usage:observations",
+    recoveryKey: "usage:observations", policy: "identical-retry", prerequisite: !chosen.length ? "Select at least one observation." : null,
   });
-  const access = localOperation(state, "usage", "usage_observations_plan");
+  const access = localOperation(state, "usage", "usage_state_receipt_get");
   if (remote || !access.available || !usage.data) return null;
   const locked = controls.flow.phase !== "idle";
   const botLabels = accountLabels(accounts.data), workerLabels = workerAccountLabels(workerAccounts.data);
@@ -52,8 +53,7 @@ export function UsageClearSection() {
           );
         })}
       </ul>
-      <StateFlowView controls={controls} label="Prepare measurement clear" applyLabel="Clear these measurements"
-        unavailable={status.usage !== "open" ? "The usage connection is not open." : !chosen.length ? "Select at least one observation." : null} />
+      <StateFlowView controls={controls} label="Prepare measurement clear" applyLabel="Clear these measurements" />
       {!locked ? <Button size="xs" variant="ghost" className="self-start" onClick={() => { setOpen(false); setChosen([]); }}>Cancel</Button> : null}
     </Section>
   );

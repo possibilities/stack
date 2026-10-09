@@ -824,6 +824,22 @@ try {
   await pendingRequests.waitFor({ state: "detached" });
   assert.equal(await page.evaluate((key) => localStorage.getItem(key), slot), null, "forgetting drops the saved request");
   assert.equal((await call("github_state_receipt_get", { requestId: unknownInput.requestId })).receipt.status, "unknown", "the owner's receipt is untouched");
+  const blockedPlan = await call("github_history_plan", { sequences: [11] });
+  const blockedInput = { planId: blockedPlan.id, expectedRevision: blockedPlan.revision, requestId: randomUUID() };
+  journal.begin(blockedInput, blockedPlan);
+  journal.finish(blockedInput.requestId, "blocked", []);
+  const blockedSlot = destinationKey(origin, `state-flow.source:history:${fnv("11")}`);
+  await page.evaluate(([key, input]) => localStorage.setItem(key, JSON.stringify({ input, at: Date.now() })), [blockedSlot, blockedInput]);
+  const plansBeforeRecovery = watchCalls("github_history_plan").length;
+  await page.reload();
+  await pendingRequests.getByRole("region", { name: "source receipt blocked" }).waitFor();
+  assert.equal(await pendingRequests.getByRole("button", { name: /Prepare|Send identical|Clear original payloads/ }).count(), 0,
+    "a blocked old-selection receipt cannot offer a new empty-selection plan");
+  await activate(pendingRequests.getByRole("button", { name: "Forget this request" }));
+  await pendingRequests.waitFor({ state: "detached" });
+  assert.equal(watchCalls("github_history_plan").length, plansBeforeRecovery);
+  assert.equal(watchCalls("github_history_clear").length, clearsBefore);
+  assert.equal((await call("github_state_receipt_get", { requestId: blockedInput.requestId })).receipt.status, "blocked");
   journal.close(); db.close();
   await page.goto(`${origin}/source`);
   await watchesWindow.getByRole("button", { name: "Open inbox" }).first().waitFor();
