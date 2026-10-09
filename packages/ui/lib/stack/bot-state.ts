@@ -39,7 +39,6 @@ export function botStateKey(incarnation: string, action: BotStateAction): string
   return `bots:${incarnation}:${action.kind}${detail}`;
 }
 
-export { firstPage, nextPage, type Page, type PageRead } from "./state";
 
 /** Optional stores answer `revision: "absent"` when never created: empty, not unavailable. */
 export const absentStore = (page: { revision: string }) => page.revision === "absent";

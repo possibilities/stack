@@ -55,11 +55,11 @@ export function ReadError({ error, what }: { error: string | null; what: string 
   return error ? <p role="status" className="text-xs text-destructive">{what} unavailable: {error}</p> : null;
 }
 
-export function MoreButton({ nextOffset, loading, onMore, restarted }: { nextOffset: number | null; loading: boolean; onMore(): void; restarted: boolean }) {
+export function MoreButton({ nextOffset, loading, canMore, onMore, restarted }: { nextOffset: number | null; loading: boolean; canMore: boolean; onMore(): void; restarted: boolean }) {
   return (
     <>
       {restarted ? <p role="status" className="text-xs text-warning">This listing changed while paging, so it started again from the first page.</p> : null}
-      {nextOffset !== null ? <Button size="xs" variant="ghost" className="self-start text-muted-foreground" disabled={loading} onClick={onMore}>Load more (from {nextOffset})</Button> : null}
+      {nextOffset !== null ? <Button size="xs" variant="ghost" className="self-start text-muted-foreground" disabled={loading || !canMore} onClick={onMore}>Load more (from {nextOffset})</Button> : null}
     </>
   );
 }

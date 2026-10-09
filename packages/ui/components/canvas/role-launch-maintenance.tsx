@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { localOperations, stateOperations } from "@/lib/stack/state";
 import type { RoleLaunch } from "@/lib/stack/types";
-import { usePagedRead } from "./owner-reads";
+import { ObservationStatus, usePagedRead } from "./owner-reads";
 import { Time } from "./primitives";
 import { useStack, useStore } from "./provider";
 import { MaintenanceDisclosure, StateFlowView, useStateFlow } from "./state-flow";
@@ -24,7 +24,7 @@ function LaunchDirectories() {
   const store = useStore();
   const [selected, setSelected] = useState<string[]>([]);
   const pages = usePagedRead<RoleLaunch>((offset, revision) => store.call<{ launches: RoleLaunch[]; revision: string; nextOffset: number | null }>("roles", "role_launch_list", { offset, limit: 100, ...(revision ? { revision } : {}) })
-    .then((page) => ({ items: page.launches, revision: page.revision, nextOffset: page.nextOffset })), "roles:launches", state.roleCatalog.at ?? 0);
+    .then((page) => ({ ...page, items: page.launches })), "roles:launches:100", state.roleCatalog.at ?? 0, { pkg: "roles", operation: "role_launch_list" });
   const controls = useStateFlow({
     operations: stateOperations(store.call, "roles", { plan: "role_launch_plan", apply: "role_launch_clear", receipt: "roles_state_receipt_get" }, { ids: selected }),
     recoveryKey: "roles:launch_clear:ids", observe: state.roleCatalog.at,
@@ -32,12 +32,13 @@ function LaunchDirectories() {
   });
   const locked = controls.flow.phase !== "idle";
   const rows = pages.page?.items ?? [];
-  const unavailable = state.status.roles !== "open" ? "The roles connection is not open." : pages.error ? "Refresh the launch directories before preparing."
+  const unavailable = state.status.roles !== "open" ? "The roles connection is not open." : pages.error || pages.stale || pages.loading ? "Refresh the launch directories before preparing."
     : !selected.length ? "Select retained launch directories to clear."
     : selected.some((id) => !rows.some((row) => row.id === id && row.state === "retained")) ? "The selected launches changed; close the flow and review the current selection." : null;
   return <Section title="Launch directories" aside={<Button size="xs" variant="ghost" disabled={pages.loading || state.status.roles !== "open"} onClick={pages.refresh}>Refresh launches</Button>}>
     <p className={hint}>Metadata for Role injections. Refresh explicitly for file and process changes. Live launches and unknown or missing-lock directories block clearing; no native process is stopped.</p>
     {pages.error ? <p role="alert" className="text-xs text-destructive">Launch directories unavailable: {pages.error}</p> : null}
+    <ObservationStatus read={pages} />
     {pages.page?.restarted ? <p className={hint}>The observation changed while paging; showing the first page again.</p> : null}
     <MaintenanceDisclosure active={locked} aside="retained launches">
       <p className={hint}>Clears exact exited launch directories only. External native history and credentials, Bot and Worker materializations, Role configuration, shims and backups remain. Unknown or partial receipts are not rerun.</p>
@@ -51,7 +52,7 @@ function LaunchDirectories() {
         </li>)}
       </ul>
       {pages.page && !rows.length ? <p className={hint}>No launch directories.</p> : null}
-      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={pages.loading || locked || state.status.roles !== "open"} onClick={pages.more}>Load more launches</Button> : null}
+      {pages.page?.nextOffset != null ? <Button size="xs" variant="ghost" disabled={!pages.canMore || locked} onClick={pages.more}>Load more launches</Button> : null}
       <StateFlowView controls={controls} label={`Prepare clearing ${selected.length} launch directories`} applyLabel="Clear these launch directories" unavailable={unavailable} />
     </MaintenanceDisclosure>
   </Section>;

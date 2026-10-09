@@ -89,6 +89,8 @@ const receipts = [
 ];
 let historyRevision = 1, historyUnavailable = false;
 const historyCalls = [];
+const detailCalls = [];
+let occurrenceGate = null;
 
 // Typed occurrence subscriptions: one Bot Chat target, one Worker target, receipts across every delivery state.
 const delivery = (id, eventId, state, boundary, error = null) => ({ id, eventId, state, boundary, error });
@@ -182,6 +184,7 @@ const handlers = {
     return { completions: rows.slice(args.offset, args.offset + args.limit), revision, total: rows.length, nextOffset, truncated: nextOffset !== null };
   },
   serve_completion_get({ id }) {
+    detailCalls.push(id);
     const found = receipts.find((row) => row.id === id) ?? null;
     if (!found) return { receipt: null, link: null, linkStatus: "not_found" };
     if (id === workerReceipt.id) return { receipt: found, link: { kind: "worker", requestId: found.recordId, workerId, turnId: turnOld }, linkStatus: "resolved" };
@@ -196,8 +199,11 @@ const handlers = {
     if (args.revision && args.revision !== revision) throw new Error("occurrence inventory changed; restart paging");
     return { subscriptions: rows.slice(args.offset, args.offset + args.limit), revision, nextOffset: args.offset + args.limit < rows.length ? args.offset + args.limit : null };
   },
-  serve_occurrence_get({ id }) {
-    return { subscription: occurrences.find((row) => row.id === id) ?? null };
+  async serve_occurrence_get({ id }) {
+    const subscription = structuredClone(occurrences.find((row) => row.id === id) ?? null);
+    const gate = occurrenceGate;
+    if (gate) { gate.admitted.resolve(); await gate.promise; }
+    return { subscription };
   },
   worker_list: () => ({ workers: [{ ...worker, turn: turnSummary(turns.at(-1)), pendingPermissions: 0 }] }),
   worker_runtime_list: () => ({ runtimes: [] }),
@@ -385,6 +391,16 @@ try {
   assert.deepEqual(historyCalls.at(-1), { offset: 0, limit: 100 }, "the first page passes no filters and the contract's largest page");
   await shot("subscriptions-history", subs);
 
+  // A failed same-query refresh keeps the prefix explicitly stale and disables continuation.
+  historyUnavailable = true;
+  await subs.getByRole("button", { name: "Refresh subscriptions" }).click();
+  await subs.getByText(/Showing stale evidence/).waitFor();
+  await subs.getByText(/Showing 100 of 105 retained receipts/).waitFor();
+  assert.equal(await subs.getByRole("button", { name: /Load more/ }).isDisabled(), true);
+  historyUnavailable = false;
+  await subs.getByRole("button", { name: "Refresh subscriptions" }).click();
+  await subs.getByText(/Showing stale evidence/).waitFor({ state: "detached" });
+
   // A changed observation mid-paging restarts instead of mixing revisions; the next page then lands.
   historyRevision = 2;
   await subs.getByRole("button", { name: /Load more \(from 100\)/ }).click();
@@ -425,6 +441,24 @@ try {
   await completionRow(unsupportedReceipt.id).getByRole("button", { name: "Details" }).click();
   await completionRow(unsupportedReceipt.id).getByText("Linking not supported", { exact: false }).waitFor();
 
+  // Activity hides release view demand but preserve the open detail and its evidence. Returning
+  // reads both the first history page and each still-open keyed detail again.
+  const switchSpace = async (name) => {
+    await page.getByRole("button", { name: /^Spaces/ }).click();
+    await page.getByRole("menuitem", { name: new RegExp(`^${name}`) }).click();
+    await page.locator(`[data-space="${name.toLowerCase()}"]`).waitFor({ state: "visible" });
+  };
+  await switchSpace("Fleet");
+  const pausedHistory = historyCalls.length, pausedDetails = detailCalls.length;
+  serveSock.publish("serve_subscriptions_changed");
+  await wait(100);
+  assert.equal(historyCalls.length, pausedHistory, "passive Store history projection is not demand");
+  assert.equal(detailCalls.length, pausedDetails, "hidden detail stops reading");
+  await switchSpace("System");
+  await completionRow(workerReceipt.id).getByRole("button", { name: "Hide details" }).waitFor();
+  for (let i = 0; i < 100 && (historyCalls.length === pausedHistory || detailCalls.length === pausedDetails); i++) await wait(20);
+  assert.ok(historyCalls.length > pausedHistory && detailCalls.length > pausedDetails, "reactivation is reversible for Store and hook observations");
+
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("subscriptions-history-dark", subs);
   await page.emulateMedia({ colorScheme: "light" });
@@ -460,6 +494,17 @@ try {
   await occurrenceRow(workerOccurrence).getByText("Source arguments", { exact: false }).waitFor({ state: "detached" });
   assert.equal(await subs.getByText("fixture-args-marker-worker", { exact: false }).count(), 0, "dropped on revision change");
   await occurrenceRow(botOccurrence).getByText("fixture-args-bot", { exact: false }).waitFor();
+
+  // A late sensitive reply cannot reopen an inspection whose row intent changed while reading.
+  occurrenceGate = { ...Promise.withResolvers(), admitted: Promise.withResolvers() };
+  await occurrenceRow(workerOccurrence).getByRole("button", { name: "Inspect…" }).click();
+  await occurrenceGate.admitted.promise;
+  occurrences.find((row) => row.id === workerOccurrence).revision = "o3";
+  serveSock.publish("serve_subscriptions_changed");
+  await occurrenceRow(workerOccurrence).getByRole("button", { name: "Inspect…" }).waitFor();
+  occurrenceGate.resolve(); occurrenceGate = null;
+  await wait(100);
+  assert.equal(await occurrenceRow(workerOccurrence).getByText("fixture-args-marker-worker", { exact: false }).count(), 0);
 
   // Removal at the exact intent revision; a stale choice is refused and re-chosen at the current one.
   await occurrenceRow(botOccurrence).getByRole("button", { name: "Remove…" }).click();

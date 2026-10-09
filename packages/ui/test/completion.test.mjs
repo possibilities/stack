@@ -17,7 +17,7 @@ registerHooks({
 const { brainSourcesView, brainSubmissionView, browseReportText, completionDelivery, completionDiagnostic, completionLinkStatusLabels, completionReceiptLabels, completionTargets,
   completionUncertainty, completionWatch, completionWatchLabels, noBotWatch, occurrenceDeliveryLabel, occurrencePolicyLabel, procExitLabels, procExitParts,
   receiptQuery, workerEventFence, workerEventReceiptLabels, workerObservationPhaseLabels } = await import("../lib/stack/completion.ts");
-const { continueCompletions, continueOccurrences, loadCompletions, loadOccurrences } = await import("../lib/stack/state.ts");
+const { completionsObservation, occurrencesObservation } = await import("../lib/stack/state.ts");
 
 const receipt = (extra = {}) => ({ id: "00000000-0000-4000-8000-0000000000c1", botId: "alpha", threadId: "thread-1", pkg: "notify", operation: "notification_send",
   recordId: "00000000-0000-4000-8000-0000000000d1", state: "pending", lastDeliveredAt: null, lastDeliveryKind: null, lastError: null,
@@ -110,21 +110,29 @@ test("completion paging passes exact filters, appends pages and restarts on a ch
     if (args.revision && args.revision !== revision) throw new Error("completion observation changed; restart paging");
     return { completions: [{ id: `receipt-${args.offset}` }], revision, total: 3, nextOffset: args.offset === 0 ? 1 : null, truncated: true };
   };
-  const first = await loadCompletions(call, { botId: "alpha", package: "", state: "unknown" });
+  const read = completionsObservation(call);
+  read.setQuery({ botId: "alpha", package: "", state: "unknown" });
+  const release = read.activate();
+  await read.refresh();
   assert.deepEqual(calls[0], ["serve_completion_list", { botId: "alpha", state: "unknown", offset: 0, limit: 100 }], "empty filters are omitted rather than matched literally");
-  const all = await continueCompletions(call, first);
+  await read.more();
+  const all = read.getSnapshot().evidence.value;
   assert.deepEqual(calls[1][1], { botId: "alpha", state: "unknown", offset: 1, limit: 100, revision: "c1" });
   assert.deepEqual(all.completions.map((row) => row.id), ["receipt-0", "receipt-1"]);
   assert.equal(all.total, 3);
   assert.equal(all.truncated, true);
   assert.equal(all.restarted, false);
-  assert.equal(await continueCompletions(call, all), all, "a complete history is not re-read");
+  await read.more();
+  assert.equal(read.getSnapshot().evidence.value, all, "a complete history is not re-read");
 
+  await read.refresh();
   revision = "c2";
-  const restarted = await continueCompletions(call, first);
+  await read.more();
+  const restarted = read.getSnapshot().evidence.value;
   assert.equal(restarted.restarted, true);
   assert.deepEqual(restarted.completions.map((row) => row.id), ["receipt-0"]);
   assert.equal(calls.at(-1)[1].offset, 0, "a changed observation pages again from the first page");
+  release();
 });
 
 test("receiptQuery builds exact-record arguments and omits empty values", () => {
@@ -206,15 +214,22 @@ test("occurrence paging passes exact filters and restarts on a changed inventory
     if (args.revision && args.revision !== revision) throw new Error("occurrence inventory changed; restart paging");
     return { subscriptions: [{ id: `occ-${args.offset}` }], revision, nextOffset: args.offset === 0 ? 1 : null };
   };
-  const first = await loadOccurrences(call, { botId: "alpha", package: "xcom" });
+  const read = occurrencesObservation(call);
+  read.setQuery({ botId: "alpha", package: "xcom" });
+  const release = read.activate();
+  await read.refresh();
   assert.deepEqual(calls[0], ["serve_occurrence_list", { botId: "alpha", package: "xcom", offset: 0, limit: 100 }]);
-  const all = await continueOccurrences(call, first);
+  await read.more();
+  const all = read.getSnapshot().evidence.value;
   assert.deepEqual(all.subscriptions.map((row) => row.id), ["occ-0", "occ-1"]);
   assert.equal(all.restarted, false);
 
+  await read.refresh();
   revision = "o2";
-  const restarted = await continueOccurrences(call, first);
+  await read.more();
+  const restarted = read.getSnapshot().evidence.value;
   assert.equal(restarted.restarted, true);
+  release();
   assert.deepEqual(restarted.subscriptions.map((row) => row.id), ["occ-0"]);
   assert.equal(calls.at(-1)[1].offset, 0);
 });

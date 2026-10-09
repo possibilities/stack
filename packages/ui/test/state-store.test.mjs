@@ -19,8 +19,9 @@ registerHooks({
 
 const { StackStore } = await import("../lib/stack/store.ts");
 const empty = { data: null, error: null, at: null };
+const serveCatalog = { data: [{ name: "serve", transports: [{ type: "websocket", operations: ["serve_state_list", "serve_subscription_list", "serve_completion_list", "serve_occurrence_list"] }] }], error: null, at: 1 };
 const snapshot = (endpoints, extra = {}) => ({ server: empty, resources: empty, accounts: empty, workerAccounts: empty, workerRuntimes: empty, workerSessions: empty,
-  usage: empty, login: empty, workerLogins: empty, bots: empty, botDefaults: empty, voice: empty, roleCatalog: empty, catalog: empty, endpoints, ...extra });
+  usage: empty, login: empty, workerLogins: empty, bots: empty, botDefaults: empty, voice: empty, roleCatalog: empty, catalog: serveCatalog, endpoints, ...extra });
 
 async function until(store, condition, label = "store update") {
   if (condition(store.getState())) return;
@@ -212,6 +213,39 @@ test("completion history and occurrence subscriptions stay unread until watched,
     await until(store, (state) => state.completions.data?.completions.length === 2 && state.occurrences.data?.subscriptions.length === 2, "serve_subscriptions_changed");
     assert.equal(store.getState().completionGeneration, receiptGeneration + 1, "the notice bumps the generation mounted watch views re-read on");
 
+    // Real gateway notices during a held read owe exactly one fresh read. They must not be
+    // wired as ordinary refresh commands, which would coalesce away the invalidation.
+    const liveCall = store.call, replies = [], firstAdmitted = Promise.withResolvers(), followAdmitted = Promise.withResolvers();
+    store.call = async (pkg, name, args) => {
+      const value = await liveCall(pkg, name, args);
+      if (name === "serve_completion_list") {
+        const gate = Promise.withResolvers();
+        replies.push(gate);
+        (replies.length === 1 ? firstAdmitted : followAdmitted).resolve();
+        await gate.promise;
+      }
+      return value;
+    };
+    const retainedBeforeBurst = store.getState().completions.data;
+    const burstRead = store.refreshCompletions();
+    await firstAdmitted.promise;
+    const beforeBurst = store.getState().completionGeneration;
+    socket.publish("serve_subscriptions_changed");
+    socket.publish("serve_subscriptions_changed");
+    socket.publish("serve_subscriptions_changed");
+    await until(store, (state) => state.completionGeneration === beforeBurst + 3, "invalidation burst received");
+    assert.equal(replies.length, 1, "a burst does not dispatch overlapping first-page reads");
+    replies[0].resolve();
+    await followAdmitted.promise;
+    assert.equal(store.getState().completions.data, retainedBeforeBurst, "the invalidated reply cannot become evidence");
+    assert.equal(store.getState().completions.stale, true);
+    assert.equal(store.getState().completions.pending, "refresh");
+    replies[1].resolve();
+    await burstRead;
+    assert.equal(replies.length, 2, "one fresh follow-up satisfies the entire burst");
+    assert.equal(store.getState().completions.stale, false);
+    store.call = liveCall;
+
     // A domain view's history request points the window filter at one Bot and marks each request.
     assert.equal(store.getState().historyRequest, null);
     const historyReads = historyCalls.length;
@@ -246,6 +280,48 @@ test("completion history and occurrence subscriptions stay unread until watched,
     assert.equal(historyCalls.length, settled.history, "unwatched history is not re-read");
     assert.equal(occurrenceCalls.length, settled.occurrences, "unwatched occurrences are not re-read");
     assert.equal(store.getState().completions.data?.filter.state, "unknown", "unwatching keeps the held data");
+
+    // A passive projection is not demand. A last release fences outstanding data and errors,
+    // and inactive A→B→A does not revive the first A's pending generation.
+    const call = store.call, deferred = Promise.withResolvers(), admitted = Promise.withResolvers();
+    store.call = async (pkg, name, args) => {
+      if (name === "serve_completion_list") { admitted.resolve(); return deferred.promise; }
+      return call(pkg, name, args);
+    };
+    const leave = store.watchCompletions();
+    await admitted.promise;
+    leave();
+    await store.filterCompletions({ package: "brain" });
+    await store.filterCompletions({ state: "unknown" });
+    deferred.resolve({ completions: [completionRow("obsolete")], revision: "old", total: 1, nextOffset: null, truncated: false });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(store.getState().completions.data, null);
+    assert.equal(store.getState().completions.pending, null);
+    store.call = call;
+    const resume = store.watchCompletions();
+    await until(store, (state) => state.completions.data !== null && !state.completions.stale, "Activity return refresh");
+    assert.deepEqual(store.getState().completions.data.completions, []);
+
+    // A stopped Store fences all four resources. Restart retains the view's demand but
+    // observes the new connection rather than accepting the old transport's late answer.
+    const stopped = Promise.withResolvers(), started = Promise.withResolvers();
+    store.call = async (pkg, name, args) => {
+      if (name === "serve_completion_list") { started.resolve(); return stopped.promise; }
+      return call(pkg, name, args);
+    };
+    const pendingRead = store.refreshCompletions();
+    await started.promise;
+    store.stop();
+    const retained = store.getState().completions.data;
+    assert.equal(store.getState().completions.stale, true);
+    assert.equal(store.getState().completions.pending, null);
+    stopped.reject(new Error("closed old transport")); await pendingRead;
+    assert.equal(store.getState().completions.data, retained);
+    assert.equal(store.getState().completions.error, null);
+    store.call = call;
+    store.start({ packages: ["serve"], scopedBots: false });
+    await until(store, (state) => state.completions.data !== retained && !state.completions.stale, "Store restart observes held demand");
+    resume();
   } finally {
     store.stop();
     globalThis.fetch = originalFetch;

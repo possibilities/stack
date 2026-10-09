@@ -21,6 +21,7 @@ import { useNow, useStack, useStore, useWorkbench } from "./provider";
 import { MaintenanceDisclosure } from "./state-flow";
 import { BotSubscriptionFilter, HistoryView, OccurrencesView, PackageSubscriptionFilter } from "./subscription-views";
 import { Window } from "./window";
+import { ObservationStatus, useRevealedRead } from "./owner-reads";
 
 const hintClass = "text-[0.72rem] text-pretty text-muted-foreground";
 
@@ -262,7 +263,7 @@ export function StateInventoryWindow() {
   const store = useStore();
   const { stateInventory, stateSelection, status, endpoints, catalog, remote } = state;
   const [kind, setKind] = useState<StateEntry["kind"] | "">("");
-  const [loading, setLoading] = useState(false);
+  const loading = stateInventory.pending !== null;
   if (remote) return <LocalOnly id="state" title="State" icon={DatabaseIcon} what="Owner state inventories are local operator reads. Remote sessions cannot list or change them." />;
   const access = localOperation(state, "serve", "serve_state_list");
   const data = stateInventory.data;
@@ -270,7 +271,7 @@ export function StateInventoryWindow() {
   const owners = [...new Set([...(data?.owners ?? []).map((owner) => owner.package), ...(catalog.data ?? []).map((doc) => doc.name)])].sort();
   const groups = data ? groupByOwner(data).map((group) => ({ ...group, entries: kind ? group.entries.filter((entry) => entry.kind === kind) : group.entries })) : [];
   const unavailable = data?.owners.filter((owner) => !owner.available) ?? [];
-  const run = (work: Promise<void>) => { setLoading(true); void work.finally(() => setLoading(false)); };
+  const run = (work: Promise<void>) => { void work; };
   return (
     <Window id="state" title="State" subtitle="owner inventories" icon={DatabaseIcon} accent="server" count={data?.entries.length ?? null}
       status={status.serve} endpoint={endpoints.serve} updatedAt={stateInventory.at} error={stateInventory.error} empty={!data}
@@ -278,7 +279,7 @@ export function StateInventoryWindow() {
         {loading ? <Spinner /> : <RefreshCwIcon />}
       </Button>}
       footer={data?.nextOffset != null ? (
-        <Button size="sm" variant="ghost" className="w-full justify-center text-muted-foreground hover:text-foreground" disabled={loading} onClick={() => run(store.moreStateInventory())}>
+        <Button size="sm" variant="ghost" className="w-full justify-center text-muted-foreground hover:text-foreground" disabled={!stateInventory.canMore} onClick={() => run(store.moreStateInventory())}>
           Load more (from {data.nextOffset})
         </Button>
       ) : undefined}>
@@ -299,6 +300,7 @@ export function StateInventoryWindow() {
           </label>
         </div>
         {!access.available ? <p className={hintClass}>{access.reason}</p> : null}
+        <ObservationStatus read={stateInventory} />
         {data?.restarted ? <p role="status" className="text-xs text-warning">The inventory changed while paging, so paging started again from the first page.</p> : null}
         {data ? (
           <>
@@ -319,21 +321,18 @@ export function StateInventoryWindow() {
 
 const subscriptionTone: Record<ServeSubscription["state"], Tone> = { active: "success", delivering: "info", connecting: "muted", error: "destructive" };
 
-function SubscriptionRow({ subscription, onRemove, available }: { subscription: ServeSubscription; onRemove(subscription: ServeSubscription): void; available: boolean }) {
+function SubscriptionRow({ subscription, onRemove, available, canInspect }: { subscription: ServeSubscription; onRemove(subscription: ServeSubscription): void; available: boolean; canInspect: boolean }) {
   const store = useStore();
   const { bots } = useStack();
   const now = useNow(30_000);
-  const [detail, setDetail] = useState<{ revision: string; value: ServeSubscriptionDetail | null } | null>(null);
-  const [reading, setReading] = useState(false);
   const node = { kind: "subscription", id: subscription.id } as const;
-  // Revealed arguments belong to the revision they were read at; a changed subscription hides them.
-  const shown = detail && detail.revision === subscription.revision ? detail : null;
-  const reveal = () => {
-    setReading(true);
-    store.call<{ subscription: ServeSubscriptionDetail | null }>("serve", "serve_subscription_get", { id: subscription.id })
-      .then(({ subscription: value }) => setDetail({ revision: value?.revision ?? subscription.revision, value }), (error) => toast.error(errorMessage(error)))
-      .finally(() => setReading(false));
-  };
+  const detail = useRevealedRead(async () => {
+    const { subscription: value } = await store.call<{ subscription: ServeSubscriptionDetail | null }>("serve", "serve_subscription_get", { id: subscription.id });
+    if (value && value.revision !== subscription.revision) throw new Error("This subscription changed. Reveal the current row again.");
+    return value;
+  }, JSON.stringify([subscription.id, subscription.revision]), `${subscription.state}:${subscription.lastDeliveredAt}`, { pkg: "serve", operation: "serve_subscription_get" });
+  const shown = detail.shown ? { value: detail.data } : null;
+  const reading = detail.loading;
   const knownBot = bots.data?.some((bot) => bot.id === subscription.botId);
   return (
     <NodeCard node={node} variant="row" label={`subscription ${subscription.id}`} className="flex flex-col">
@@ -350,7 +349,7 @@ function SubscriptionRow({ subscription, onRemove, available }: { subscription: 
         <span>{subscription.lastDeliveredAt ? `delivered ${relativeTime(subscription.lastDeliveredAt, now)}` : "never delivered"}</span>
       </div>
       <div className="flex items-center gap-1 pl-2.5">
-        <Button size="xs" variant="ghost" disabled={reading || !available} onClick={() => shown ? setDetail(null) : reveal()} aria-expanded={!!shown}>
+        <Button size="xs" variant="ghost" disabled={reading || !canInspect} onClick={() => shown ? detail.hide() : detail.reveal()} aria-expanded={!!shown}>
           {reading ? <Spinner /> : shown ? <EyeOffIcon /> : <EyeIcon />}{shown ? "Hide arguments" : "Reveal arguments"}
         </Button>
         <Button size="xs" variant="ghost" className="text-destructive hover:text-destructive" disabled={!available} onClick={() => onRemove(subscription)}>
@@ -360,6 +359,8 @@ function SubscriptionRow({ subscription, onRemove, available }: { subscription: 
       </div>
       {shown ? (
         <div className="ml-3.5 flex flex-col gap-1 rounded-md border border-dashed bg-background/60 p-2 text-xs">
+          <ObservationStatus read={detail} />
+          {detail.error ? <p className="text-destructive">Inspection unavailable: {detail.error}</p> : null}
           {shown.value ? (
             <>
               <span className="text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase">Read arguments · may be sensitive</span>
@@ -367,7 +368,7 @@ function SubscriptionRow({ subscription, onRemove, available }: { subscription: 
               <span className="text-[0.66rem] font-medium tracking-[0.06em] text-muted-foreground uppercase">Last error</span>
               <p className={shown.value.lastError ? "break-words text-destructive" : "text-muted-foreground"}>{shown.value.lastError ?? "None recorded"}</p>
             </>
-          ) : <p className="text-muted-foreground">This subscription no longer exists.</p>}
+          ) : detail.hasRead ? <p className="text-muted-foreground">This subscription no longer exists.</p> : reading ? <p className="text-muted-foreground">Reading arguments…</p> : null}
         </div>
       ) : null}
     </NodeCard>
@@ -386,6 +387,7 @@ function WatchesView({ run }: { run(work: Promise<void>): void }) {
   useEffect(() => setThread(subscriptionFilter.threadId ?? ""), [subscriptionFilter.threadId]);
   const listAccess = localOperation(state, "serve", "serve_subscription_list");
   const removeAccess = localOperation(state, "serve", "serve_subscription_remove");
+  const detailAccess = localOperation(state, "serve", "serve_subscription_get");
   const data = subscriptions.data;
   const filter = (next: typeof subscriptionFilter) => run(store.filterSubscriptions(next));
   const listed = removing ? data?.subscriptions.find((row) => row.id === removing.id) ?? null : null;
@@ -412,10 +414,11 @@ function WatchesView({ run }: { run(work: Promise<void>): void }) {
         </form>
       </div>
       {!listAccess.available ? <p className={hintClass}>{listAccess.reason}</p> : null}
+      <ObservationStatus read={subscriptions} />
       {data?.restarted ? <p role="status" className="text-xs text-warning">Subscriptions changed while paging, so paging started again from the first page.</p> : null}
       {data ? data.subscriptions.length ? (
         <div className="-mx-1 flex flex-col">
-          {data.subscriptions.map((row) => <SubscriptionRow key={row.id} subscription={row} available={removeAccess.available} onRemove={(target) => { setRemoveError(null); setRemoving(target); }} />)}
+          {data.subscriptions.map((row) => <SubscriptionRow key={row.id} subscription={row} available={removeAccess.available} canInspect={detailAccess.available} onRemove={(target) => { setRemoveError(null); setRemoving(target); }} />)}
         </div>
       ) : <Empty icon={CableIcon} title={Object.values(subscriptionFilter).some(Boolean) ? "No subscriptions match" : "No Bot event subscriptions"} />
         : <Empty icon={CableIcon} title={subscriptions.error ? "Subscriptions unavailable" : status.serve === "closed" ? "Server reconnecting" : "Reading subscriptions…"} />}
@@ -461,19 +464,19 @@ export function SubscriptionsWindow() {
   const store = useStore();
   const { subscriptions, occurrences, completions, status, endpoints, remote } = state;
   const [view, setView] = useState<SubscriptionView>("watches");
-  const [loading, setLoading] = useState(false);
   const seenHistory = useRef(0);
   const historySeq = state.historyRequest?.seq ?? 0;
   // A domain view's "Open in History" switches this window to the History view it just filtered.
   useEffect(() => {
     if (historySeq !== seenHistory.current) { seenHistory.current = historySeq; if (historySeq > 0) setView("history"); }
   }, [historySeq]);
-  const run = (work: Promise<void>) => { setLoading(true); void work.finally(() => setLoading(false)); };
+  const run = (work: Promise<void>) => { void work; };
   if (remote) return <LocalOnly id="subscriptions" title="Subscriptions" icon={CableIcon}
     what="Bot event subscriptions, occurrence subscriptions and completion history are local operator state. Remote sessions cannot list, inspect or remove them." />;
   const listOperation = view === "watches" ? "serve_subscription_list" : view === "occurrences" ? "serve_occurrence_list" : "serve_completion_list";
   const listAccess = localOperation(state, "serve", listOperation);
   const resource = view === "watches" ? subscriptions : view === "occurrences" ? occurrences : completions;
+  const loading = resource.pending !== null;
   const data = resource.data;
   const count = view === "history" ? completions.data?.completions.length ?? null
     : view === "occurrences" ? occurrences.data?.subscriptions.length ?? null : subscriptions.data?.subscriptions.length ?? null;
@@ -486,7 +489,7 @@ export function SubscriptionsWindow() {
         {loading ? <Spinner /> : <RefreshCwIcon />}
       </Button>}
       footer={data?.nextOffset != null ? (
-        <Button size="sm" variant="ghost" className="w-full justify-center text-muted-foreground hover:text-foreground" disabled={loading} onClick={more}>
+        <Button size="sm" variant="ghost" className="w-full justify-center text-muted-foreground hover:text-foreground" disabled={!resource.canMore} onClick={more}>
           Load more (from {data.nextOffset})
         </Button>
       ) : undefined}>
