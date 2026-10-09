@@ -144,22 +144,25 @@ export function UploadsView({ scope }: { scope: BotScope }) {
   const pages = useBotPages<StateFile>((offset, revision) => store.call<StateFilePage>("bots", "chat_upload_list", { botId: scope.botId, offset, limit: 100, ...(revision ? { revision } : {}) })
     .then((page) => ({ items: absentStore(page) ? [] : page.entries, revision: page.revision, nextOffset: page.nextOffset })), scope.incarnation, scope.observe);
   const [open, setOpen] = useState<string | null>(null);
+  // Keep the selected detail mounted when its own removal invalidates the list.
+  // The receipt belongs to that exact UUID, even after no upload row remains.
+  const rows: { id: string; file: StateFile | null }[] = (pages.page?.items ?? []).map((file) => ({ id: fileName(file.path), file }));
+  if (open && !rows.some((row) => row.id === open)) rows.push({ id: open, file: null });
   return (
     <div className="flex flex-col gap-2">
       <ViewHeader title="Uploads" loading={pages.loading} onRefresh={pages.refresh} />
       <ReadError error={pages.error} what="Upload storage" />
-      {pages.page ? pages.page.items.length ? (
+      {pages.page ? rows.length ? (
         <ul aria-label="Uploads" className="-mx-1 flex flex-col gap-1">
-          {pages.page.items.map((file) => {
-            const id = fileName(file.path);
+          {rows.map(({ id, file }) => {
             return (
               <li key={id} className="flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-muted/40">
                 <button type="button" className="flex min-w-0 items-center gap-2 text-left text-xs" aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>
                   <FileIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 truncate font-mono text-[0.7rem]">{id}</span>
-                  {quarantined(file) ? <Pill tone="warning">cleanup quarantine</Pill> : null}
+                  {file && quarantined(file) ? <Pill tone="warning">cleanup quarantine</Pill> : null}
                 </button>
-                {open === id && !quarantined(file) ? <UploadDetail scope={scope} id={id} /> : null}
+                {open === id && (!file || !quarantined(file)) ? <UploadDetail scope={scope} id={id} listed={!!file} /> : null}
               </li>
             );
           })}
@@ -170,14 +173,15 @@ export function UploadsView({ scope }: { scope: BotScope }) {
   );
 }
 
-function UploadDetail({ scope, id }: { scope: BotScope; id: string }) {
+function UploadDetail({ scope, id, listed }: { scope: BotScope; id: string; listed: boolean }) {
   const store = useStore();
   const status = useBotRead(() => store.call<BotUpload>("bots", "chat_upload_status", { botId: scope.botId, id }), `${scope.incarnation}:${id}`, scope.observe);
   const preview = useFilePreview(() => store.call<StateFileRead>("bots", "chat_upload_read", { botId: scope.botId, id, offset: 0, length: chunk }));
-  const upload = status.data;
+  const upload = listed ? status.data : null;
   return (
     <div className="flex flex-col gap-1.5 pl-5 text-xs">
       <ReadError error={status.error} what="Upload status" />
+      {!listed ? <p className={hintClass}>This upload is no longer in the current listing. Its maintenance receipt remains inspectable below.</p> : null}
       {upload ? (
         <dl className="grid grid-cols-[5rem_1fr] gap-x-2">
           <dt className="text-muted-foreground">Name</dt><dd className="truncate">{upload.name}</dd>
@@ -194,7 +198,8 @@ function UploadDetail({ scope, id }: { scope: BotScope; id: string }) {
           </>
         ) : <Button size="xs" variant="outline" className="self-start" onClick={() => preview.open(id)}>Read content</Button>
       ) : null}
-      <BotAction scope={scope} action={{ kind: "upload_remove", uploadId: id }} label="Prepare upload removal" applyLabel="Remove this upload">
+      <BotAction scope={scope} action={{ kind: "upload_remove", uploadId: id }} label="Prepare upload removal" applyLabel="Remove this upload"
+        prerequisite={listed ? null : "This upload is no longer in the current listing."}>
         <p className={hintClass}>Removing retires this upload ID for this Bot. Attachment metadata, transcript paths and any copies of the bytes stay where they are, so those references will stop opening.</p>
       </BotAction>
     </div>

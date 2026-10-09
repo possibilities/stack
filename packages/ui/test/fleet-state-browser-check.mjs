@@ -38,8 +38,8 @@ const exists = (path) => lstat(path).then(() => true, () => false);
 const store = new StateStore(dir);
 const account = store.addAccount(JSON.stringify({ tokens: { refresh_token: "test", access_token: "access", id_token: "fixture.jwt.signature" } })).id;
 store.close();
+// Initialize the disposable canonical Roles; their names are owner-fixed.
 const roles = new RoleStore(dir);
-roles.role(roles.catalog().defaultRoleId).update(0, { name: "Fixture" });
 roles.close();
 
 /** Dependency owners the plan consults. `blocked` names what the Worker fixture reports as open work. */
