@@ -498,6 +498,7 @@ test("harness filter drafts parse exactly, emit canonical text and block on pend
   // Harness exclusions are never called "Off"; only the stored switch is.
   assert.equal(roles.exclusionLabel("disabled", "codex"), "Off");
   assert.equal(roles.exclusionLabel("disabled", null), "Off");
+  assert.equal(roles.exclusionLabel("role_denied", "codex"), "Outside this Role's tool grants");
   assert.equal(roles.exclusionLabel("harness_required", null), "Needs a harness choice");
   assert.equal(roles.exclusionLabel("harness_required", "codex"), "Needs a harness choice");
   assert.equal(roles.exclusionLabel("harness_mismatch", "claude"), "Not for claude");

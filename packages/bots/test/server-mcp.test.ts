@@ -17,7 +17,7 @@ test("bot stdio MCP connections follow the owner catalog and bind each connectio
     await writeFile(join(beta, "api.yaml"), "name: beta\ndescription: Beta.\nsocket:\n  description: Beta socket.\n");
     const env = { STACK_STATE_DIR: join(root, "state") };
     const endpoint = "unix:///tmp/stack-app/first.sock";
-    const first = await serverMcpLaunches(root, 43123, "bot-1", endpoint, env);
+    const first = await serverMcpLaunches(root, 43123, "bot-1", endpoint, "admin", env);
     const bridges = ["codex-computer-use", "chrome", "messages", "computer-history", "openai-developer-docs"];
     assert.deepEqual(Object.keys(first), ["alpha", ...bridges]);
     for (const launch of Object.values(first)) {
@@ -28,7 +28,7 @@ test("bot stdio MCP connections follow the owner catalog and bind each connectio
     }
     assert.equal(first.alpha!.args.at(-1), "alpha");
     await writeFile(join(beta, "api.yaml"), "name: beta\ndescription: Beta.\nmcp:\n  description: Beta HTTP.\n  operations: all\n  events: all\n");
-    const next = await serverMcpLaunches(root, 43123, "bot-1", "unix:///tmp/stack-app/second.sock", env);
+    const next = await serverMcpLaunches(root, 43123, "bot-1", "unix:///tmp/stack-app/second.sock", "admin", env);
     assert.deepEqual(Object.keys(next), ["alpha", "beta", ...bridges]);
     assert.notEqual(next.alpha!.env.STACK_MCP_BINDING, first.alpha!.env.STACK_MCP_BINDING);
     assert.equal(next.beta!.args.at(-1), "beta");
@@ -42,9 +42,18 @@ test("the real owner catalog gives Bots a signed browser management connection",
   try {
     const env = { STACK_STATE_DIR: state };
     const endpoint = "unix:///fixture/browser-bot.sock";
-    const launches = await serverMcpLaunches(workspaceRoot(import.meta.dirname), 43123, "bot-1", endpoint, env);
+    const launches = await serverMcpLaunches(workspaceRoot(import.meta.dirname), 43123, "bot-1", endpoint, "admin", env);
     assert.ok(launches.browse, "browser management must be discoverable by launched Bots");
     assert.equal(launches.browse.args.at(-1), "browse");
     assert.deepEqual(parseMcpBinding(launches.browse.env.STACK_MCP_BINDING!, env), { botId: "bot-1", instance: botInstance(endpoint) });
+    const sharedBridges = ["codex-computer-use", "chrome", "messages", "computer-history", "openai-developer-docs"];
+    for (const [role, packages] of [
+      ["manager", ["brain", "content", "hud", "notify", "proc", "scrape", "source", "usage", "worker", "xcom"]],
+      ["worker", ["brain", "content", "scrape", "xcom"]],
+      ["unassigned", []],
+    ] as const) {
+      const selected = await serverMcpLaunches(workspaceRoot(import.meta.dirname), 43123, "bot-1", endpoint, role, env);
+      assert.deepEqual(Object.keys(selected), [...packages, ...sharedBridges], `${role} launch omits zero-tool Package servers`);
+    }
   } finally { await rm(state, { recursive: true, force: true }); }
 });

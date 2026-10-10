@@ -23,8 +23,9 @@ export const sourcesCompletion = z.strictObject({ result: z.strictObject({ scope
   admission_count: z.number().int(), run_count: z.number().int(), no_run_count: z.number().int(),
   admission_outcomes: z.partialRecord(admissionOutcome, z.number().int()), outcomes: z.record(z.string(), z.number().int()), runs: z.array(sourceItem).max(50), truncated: z.boolean(), nextOffset: z.number().int().nullable(),
   read: z.strictObject({ operation: z.literal("sources_sync_completion"), requestId: z.uuid(), offset: z.number().int().nullable() }) }).nullable() });
-export const completionInput = z.strictObject({ requestId: z.uuid(), botId: z.string().min(1), threadId: z.string().min(1) });
-export const sourcesCompletionInput = completionInput.extend({ offset: z.number().int().min(0).max(1000).default(0) });
+export const completionInput = z.strictObject({ requestId: z.uuid(), botId: z.string().min(1).optional(), threadId: z.string().min(1).optional() });
+export const sourcesCompletionInput = completionInput.extend({ botId: z.string().min(1), threadId: z.string().min(1),
+  offset: z.number().int().min(0).max(1000).default(0) });
 export const brainCompletionIdentityInput = completionIdentityInput.extend({ operation: z.enum(["submit", "sources_sync"]) });
 export const brainCompletionIdentityOutput = z.strictObject({ link: z.union([brainSubmitCompletionLink, brainSourcesCompletionLink]).nullable() });
 const declaration = (topic: string, readOperation: string): CompletionWatch => ({ topic, readOperation, idArgument: "requestId", terminalField: "result", defaultWhen: [], initialValueField: "observation",
@@ -48,11 +49,13 @@ export async function admitWatched(ctx: Context, operation: "submit" | "sources_
     request = parse();
     if (request.wait) throw new Error("watched admission cannot wait; omit wait and inspect the completion receipt");
     if ("limit" in request && request.limit > 1000) throw new Error("watched source synchronization accepts at most 1000 sources per admission");
-    if (!invocation?.botId || !invocation.threadId || !input.requestId) throw new Error("watched admission requires a verified Bot Chat and requestId");
+    if ((!invocation?.botId || !invocation.threadId) && (!invocation?.workerId || !invocation.workerInstance) || !input.requestId)
+      throw new Error("tracked admission requires a verified Bot Chat or Worker and requestId");
   } catch (error) { throw new OperationRejected(String(error), { cause: error }); }
-  await requireCompletionCoordination(ctx.env, "brain", operation, brainWatches[operation]!, input, invocation);
+  if (!invocation?.workerId) await requireCompletionCoordination(ctx.env, "brain", operation, brainWatches[operation]!, input, invocation);
   if (ctx.controller.signal.aborted) throw new OperationRejected("Brain is stopping; nothing admitted");
-  const requestId = String(input.requestId), botId = invocation!.botId!, threadId = invocation!.threadId!;
+  const requestId = String(input.requestId), botId = invocation!.workerId ? `worker:${invocation!.workerId}` : invocation!.botId!,
+    threadId = invocation!.workerId ? `worker:${invocation!.workerId}` : invocation!.threadId!;
   const { requestId: _id, subscribe: _subscribe, ...intent } = input;
   const inputDigest = stateHash(intent);
   const admit = ctx.store.db.transaction(() => {
@@ -104,15 +107,19 @@ export async function admitWatched(ctx: Context, operation: "submit" | "sources_
   return { ...result, requestId, subscription: null, observation: null };
 }
 
-/** Structurally read-only, no content/audit reads, and bound to the exact Chat. */
+/** Structurally read-only, no content/audit reads, and bound to the exact Chat or Worker. */
 export function readCompletion(dbPath: string, operation: "submit" | "sources_sync", input: z.infer<typeof completionInput> & { offset?: number }, invocation?: InvocationContext) {
-  if (invocation && (invocation.workerId || invocation.transport !== "mcp" || invocation.botId !== input.botId || invocation.threadId !== input.threadId))
-    throw new Error("Brain completion belongs to another Bot Chat");
+  if (invocation && invocation.transport !== "mcp") throw new Error("Brain completion requires MCP identity");
+  if (invocation?.workerId && operation !== "submit") throw new Error("Worker source completion is unavailable");
+  const botId = invocation?.workerId ? `worker:${invocation.workerId}` : input.botId;
+  const threadId = invocation?.workerId ? `worker:${invocation.workerId}` : input.threadId;
+  if (!botId || !threadId || invocation && !invocation.workerId && (invocation.botId !== botId || invocation.threadId !== threadId))
+    throw new Error("Brain completion belongs to another Bot Chat or Worker");
   const cache = new ResearchCache(dbPath);
   try {
     const row = binding(cache.db, input.requestId);
     if (!row) return { result: null };
-    if (row.operation !== operation || row.bot_id !== input.botId || row.thread_id !== input.threadId) throw new Error("Brain completion belongs to another admission or Chat");
+    if (row.operation !== operation || row.bot_id !== botId || row.thread_id !== threadId) throw new Error("Brain completion belongs to another admission or Chat");
     if (operation === "submit") {
       const admitted = JSON.parse(row.admission_json) as SafeSubmit;
       if (admitted.status === "already_indexed") return submissionCompletion.parse({ result: { kind: "already_indexed", document_id: admitted.document_id } });

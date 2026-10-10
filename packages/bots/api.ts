@@ -590,7 +590,7 @@ const packageApi: PackageApi<BotsContext, BotsTopic> = {
       browserReleased: serverMcpPort === undefined ? undefined : async (botId) => {
         await socketCall(socketPath("browse", env), "tools/call", { name: "browser_bot_release", arguments: { botId } }, { timeoutMs: 65_000 });
       },
-      mcpServers: serverMcpPort === undefined ? undefined : (id, endpoint) => serverMcpLaunches(workspaceRoot(import.meta.dirname), Number(serverMcpPort), id, endpoint, env) });
+      mcpServers: serverMcpPort === undefined ? undefined : (id, endpoint, role) => serverMcpLaunches(workspaceRoot(import.meta.dirname), Number(serverMcpPort), id, endpoint, role, env) });
     await supervisor.load();
     await supervisor.reap();
     await supervisor.resumeAll();

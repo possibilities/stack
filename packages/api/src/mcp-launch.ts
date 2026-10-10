@@ -4,11 +4,12 @@ import { botMcpUrl, workerMcpUrl } from "./bot-mcp-identity.js";
 import { withLocalAuth } from "./local-auth.js";
 import { stateDir, workspaceRoot } from "./workspace.js";
 import { configuredMcpServers } from "./mcp.js";
+import { installedMcpCatalog } from "./exposure.js";
 import { injectedMcpBinding } from "./injected-mcp.js";
-import type { PackageRole } from "./role-grants.js";
+import { packageServerAllowed, packageToolAllowed, type PackageRole } from "./role-grants.js";
 
 export type McpStdioLaunch = { type: "stdio"; command: string; args: string[]; env: Record<string, string> };
-export type McpLaunchAuthority = { kind: "bot"; botId: string; endpoint: string } |
+export type McpLaunchAuthority = { kind: "bot"; botId: string; endpoint: string; role: PackageRole } |
   { kind: "worker"; workerId: string; instance: string } | { kind: "operator" } |
   { kind: "inject"; role: PackageRole; launchPath: string; pid: number; birth: string };
 
@@ -32,7 +33,20 @@ export async function internalMcpLaunches(root: string, authority: McpLaunchAuth
     "STACK_CONTENT_HOST", "STACK_CONTENT_PORT", "STACK_CONTENT_ARTIFACT_PORT", "STACK_WIKI_PORT", "STACK_WIKI_ARTIFACT_PORT",
     "STACK_CONTENT_DOCUMENT_ORIGIN", "STACK_CONTENT_ARTIFACT_ORIGIN"])
     if (env[key] !== undefined) values[key] = env[key];
-  return Object.fromEntries((await configuredMcpServers(root)).map(({ name }) => [name, {
+  const role = authority.kind === "bot" ? authority.role : authority.kind === "worker" ? "worker"
+    : authority.kind === "inject" ? authority.role : "admin";
+  const selected = [];
+  for (const entry of await configuredMcpServers(root)) {
+    if (entry.kind === "codex" || role === "admin") { selected.push(entry); continue; }
+    if (!packageServerAllowed(role, entry.name)) continue;
+    const { catalog, exposure } = await installedMcpCatalog(root, entry.name);
+    const ordinary = catalog.tools.some(tool => packageToolAllowed(role, entry.name, tool.name));
+    const events = exposure.events.length > 0 || catalog.tools.some(tool => tool.eventSource);
+    const generated = events && (["events_catalog", "events_subscribe", "events_status", "events_unsubscribe"].some(name =>
+      packageToolAllowed(role, entry.name, name)) || catalog.tools.some(tool => tool.eventSource) && packageToolAllowed(role, entry.name, "events_listen"));
+    if (ordinary || generated) selected.push(entry);
+  }
+  return Object.fromEntries(selected.map(({ name }) => [name, {
     type: "stdio", command: process.execPath,
     args: [join(workspaceRoot(import.meta.dirname), "packages/api/dist/src/stdio-main.js"), name], env: { ...values },
   }]));

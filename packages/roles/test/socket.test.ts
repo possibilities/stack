@@ -11,6 +11,24 @@ async function createRole(socket: string): Promise<string> {
   return result.defaultRoleId;
 }
 
+test("Role launch preview includes only Package connections granted to its canonical access role", async () => {
+  const root = await mkdtemp(join(tmpdir(), "role-grant-preview-"));
+  const env = { ...process.env, STACK_STATE_DIR: root };
+  const served = await serveApi({ name: "roles", transport: "socket", env });
+  try {
+    const catalog = await socketCall(served.socketPath!, "tools/call", { name: "roles_snapshot", arguments: {} }) as
+      { managerRoleId: string; workerDefaultRoleId: string; adminRoleId: string };
+    for (const [roleId, expected] of [[catalog.managerRoleId, 10], [catalog.workerDefaultRoleId, 4], [catalog.adminRoleId, 16]] as const) {
+      const preview = await socketCall(served.socketPath!, "tools/call", { name: "role_launch_preview", arguments: { roleId, harness: "codex" } }) as any;
+      assert.equal(preview.internalMcpServers.filter((server: any) => server.kind === "package" && server.included).length, expected);
+      assert.equal(preview.internalMcpServers.filter((server: any) => server.kind === "codex" && server.included).length, 5);
+      if (roleId === catalog.workerDefaultRoleId) {
+        assert.equal(preview.internalMcpServers.find((server: any) => server.name === "source").selectionReason, "role_denied");
+      }
+    }
+  } finally { await served.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("capability harness allowlists persist, preserve omitted updates, and preview selection independently of instruction context", async () => {
   const root = await mkdtemp(join(tmpdir(), "role-cap-"));
   const env = { ...process.env, STACK_STATE_DIR: root };

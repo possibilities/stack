@@ -695,7 +695,7 @@ export type RoleCategory = { id: string; title: string; description: string; ena
 /** A supporting file beside a skill's generated SKILL.md; bytes travel as canonical base64. */
 export type RoleSkillFile = { path: string; contentBase64: string };
 export type RoleCapabilityHarness = "codex" | "opencode" | "claude" | "devin";
-export type RoleCapabilitySelection = "included" | "disabled" | "harness_required" | "harness_mismatch";
+export type RoleCapabilitySelection = "included" | "disabled" | "harness_required" | "harness_mismatch" | "role_denied";
 /** Missing/null means all harnesses; [] means none. Not instruction-rendering context. */
 export type RoleCapabilityHarnesses = RoleCapabilityHarness[] | null;
 /** A Role-owned skill. Its name and description become SKILL.md frontmatter, so both reach Bots. */

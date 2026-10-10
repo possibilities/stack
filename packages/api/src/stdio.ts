@@ -1,7 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LocalAuth } from "./local-auth.js";
 import { configuredMcpServers } from "./mcp.js";
-import { parseMcpBinding, verifyMcpIdentity, type McpIdentity } from "./mcp-authority.js";
+import { packageRole, parseMcpBinding, verifyMcpIdentity, type McpIdentity } from "./mcp-authority.js";
 import { packageMcpServer } from "./mcp-package.js";
 import { canonicalMcpName, codexMcpDefinition } from "./codex-mcp/catalog.js";
 import { codexMcpServer } from "./codex-mcp/server.js";
@@ -9,7 +9,7 @@ import { installedMcpCatalog } from "./exposure.js";
 import { mcpPrerequisite } from "./mcp-prerequisite.js";
 import { socketCall } from "./socket.js";
 import { socketPath, workspaceRoot } from "./workspace.js";
-import { mcpEventCatalog, type McpEventCall } from "./mcp-events.js";
+import { mcpEventCatalog, roleEventCatalog, type McpEventCall } from "./mcp-events.js";
 import { verifyInjectedMcpBinding } from "./injected-mcp.js";
 import type { PackageRole } from "./role-grants.js";
 
@@ -46,7 +46,8 @@ export async function runMcpStdio(name: string, env: NodeJS.ProcessEnv = process
     // reach the durable owner. Operators never acquire a wakeup target.
     if (tool === "events_catalog") {
       const installed = await installedMcpCatalog(root, pkg);
-      return mcpEventCatalog(identity && "workerId" in identity ? installed.workerCatalog : installed.catalog);
+      const role = injected?.role ?? await packageRole(identity, env);
+      return mcpEventCatalog(roleEventCatalog(identity && "workerId" in identity ? installed.workerCatalog : installed.catalog, role, pkg));
     }
     if (!identity) throw new Error("event subscriptions require a managed Bot or Worker launch binding");
     try { return await socketCall(socketPath("serve", env), "tools/call", { name: "serve_mcp_event", arguments: {

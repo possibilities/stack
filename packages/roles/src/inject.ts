@@ -5,7 +5,7 @@ import { access, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/pr
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { assertInstallationOpen, internalMcpLaunches, mcpPort, mcpToolTimeoutSeconds, stateDir, workspaceRoot } from "@stack/api";
+import { assertInstallationOpen, configuredMcpServers, internalMcpLaunches, mcpPort, mcpToolTimeoutSeconds, stateDir, workspaceRoot } from "@stack/api";
 import { roleMcpConflict, serverMcpOrigins } from "./bundle.js";
 import { injectArguments, type Harness } from "./inject-args.js";
 import { startOpenCodeHost } from "./inject-opencode.js";
@@ -36,7 +36,7 @@ async function snapshotFor(name: string): Promise<ReturnType<RoleStore["namedAcc
 async function connections(snapshot: RoleSnapshot, access: "admin" | "manager" | "worker" | "unassigned",
   launchPath: string, birth: string): Promise<Record<string, Mcp>> {
   const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "inject", role: access, launchPath, pid: process.pid, birth });
-  const names = new Set(Object.keys(launches).map(asciiFold));
+  const names = new Set((await configuredMcpServers(workspaceRoot(import.meta.dirname))).map(({ name }) => asciiFold(name)));
   const ports = [mcpPort(), Number(process.env.STACK_SERVER_MCP_PORT)].filter(port => Number.isInteger(port) && port > 0);
   const origins = new Set(ports.flatMap(serverMcpOrigins));
   const servers: Record<string, Mcp> = {};

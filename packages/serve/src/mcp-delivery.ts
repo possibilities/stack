@@ -69,7 +69,8 @@ export async function authorizeRoleRead(subscription: EventSubscription, env: No
     const operation = subscription.completion.operation;
     if (!packageToolAllowed(role, subscription.pkg, operation) || !completionWatchAllowed(role, subscription.pkg, operation))
       throw new Error("completion subscription is not granted to the current Bot Role");
-  } else if (role !== "admin" || !packageToolAllowed(role, subscription.pkg, subscription.readOperation)) {
+  } else if (!packageToolAllowed(role, subscription.pkg, "events_subscribe") ||
+      !packageToolAllowed(role, subscription.pkg, subscription.readOperation)) {
     throw new Error("event subscription is not granted to the current Bot Role");
   }
 }

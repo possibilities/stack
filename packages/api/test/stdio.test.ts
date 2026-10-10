@@ -31,10 +31,10 @@ import { invocationContext, operatorInvocation } from "../src/invocation.js";
 test("stdio children use private sockets, refresh policy, fence identities and leave durable watches with one owner", { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-stdio-"));
   const env = { ...process.env, STACK_STATE_DIR: join(root, "state"), STACK_MCP_PORT: "not-an-http-port" };
-  const dir = join(root, "packages", "demo");
+  const dir = join(root, "packages", "content");
   await mkdir(dir, { recursive: true });
-  const manifest = (operations = "[read, mutate, send, record, read_events]", workers = "[read]", workerEvents = "[]") => writeFile(join(dir, "api.yaml"),
-    `name: demo\ndescription: Demo.\nmcp:\n  description: Demo MCP.\n  operations: ${operations}\n  workerOperations: ${workers}\n  workerEvents: ${workerEvents}\n  events: [changed, arrived]\n`);
+  const manifest = (operations = "[read, get, mutate, send, record, read_events]", workers = "[read]", workerEvents = "[]") => writeFile(join(dir, "api.yaml"),
+    `name: content\ndescription: Demo.\nmcp:\n  description: Demo MCP.\n  operations: ${operations}\n  workerOperations: ${workers}\n  workerEvents: ${workerEvents}\n  events: [changed, arrived]\n`);
   await manifest();
   await mkdir(join(dir, "dist"));
   await writeFile(join(dir, "dist", "api.js"), `
@@ -45,6 +45,7 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     const record = z.object({ id: z.uuid(), done: z.string().nullable(), answer: z.string().nullable() });
     export const api = { operations: [
       operation({ name: "read", description: "Read value and caller", input: z.strictObject({}), output: z.object({ value: z.number(), thread: z.string().nullable(), worker: z.string().nullable() }), annotations: { readOnlyHint: true }, async call() {} }),
+      operation({ name: "get", description: "Worker-granted read", input: z.strictObject({}), output: z.object({ value: z.number() }), annotations: { readOnlyHint: true }, async call() {} }),
       operation({ name: "mutate", description: "Change value", input: z.strictObject({}), output: z.object({ value: z.number() }), async call() {} }),
       operation({ name: "send", description: "Send a record with optional completion", input: z.strictObject({ id: z.uuid().optional(), subscribe: z.boolean().optional(), actions: z.array(z.string()).optional() }), output: record.extend({ subscription: completionReceipt.nullable() }),
         completionWatch: { topic: "changed", readOperation: "record", idArgument: "id", terminalField: "done", defaultWhen: ["actions"] }, async call() { throw new Error("send must use the live owner"); } }),
@@ -66,11 +67,13 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     worker_status: () => ({ worker: { accountId: "account", phase: workerLive ? "running" : "closed", runtimeInstance: instance } }),
     worker_runtime_list: () => ({ runtimes: [{ id: "account", state: "running", instance }] }),
   });
-  const pkg = await serveSocket({ info: { name: "demo", description: "Fixture", transportDescription: "Fixture", path: socketPath("demo", env) }, context: {},
+  const pkg = await serveSocket({ info: { name: "content", description: "Fixture", transportDescription: "Fixture", path: socketPath("content", env) }, context: {},
     events: { topics: { changed: "Value changed" } }, operations: [
       operation({ name: "read", description: "Read value and caller", input: z.strictObject({}), output: z.object({ value: z.number(), thread: z.string().nullable(), worker: z.string().nullable() }),
         annotations: { readOnlyHint: true }, async call(_ctx, _input, invocation) { return { value, thread: invocation?.threadId ?? null, worker: invocation?.workerId ?? null }; },
         mcpContent() { return [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }]; } }),
+      operation({ name: "get", description: "Worker-granted read", input: z.strictObject({}), output: z.object({ value: z.number() }),
+        annotations: { readOnlyHint: true }, async call() { return { value }; } }),
       operation({ name: "mutate", description: "Change value", input: z.strictObject({}), output: z.object({ value: z.number() }),
         async call() { mutations++; return { value: ++value }; } }),
       operation({ name: "send", description: "Send a record with optional completion", input: z.strictObject({ id: z.uuid().optional(), subscribe: z.boolean().optional(), actions: z.array(z.string()).optional() }), output: recordSchema.extend({ subscription: completionReceipt.nullable() }),
@@ -105,7 +108,7 @@ test("stdio children use private sockets, refresh policy, fence identities and l
   let serve = await serveOwner();
   const clients: Client[] = [];
   const connect = async (authority: McpLaunchAuthority, overrides: Record<string, string> = {}) => {
-    const launch = (await internalMcpLaunches(root, authority, env)).demo!;
+    const launch = (await internalMcpLaunches(root, authority, env)).content!;
     const transport = new StdioClientTransport({ command: launch.command, args: launch.args, env: { ...launch.env, ...overrides }, cwd: root, stderr: "pipe" });
     const client = new Client({ name: "stdio-fixture", version: "1" }); clients.push(client);
     await client.connect(transport);
@@ -119,7 +122,7 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     assert.deepEqual(read.content, [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }]);
     assert.equal((await operator.client.callTool({ name: "read", arguments: { invalid: true } })).isError, true);
     assert.equal((await operator.client.callTool({ name: "events_subscribe", arguments: { topic: "changed", readOperation: "read" } })).isError, true);
-    const bot = await connect({ kind: "bot", botId: "bot-1", endpoint });
+    const bot = await connect({ kind: "bot", botId: "bot-1", endpoint, role: "admin" });
     assert.equal((await bot.client.callTool({ name: "read" })).isError, true);
     for (const threadId of ["root", "child"]) assert.equal(CallToolResultSchema.parse(await bot.client.callTool({ name: "read", _meta: { threadId } })).structuredContent?.thread, threadId);
     const subscribe = (threadId: string) => bot.client.callTool({ name: "events_subscribe", arguments: { topic: "changed", readOperation: "read" }, _meta: { threadId } });
@@ -136,17 +139,18 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     assert.equal((deliveries[0]!.value as { value: number }).value, 2);
     assert.ok((await readFile(join(env.STACK_STATE_DIR, "event-subscriptions.sqlite"))).length);
     const worker = await connect({ kind: "worker", workerId, instance });
-    assert.deepEqual((await worker.client.listTools()).tools, [], "ungranted fixture tools stay hidden from Worker");
+    assert.deepEqual((await worker.client.listTools()).tools.map(tool => tool.name), ["get"], "Worker sees only the selected read");
+    assert.deepEqual((await worker.client.callTool({ name: "get" })).structuredContent, { value: 2 });
     assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
     assert.equal((await worker.client.callTool({ name: "mutate" })).isError, true);
     assert.equal((await worker.client.callTool({ name: "events_subscribe", arguments: { topic: "changed", readOperation: "read" } })).isError, true);
     await assert.rejects(connect({ kind: "worker", workerId, instance }, { STACK_MCP_BINDING: worker.launch.env.STACK_MCP_BINDING!.replace(/proof=./, "proof=z") }), /closed/);
-    await assert.rejects(socketCall(serve.path, "tools/call", { name: "serve_mcp_event", arguments: { binding: worker.launch.env.STACK_MCP_BINDING, pkg: "demo", tool: "events_status", arguments: {}, threadId: "child", sessionId: null } }), /event relay is not granted/);
+    await assert.rejects(socketCall(serve.path, "tools/call", { name: "serve_mcp_event", arguments: { binding: worker.launch.env.STACK_MCP_BINDING, pkg: "content", tool: "events_status", arguments: {}, threadId: "child", sessionId: null } }), /event relay is not granted/);
     await manifest(undefined, undefined, "[arrived]");
-    assert.deepEqual((await worker.client.listTools()).tools, [], "Worker event selections do not bypass role grants");
+    assert.deepEqual((await worker.client.listTools()).tools.map(tool => tool.name), ["get"], "Worker event selections do not bypass role grants");
     assert.equal((await worker.client.callTool({ name: "events_listen", arguments: { name: "arrived" } })).isError, true);
     await manifest();
-    const completion = await connect({ kind: "bot", botId: "bot-1", endpoint });
+    const completion = await connect({ kind: "bot", botId: "bot-1", endpoint, role: "admin" });
     const request = { actions: ["Yes"] };
     assert.equal((await completion.client.callTool({ name: "send", arguments: request, _meta: { threadId: "foreign-root" } })).isError, true);
     assert.equal((await operator.client.callTool({ name: "send", arguments: { subscribe: true } })).isError, true);
@@ -189,9 +193,9 @@ test("stdio children use private sockets, refresh policy, fence identities and l
     assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
     await manifest();
     workerLive = false;
-    assert.deepEqual((await worker.client.listTools()).tools, [], "catalog admission conveys no live identity authority");
+    assert.deepEqual((await worker.client.listTools()).tools.map(tool => tool.name), ["get"], "catalog admission conveys no live identity authority");
     assert.equal((await worker.client.callTool({ name: "read" })).isError, true);
-    const stale = await connect({ kind: "bot", botId: "bot-1", endpoint });
+    const stale = await connect({ kind: "bot", botId: "bot-1", endpoint, role: "admin" });
     botLive = false;
     assert.equal((await stale.client.callTool({ name: "read", _meta: { threadId: "child" } })).isError, true);
     await assert.rejects(connect({ kind: "operator" }, { STACK_MCP_AUTHORITY: "bot", STACK_MCP_BINDING: "" }), /closed/);
@@ -224,6 +228,15 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
     export const api = { operations: ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"].map(name =>
       operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })) };
   `);
+  const brainDir = join(root, "packages", "brain");
+  await mkdir(join(brainDir, "dist"), { recursive: true });
+  await writeFile(join(brainDir, "api.yaml"), "name: brain\ndescription: Fixture.\nmcp:\n  description: Fixture.\n  operations: all\n  events: []\n");
+  await writeFile(join(brainDir, "dist", "api.js"), `
+    import { operation } from ${JSON.stringify(new URL("../src/operation.js", import.meta.url).href)};
+    import { z } from ${JSON.stringify(import.meta.resolve("zod"))};
+    export const api = { operations: ["search", "submit", "doctor"].map(name =>
+      operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })) };
+  `);
   const birth = await processBirth(process.pid);
   const lockPath = join(launchPath, "launch-lock.json");
   const lock = { version: 1, pid: process.pid, birth, state: "running" };
@@ -234,16 +247,28 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
     context: {}, operations: names.map(name => operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }),
       async call(_ctx, _input, invocation) { invoked.push({ name, role: invocation?.transport === "mcp" ? invocation.injected?.role ?? null : null,
         launch: invocation?.transport === "mcp" ? invocation.injected?.launch ?? null : null }); return { ok: true }; } })) });
+  const brainSocket = await serveSocket({ info: { name: "brain", description: "Fixture.", transportDescription: "Fixture.", path: socketPath("brain", env) },
+    context: {}, operations: ["search", "submit", "doctor"].map(name => operation({ name, description: "Fixture.", input: z.strictObject({}),
+      output: z.object({ ok: z.boolean() }), async call(_ctx, _input, invocation) {
+        invoked.push({ name, role: invocation?.transport === "mcp" ? invocation.injected?.role ?? null : null,
+          launch: invocation?.transport === "mcp" ? invocation.injected?.launch ?? null : null }); return { ok: true };
+      } })) });
   const clients: Client[] = [];
-  const connect = async (role: "admin" | "manager" | "worker" | "unassigned", overrides: Record<string, string> = {}) => {
-    const launch = (await internalMcpLaunches(root, { kind: "inject", role, launchPath, pid: process.pid, birth }, env)).worker!;
+  const connect = async (role: "admin" | "manager" | "worker", overrides: Record<string, string> = {}) => {
+    const launches = await internalMcpLaunches(root, { kind: "inject", role, launchPath, pid: process.pid, birth }, env);
+    const launch = launches[role === "worker" ? "brain" : "worker"]!;
     const transport = new StdioClientTransport({ command: launch.command, args: launch.args, env: { ...launch.env, ...overrides }, cwd: root, stderr: "pipe" });
     const client = new Client({ name: "injected-role-fixture", version: "1" }); clients.push(client);
     await client.connect(transport);
     return { client, launch };
   };
   try {
-    for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 4)], ["worker", names.slice(0, 1)], ["unassigned", []]] as const) {
+    const workerLaunches = await internalMcpLaunches(root, { kind: "inject", role: "worker", launchPath, pid: process.pid, birth }, env);
+    assert.equal(workerLaunches.worker, undefined, "zero-tool Worker server is omitted");
+    assert.ok(workerLaunches.brain);
+    const unassigned = await internalMcpLaunches(root, { kind: "inject", role: "unassigned", launchPath, pid: process.pid, birth }, env);
+    assert.equal(unassigned.worker, undefined); assert.equal(unassigned.brain, undefined);
+    for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 4)]] as const) {
       const { client, launch } = await connect(role);
       assert.equal(launch.env.STACK_MCP_OPERATOR, "");
       assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), expected);
@@ -256,6 +281,13 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
         if (permitted) assert.deepEqual(invoked.at(-1), { name, role, launch: "codex-AbC123" }, "verified launch provenance reaches the owner socket");
       }
     }
+    const { client: workerClient } = await connect("worker");
+    assert.deepEqual((await workerClient.listTools()).tools.map(tool => tool.name), ["search", "submit"]);
+    for (const [name, permitted] of [["search", true], ["submit", true], ["doctor", false]] as const) {
+      const before = invoked.length;
+      assert.equal(Boolean((await workerClient.callTool({ name })).isError), !permitted);
+      assert.equal(invoked.length, before + Number(permitted));
+    }
     const manager = await connect("manager");
     const altered = JSON.parse(Buffer.from(manager.launch.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
     altered.role = "admin";
@@ -266,6 +298,7 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
     await assert.rejects(manager.client.listTools());
   } finally {
     await Promise.all(clients.map(client => client.close()));
+    await brainSocket.close();
     await socket.close();
     await rm(root, { recursive: true, force: true });
   }
@@ -274,9 +307,9 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
 test("offline stdio recovers on the same pipe after Server auth startup, never replays and obeys explicit revocation", { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-offline-stdio-"));
   const env = { ...process.env, STACK_STATE_DIR: join(root, "state") };
-  const dir = join(root, "packages", "demo");
+  const dir = join(root, "packages", "content");
   await mkdir(join(dir, "dist"), { recursive: true });
-  const manifest = (operations = "all") => writeFile(join(dir, "api.yaml"), `name: demo\ndescription: Demo\nmcp:\n  description: Demo MCP\n  operations: ${operations}\n  workerOperations: [read]\n  events: []\n`);
+  const manifest = (operations = "all") => writeFile(join(dir, "api.yaml"), `name: content\ndescription: Demo\nmcp:\n  description: Demo MCP\n  operations: ${operations}\n  workerOperations: [read]\n  events: []\n`);
   await manifest();
   const entry = join(dir, "dist", "api.js");
   await writeFile(entry, `
@@ -289,7 +322,7 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
       operation({ name: "mutate", description: "Mutation", input: z.strictObject({}), output: z.object({ value: z.number() }), async call(ctx) { return ctx.mutate(); } })
     ], async createContext() { throw new Error("gateway must not create contexts"); } };
   `);
-  const launch = (await internalMcpLaunches(root, { kind: "operator" }, env)).demo!;
+  const launch = (await internalMcpLaunches(root, { kind: "operator" }, env)).content!;
   const client = new Client({ name: "offline", version: "1" });
   const external = new Client({ name: "external", version: "1" });
   const oldHttp = operatorHeaders(env);
@@ -308,12 +341,12 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
     assert.equal((await client.callTool({ name: "read", arguments: { extra: true } })).isError, true);
     const absent = await client.callTool({ name: "mutate" });
     assert.equal(absent.isError, true);
-    assert.match(JSON.stringify(absent.content), /stack_service_unavailable.*demo.*mutate.*not executed.*stack serve/);
+    assert.match(JSON.stringify(absent.content), /stack_service_unavailable.*content.*mutate.*not executed.*stack serve/);
     // Exercise the authentication rotation that production Server startup runs,
     // not just the package socket becoming available.
     withLocalAuth(env, auth => auth.rotateForStartup());
     const { api } = await import(pathToFileURL(entry).href);
-    owner = await serveSocket({ info: { name: "demo", description: "Owner", transportDescription: "Owner", path: socketPath("demo", env) }, operations: api.operations,
+    owner = await serveSocket({ info: { name: "content", description: "Owner", transportDescription: "Owner", path: socketPath("content", env) }, operations: api.operations,
       context: { value: 23, mutate() { mutations++; throw new Error("handler refused"); } } });
     const recovered = await client.callTool({ name: "read" });
     assert.notEqual(recovered.isError, true, `same-pipe recovery: ${JSON.stringify(recovered.content)}`);
@@ -321,9 +354,9 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
     assert.deepEqual(await client.listTools(), offline);
     http = await serveMcp({ root, env, port: 0 });
     for (const headers of [oldHttp, { authorization: launch.env.STACK_MCP_OPERATOR! }]) {
-      assert.equal((await fetch(http.urls.demo!, { method: "POST", headers, body: "{}" })).status, 401, "neither stale HTTP nor private stdio authority authorizes external HTTP");
+      assert.equal((await fetch(http.urls.content!, { method: "POST", headers, body: "{}" })).status, 401, "neither stale HTTP nor private stdio authority authorizes external HTTP");
     }
-    await external.connect(new StreamableHTTPClientTransport(new URL(http.urls.demo!), { requestInit: { headers: operatorHeaders(env) } }));
+    await external.connect(new StreamableHTTPClientTransport(new URL(http.urls.content!), { requestInit: { headers: operatorHeaders(env) } }));
     assert.deepEqual((await external.listTools()).tools.map(tool => tool.name), ["read", "mutate"]);
     await external.close();
     assert.match(JSON.stringify((await client.callTool({ name: "mutate" })).content), /handler refused/);
@@ -331,7 +364,7 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
     await owner.close(); owner = undefined;
     let dispatches = 0;
     dropped = createServer(socket => socket.once("data", () => { dispatches++; socket.destroy(); }));
-    await new Promise<void>(resolve => dropped!.listen(socketPath("demo", env), resolve));
+    await new Promise<void>(resolve => dropped!.listen(socketPath("content", env), resolve));
     for (const name of ["read", "mutate"]) {
       const lost = await client.callTool({ name });
       assert.equal(lost.isError, true);
@@ -340,13 +373,12 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
     }
     assert.equal(dispatches, 2, "one dispatch per call, with no replay");
     await new Promise<void>(resolve => dropped!.close(() => resolve())); dropped = undefined;
-    for (const authority of [{ kind: "bot" as const, botId: "bot-1", endpoint: "unix:///fixture/bot.sock" }, { kind: "worker" as const, workerId: randomUUID(), instance: randomUUID() }]) {
-      const managed = (await internalMcpLaunches(root, authority, env)).demo!;
+    for (const authority of [{ kind: "bot" as const, botId: "bot-1", endpoint: "unix:///fixture/bot.sock", role: "admin" as const }]) {
+      const managed = (await internalMcpLaunches(root, authority, env)).content!;
       const client = new Client({ name: "offline-managed", version: "1" });
       try {
         await client.connect(new StdioClientTransport({ ...managed, stderr: "pipe" }));
-        if (authority.kind === "bot") await assert.rejects(client.listTools(), /bots.sock/, "Bot grants require a live identity owner");
-        else assert.deepEqual((await client.listTools()).tools, [], "ungranted fixture tools are hidden from Worker");
+        await assert.rejects(client.listTools(), /bots.sock/, "Bot grants require a live identity owner");
         const result = await client.callTool({ name: "read", _meta: { threadId: "root" } });
         assert.equal(result.isError, true);
         assert.match(JSON.stringify(result.content), /live managed identity owner|bots.sock/);
@@ -374,13 +406,13 @@ test("offline stdio recovers on the same pipe after Server auth startup, never r
     };
     await denied(); // Includes an opted stored read with no package socket.
     let liveReads = 0;
-    owner = await serveSocket({ info: { name: "demo", description: "Owner", transportDescription: "Owner", path: socketPath("demo", env) }, operations: api.operations,
+    owner = await serveSocket({ info: { name: "content", description: "Owner", transportDescription: "Owner", path: socketPath("content", env) }, operations: api.operations,
       context: { get value() { liveReads++; return 29; }, mutate() { mutations++; return { value: 29 }; } } });
     withLocalAuth(env, auth => auth.rotateForStartup());
     await denied(); // Starting the backend never renews the captured credential.
     assert.equal(liveReads, 0);
     assert.equal(mutations, 1);
-    const freshLaunch = (await internalMcpLaunches(root, { kind: "operator" }, env)).demo!;
+    const freshLaunch = (await internalMcpLaunches(root, { kind: "operator" }, env)).content!;
     assert.notEqual(freshLaunch.env.STACK_MCP_OPERATOR, launch.env.STACK_MCP_OPERATOR);
     const fresh = new Client({ name: "explicit-relaunch", version: "1" });
     try {

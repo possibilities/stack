@@ -6,7 +6,7 @@ import { pollInput, pollOutput } from "./occurrence.js";
 import { socketPath } from "./workspace.js";
 import { currentMcpCatalog, installedMcpCatalog, type SocketCatalog } from "./exposure.js";
 import { mcpInvocation, packageRole, type McpIdentity } from "./mcp-authority.js";
-import { completionWatchAllowed, packageToolAllowed, type PackageRole } from "./role-grants.js";
+import { completionWatchAllowed, packageServerAllowed, packageToolAllowed, type PackageRole } from "./role-grants.js";
 import { subscriptionTools, type McpEventCall } from "./mcp-events.js";
 import { socketCall, SocketCallError } from "./socket.js";
 import { forwardTimeout } from "./forward-timeout.js";
@@ -43,21 +43,23 @@ export function packageMcpServer(name: string, description: string, root: string
     if (params?.cursor) throw new McpError(-32602, "InvalidParams", { reason: "pagination_cursor" });
     const selected = await selection();
     const access = await role();
-    const sources = access === "admin" ? selected.catalog.tools.flatMap(tool => tool.eventSource ? [tool.eventSource] : []) : [];
+    const sources = packageToolAllowed(access, name, "events_listen") ? selected.catalog.tools.flatMap(tool =>
+      tool.eventSource && packageToolAllowed(access, name, tool.name) ? [tool.eventSource] : []) : [];
     await (stdio?.checkCatalogAuthority ?? checkAuthority)();
     return { events: sources };
   });
   mcp.setRequestHandler(z.object({ method: z.literal("events/poll"), params: pollInput.extend({ _meta: z.record(z.string(), z.unknown()).optional() }) }), async ({ params }, extra) => {
     await checkAuthority(); assertInstallationOpen(env); extra.signal.throwIfAborted();
-    if (await role() !== "admin") throw new McpError(-32012, "Forbidden", { kind: "event" });
+    if (!packageToolAllowed(await role(), name, "events_listen")) throw new McpError(-32012, "Forbidden", { kind: "event" });
     const selected = await selection();
     const source = selected.catalog.tools.find(tool => tool.eventSource?.name === params.name);
-    if (!source) throw new McpError(-32011, "NotFound", { kind: "event" });
+    if (!source || !(await allowed(source.name))) throw new McpError(-32011, "NotFound", { kind: "event" });
     const { _meta, ...request } = params;
     const value = await socketCall(socketPath(name, env), "tools/call", { name: source.name, arguments: request,
       invocation: mcpInvocation(identity, _meta, injected) }, { signal: extra.signal });
     const current = await selection();
-    if (!current.catalog.tools.some(tool => tool.name === source.name && tool.eventSource?.name === params.name))
+    if (!current.catalog.tools.some(tool => tool.name === source.name && tool.eventSource?.name === params.name) ||
+        !(await allowed(source.name)) || !packageToolAllowed(await role(), name, "events_listen"))
       throw new McpError(-32012, "Forbidden", { kind: "event" });
     await checkAuthority(); assertInstallationOpen(env); extra.signal.throwIfAborted();
     return pollOutput.parse(value);
@@ -73,10 +75,11 @@ export function packageMcpServer(name: string, description: string, root: string
     const { catalog, exposure } = await selection();
     const access = await role();
     const listed = catalog;
-    const generated = access === "admin" ? eventTools(exposure.events, listed) : [];
+    const generated = eventTools(exposure.events, listed).filter(tool => packageToolAllowed(access, name, tool.name));
     if (generated.some(tool => listed.tools.some(item => item.name === tool.name))) throw new Error(`${name} has an operation reserved for MCP event subscriptions`);
     await check();
-    return { tools: [...listed.tools.filter(tool => packageToolAllowed(access, name, tool.name)).map(tool => ({ ...tool, title: tool.annotations?.title })), ...generated] };
+    return { tools: packageServerAllowed(access, name)
+      ? [...listed.tools.filter(tool => packageToolAllowed(access, name, tool.name)).map(tool => ({ ...tool, title: tool.annotations?.title })), ...generated] : [] };
   });
   mcp.setRequestHandler(CallToolRequestSchema, async ({ params }, extra) => {
     try {
@@ -87,7 +90,7 @@ export function packageMcpServer(name: string, description: string, root: string
       if (access !== "admin" && !packageToolAllowed(access, name, params.name)) throw new Error("operation is not granted to this role");
       const invocation = mcpInvocation(identity, params._meta, injected);
       if (subscriptionTools.some(tool => tool.name === params.name)) {
-        if (access !== "admin") throw new Error("event subscriptions are not granted to this role");
+        if (!packageToolAllowed(access, name, params.name)) throw new Error("event subscriptions are not granted to this role");
         if (!eventTools(exposure.events, catalog).some(tool => tool.name === params.name)) throw new Error("event subscriptions are unavailable over mcp");
         const result = await events!(name, params.name, params.arguments ?? {}, invocation, extra.signal);
         await checkAuthority();

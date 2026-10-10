@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
-import { botInstance, botMcpUrl, invocationContext, McpEventSubscriptions, operation, serveMcp, serveSocket, socketCall, socketPath, type EventValue, type InvocationContext } from "@stack/api";
+import { botInstance, botMcpUrl, invocationContext, McpEventSubscriptions, operation, serveMcp, serveSocket, socketCall, socketPath, workerMcpUrl, type EventValue, type InvocationContext } from "@stack/api";
 import { api, createBrainContext, closeBrainContext } from "../api.js";
 import { brainCompletionIdentityInput } from "../src/admission-watches.js";
 import { ResearchStore, RESEARCH_SCHEMA_VERSION } from "../src/store.js";
@@ -22,6 +22,8 @@ async function until(check: () => boolean) {
 test("Brain correlated admissions atomically bind exact jobs and fixed source sets with content-safe completion", { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-brain-watches-")), dbPath = join(root, "brain", "research.db");
   const endpoint = "unix:///fixture/brain-bot.sock";
+  const managerRoleId = randomUUID(), adminRoleId = randomUUID();
+  let roleId = adminRoleId;
   const env = { HOME: root, STACK_STATE_DIR: root, STACK_BRAIN_SHARE_PORT: "0" }, caller: InvocationContext = { transport: "mcp", botId: "bot-1", instance: botInstance(endpoint), threadId: "chat", sessionId: null };
   await mkdir(join(root, "packages", "brain"), { recursive: true });
   await writeFile(join(root, "packages", "brain", "api.yaml"), "name: brain\ndescription: Brain\nmcp:\n  description: Brain\n  operations: all\n  events: [jobs_changed, sources_changed]\n");
@@ -40,7 +42,10 @@ test("Brain correlated admissions atomically bind exact jobs and fixed source se
   ] });
   const brain = await serveSocket({ info: { name: "brain", description: "Brain", transportDescription: "Socket", path: socketPath("brain", env) }, context: ctx, operations: api.operations, events: { topics: api.events!.topics } });
   const bots = await serveSocket({ info: { name: "bots", description: "Live launch", transportDescription: "Socket", path: socketPath("bots", env) }, context: {}, operations: [
-    operation({ name: "bot_list", description: "Read live launch", input: z.strictObject({}), output: z.any(), async call() { return { bots: [{ id: caller.botId, state: "running", url: endpoint, recoveryIssue: null }] }; } }),
+    operation({ name: "bot_list", description: "Read live launch", input: z.strictObject({}), output: z.any(), async call() { return { bots: [{ id: caller.botId, roleId, state: "running", url: endpoint, recoveryIssue: null }] }; } }),
+  ] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Roles", transportDescription: "Socket", path: socketPath("roles", env) }, context: {}, operations: [
+    operation({ name: "role_access_ids", description: "Role ids", input: z.strictObject({}), output: z.any(), async call() { return { managerRoleId, adminRoleId }; } }),
   ] });
   let mcp = await serveMcp({ root, env, port: 0, subscriptions: owner });
   const call = (name: string, input: object) => socketCall(brain.path, "tools/call", { name, arguments: input }) as Promise<any>;
@@ -61,7 +66,9 @@ test("Brain correlated admissions atomically bind exact jobs and fixed source se
     await assert.rejects(send("submit", { ...input, wait: true }), /cannot wait/);
     await assert.rejects(send("sources_sync", { due: true, limit: 1001 }), /at most 1000/);
     assert.equal(count("jobs"), 0); assert.equal(count("admission_bindings"), 0);
+    roleId = managerRoleId;
     const first = await send("submit", input);
+    roleId = adminRoleId;
     assert.equal(first.status, "queued"); assert.equal(first.idempotency_key, "PRIVATE KEY"); assert.equal(first.subscription.state, "pending");
     assert.deepEqual(first.observation, { result: null });
     const { requestId: _requestId, ...duplicateInput } = input;
@@ -141,7 +148,49 @@ test("Brain correlated admissions atomically bind exact jobs and fixed source se
     const cache = new ResearchCache(backup.database_path);
     try { assert.equal((cache.db.query("SELECT count(*) AS n FROM admission_bindings").get() as { n: number }).n, count("admission_bindings")); }
     finally { cache.close(); }
-  } finally { await mcp.close(); await owner.close(); await brain.close(); await closeBrainContext(ctx); await capability.close(); await bots.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await mcp.close(); await owner.close(); await brain.close(); await closeBrainContext(ctx); await capability.close(); await bots.close(); await roles.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Worker Brain submission has an exact, owner-fenced completion without a Bot watch", { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-brain-worker-completion-"));
+  const env = { HOME: root, STACK_STATE_DIR: root, STACK_BRAIN_SHARE_PORT: "0" };
+  await mkdir(join(root, "packages", "brain"), { recursive: true });
+  await writeFile(join(root, "packages", "brain", "api.yaml"), "name: brain\ndescription: Brain\nmcp:\n  description: Brain\n  operations: all\n  events: [jobs_changed, sources_changed]\n");
+  const ctx = await createBrainContext(env, { pollMs: 60_000, extract: async () => { throw new Error("no network extraction"); } });
+  const brain = await serveSocket({ info: { name: "brain", description: "Brain", transportDescription: "Socket", path: socketPath("brain", env) },
+    context: ctx, operations: api.operations, events: { topics: api.events!.topics } });
+  const workerId = randomUUID(), otherId = randomUUID(), instance = randomUUID(), accountId = randomUUID();
+  const workers = await serveSocket({ info: { name: "worker", description: "Worker", transportDescription: "Socket", path: socketPath("worker", env) }, context: {}, operations: [
+    operation({ name: "worker_status", description: "Worker identity", input: z.strictObject({ id: z.uuid() }),
+      output: z.strictObject({ worker: z.strictObject({ accountId: z.uuid(), phase: z.string(), runtimeInstance: z.uuid() }) }),
+      async call(_ctx, { id }) { assert.ok(id === workerId || id === otherId); return { worker: { accountId, phase: "running", runtimeInstance: instance } }; } }),
+    operation({ name: "worker_runtime_list", description: "Runtime identity", input: z.strictObject({}),
+      output: z.strictObject({ runtimes: z.array(z.strictObject({ id: z.uuid(), state: z.string(), instance: z.uuid() })) }),
+      async call() { return { runtimes: [{ id: accountId, state: "running", instance }] }; } }),
+  ] });
+  const mcp = await serveMcp({ root, env, port: 0 });
+  const call = async (id: string, name: string, args: object) => {
+    const response = await fetch(workerMcpUrl(mcp.urls.brain!, id, instance, env), { method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
+    assert.equal(response.status, 200);
+    return (await response.json() as { result: { isError?: boolean; structuredContent?: any; content: unknown } }).result;
+  };
+  try {
+    const requestId = randomUUID(), intent = { requestId, subscribe: true, source: "PRIVATE WORKER TEXT", kind: "text", "idempotency-key": "PRIVATE KEY" };
+    const admitted = await call(workerId, "submit", intent);
+    assert.equal(admitted.isError, undefined, JSON.stringify(admitted.content));
+    assert.equal(admitted.structuredContent.requestId, requestId);
+    assert.equal(admitted.structuredContent.subscription, null, "Worker tracking creates no Bot Chat push watch");
+    assert.deepEqual((await call(workerId, "submission_completion", { requestId })).structuredContent, { result: null });
+    assert.equal((await call(otherId, "submission_completion", { requestId })).isError, true);
+    assert.equal((await call(workerId, "submit", { ...intent, source: "changed intent" })).isError, true);
+    ctx.store.cancelJob({ jobId: admitted.structuredContent.job_id });
+    const result = await call(workerId, "submission_completion", { requestId });
+    assert.equal(result.structuredContent.result.state, "cancelled");
+    assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+    assert.equal((ctx.store.db.query("SELECT count(*) AS n FROM jobs").get() as { n: number }).n, 1);
+  } finally { await mcp.close(); await workers.close(); await brain.close(); await closeBrainContext(ctx); await rm(root, { recursive: true, force: true }); }
 });
 
 test("Brain v14 migration adds content-free admission bindings while read-only retrieval never migrates", async () => {

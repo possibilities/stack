@@ -7,7 +7,9 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { z } from "zod";
-import { botInstance, McpEventSubscriptions, operation, operatorHeaders, packageEventTopics, pollEvent, serveApi, serveMcp, serveSocket, serveWebSocket, socketCall, socketPath, type CompletionReceipt, type CompletionWatch, type EventTarget, type InvocationContext, type Occurrence } from "@stack/api";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { botInstance, botMcpUrl, McpEventSubscriptions, operation, operatorHeaders, packageEventTopics, pollEvent, serveApi, serveMcp, serveSocket, serveWebSocket, socketCall, socketPath, type CompletionReceipt, type CompletionWatch, type EventTarget, type InvocationContext, type Occurrence } from "@stack/api";
 import { api, serverCompletionCheck, type ServerContext } from "../api.js";
 import { StatusSource } from "../src/status.js";
 import { authorizeRoleRead, authorizeWorkerRead, createMcpEventSubscriptions, verifiedTarget } from "../src/mcp-delivery.js";
@@ -61,7 +63,7 @@ test("retained Bot and Worker event subscriptions cannot bypass current Role gra
   await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
   const address = http.address();
   assert.ok(address && typeof address !== "string");
-  let roleId = adminRoleId, endpoint = `ws://127.0.0.1:${address.port}/admin`, reads = 0, polls = 0, workerInputs = 0;
+  let roleId = adminRoleId, endpoint = `ws://127.0.0.1:${address.port}/admin`, reads = 0, polls = 0, allowedPolls = 0, workerInputs = 0;
   const occurrences: Occurrence[] = [];
   const bots = await serveSocket({ info: { name: "bots", description: "Bots", transportDescription: "Socket", path: socketPath("bots", env) }, context: {},
     operations: [operation({ name: "bot_list", description: "Bot inventory", input: z.strictObject({}), output: z.object({ bots: z.array(z.unknown()) }),
@@ -78,6 +80,9 @@ test("retained Bot and Worker event subscriptions cannot bypass current Role gra
         polls++;
         return { events: occurrences.slice(request.cursor === null ? occurrences.length : Number(request.cursor)), cursor: String(occurrences.length),
           truncated: false, hasMore: false, nextPollMs: 1000 };
+      } }), pollEvent({ name: "github_watch_allowed", operation: "github_watch_events", description: "Granted watch deliveries", input: z.strictObject({}),
+      payload: z.strictObject({ value: z.number() }), async poll() {
+        allowedPolls++; return { events: [], cursor: "0", truncated: false, hasMore: false, nextPollMs: 1000 };
       } })] });
   const worker = await serveSocket({ info: { name: "worker", description: "Worker", transportDescription: "Socket", path: socketPath("worker", env) }, context: {},
     operations: [operation({ name: "worker_status", description: "Worker status", input: z.strictObject({ id: z.string() }), output: z.any(),
@@ -89,6 +94,8 @@ test("retained Bot and Worker event subscriptions cannot bypass current Role gra
   const invocation = () => ({ transport: "mcp" as const, botId: "bot-1", instance: botInstance(endpoint), threadId: "main", sessionId: null });
   const make = () => createMcpEventSubscriptions(env, root);
   let subscriptions = make();
+  let mcp: Awaited<ReturnType<typeof serveMcp>> | undefined;
+  const managerClient = new Client({ name: "manager-source-events", version: "1" });
   try {
     const admitted = await subscriptions.subscribe("bots", { topic: "bots_changed", readOperation: "bot_list" }, invocation());
     assert.equal(reads, 1);
@@ -126,6 +133,16 @@ test("retained Bot and Worker event subscriptions cannot bypass current Role gra
     assert.equal(polls, 1, "the Manager Role cannot poll an Admin-only occurrence source");
     assert.equal(workerInputs, 0, "the retained Worker listener cannot enter the Worker inbox");
     assert.equal(turns, 0, "neither retained Bot subscription can deliver to the Manager launch");
+    mcp = await serveMcp({ root, env, port: 0, subscriptions });
+    await managerClient.connect(new StreamableHTTPClientTransport(new URL(botMcpUrl(mcp.urls.source!, "bot-1", endpoint, env))));
+    assert.deepEqual((await managerClient.listTools()).tools.map(tool => tool.name),
+      ["github_watch_events", "events_listen", "events_catalog", "events_subscribe", "events_status", "events_unsubscribe"]);
+    const sourceCatalog = (await managerClient.callTool({ name: "events_catalog", arguments: {}, _meta: { threadId: "main" } })).structuredContent as { occurrences: Array<{ name: string }> };
+    assert.deepEqual(sourceCatalog.occurrences.map(source => source.name), ["github_watch_allowed"]);
+    const allowedListener = await managerClient.callTool({ name: "events_listen", arguments: { name: "github_watch_allowed" }, _meta: { threadId: "main" } });
+    assert.equal(allowedListener.isError, undefined, JSON.stringify(allowedListener.content));
+    assert.equal(allowedPolls, 1, "Manager can initialize a granted occurrence source");
+    assert.equal((await managerClient.callTool({ name: "events_status", arguments: {}, _meta: { threadId: "main" } })).isError, undefined);
     const allowed = { ...retained, pkg: "worker", topic: "worker_turn_changed", readOperation: "worker_turn_observation",
       completion: { operation: "worker_start", terminalField: "result" } };
     await authorizeRoleRead(allowed, env);
@@ -133,7 +150,7 @@ test("retained Bot and Worker event subscriptions cannot bypass current Role gra
     await authorizeRoleRead({ ...allowed, pkg: "notify", completion: { operation: "notification_send", terminalField: "dismissedAt" } }, env);
     await assert.rejects(authorizeRoleRead({ ...allowed, completion: { operation: "worker_close", terminalField: "result" } }, env), /not granted/);
   } finally {
-    await subscriptions.close(); await worker.close(); await source.close(); await roles.close(); await bots.close();
+    await managerClient.close(); await mcp?.close(); await subscriptions.close(); await worker.close(); await source.close(); await roles.close(); await bots.close();
     for (const peer of wss.clients) peer.terminate();
     await new Promise<void>(resolve => wss.close(() => resolve()));
     await new Promise<void>(resolve => http.close(() => resolve()));

@@ -685,6 +685,7 @@ export function harnessSummary(value: RoleCapabilityHarnesses | undefined): stri
  */
 export function exclusionLabel(reason: Exclude<RoleCapabilitySelection, "included">, harness: RoleCapabilityHarness | null): string {
   if (reason === "disabled") return "Off";
+  if (reason === "role_denied") return "Outside this Role's tool grants";
   if (reason === "harness_required") return "Needs a harness choice";
   return harness ? `Not for ${harness}` : "Allowed for no harness";
 }

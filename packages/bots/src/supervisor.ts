@@ -65,7 +65,7 @@ export type RunningChild = {
 
 export type SupervisorOptions = {
   stateDir: string;
-  mcpServers?: (botId: string, endpoint: string) => Promise<Record<string, McpStdioLaunch>>;
+  mcpServers?: (botId: string, endpoint: string, role: "admin" | "manager" | "unassigned") => Promise<Record<string, McpStdioLaunch>>;
   browserEnv?: (botId: string, endpoint: string) => NodeJS.ProcessEnv;
   browserReleased?: (botId: string) => Promise<void>;
   launch?: (spec: LaunchSpec) => RunningChild;
@@ -470,7 +470,9 @@ export class Supervisor {
       let rolePath: string | undefined;
       let child: RunningChild;
       try {
-        const mcpServers = await this.options.mcpServers?.(id, url) ?? {};
+        const access = this.role.accessRoleIds();
+        const launchRole = snapshot.id === access.adminRoleId ? "admin" : snapshot.id === access.managerRoleId ? "manager" : "unassigned";
+        const mcpServers = await this.options.mcpServers?.(id, url, launchRole) ?? {};
         rolePath = await materializeRole(this.options.stateDir, id, snapshot, mcpServers, cwd);
         if (account) await writeFile(join(identity, "auth.json"), account.auth, { mode: 0o600 });
         const env = { ...process.env };

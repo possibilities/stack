@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join, dirname, basename, isAbsolute, relative, sep } from "node:path";
 import { renderBotInstructions, type RoleSnapshot } from "./store.js";
 import { mcpRecord, skillRecord, trustedProjectRecord, type RoleMcpServer, type TrustedProject } from "./resources.js";
-import { canonicalMcpName, mcpToolTimeoutSeconds, parseMcpBinding, mcpPort, type McpStdioLaunch } from "@stack/api";
+import { canonicalMcpName, configuredMcpServers, mcpToolTimeoutSeconds, parseMcpBinding, mcpPort, workspaceRoot, type McpStdioLaunch } from "@stack/api";
 import { selectRoleCapabilities } from "./capabilities.js";
 
 const namePattern = /^[a-z][a-z0-9-]{0,31}$/;
@@ -83,7 +83,7 @@ export async function materializeRole(stateDir: string, botId: string, snapshot:
       lines.push(`[mcp_servers.${name}]`, `command = ${toml(launch.command)}`, `args = [${launch.args.map(toml).join(", ")}]`,
         `env = ${inline(launch.env)}`, "enabled = true", `tool_timeout_sec = ${mcpToolTimeoutSeconds(name)}`, "");
     }
-    const ownerNames = new Set(Object.keys(mcpServers).map((name) => name.toLowerCase()));
+    const ownerNames = new Set([...Object.keys(mcpServers), ...(await configuredMcpServers(workspaceRoot(import.meta.dirname))).map(({ name }) => name)].map(name => name.toLowerCase()));
     const ownerOrigins = new Set(Object.values(mcpServers).flatMap(launch => serverMcpOrigins(mcpPort(launch.env))));
     for (const value of snapshot.mcpServers) {
       const server = mcpRecord.parse(value);

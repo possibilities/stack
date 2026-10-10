@@ -6,7 +6,7 @@ import { withStateInventory, requireStateOperator, stateApplyInput, statePlan, s
 import { roleStateCategories } from "./src/state-categories.js";
 import { fragmentConditions, renderContext } from "./src/conditions.js";
 import { capabilityHarness, capabilityHarnesses, capabilitySelection, capabilitySelectionReason, internalMcpHarnesses, internalMcpSelection, selectRoleCapabilities } from "./src/capabilities.js";
-import { canonicalMcpName, configuredMcpServers, mcpPort, operation, stateDir, workspaceRoot, type PackageApi, type StandaloneContext } from "@stack/api";
+import { canonicalMcpName, configuredMcpServers, mcpPort, operation, packageServerAllowed, stateDir, workspaceRoot, type PackageApi, type PackageRole, type StandaloneContext } from "@stack/api";
 import { matchingProjects, serverMcpOrigins, roleMcpConfig, roleMcpConflict } from "./src/bundle.js";
 import { RoleStore, instructionLimitBytes, renderSegments, renderBotInstructions, snapshotLimitChars, roleName, roleDescription } from "./src/store.js";
 import { botMarkdown } from "./src/bot-markdown.js";
@@ -81,12 +81,18 @@ function summarize(result: z.infer<typeof launchSnapshot>): z.infer<typeof snaps
 function changed(ctx: RolesContext, result: z.infer<typeof launchSnapshot>) { ctx.changed?.(); return { roleId: result.id, revision: result.revision }; }
 const internalMcpServers = () => configuredMcpServers(workspaceRoot(import.meta.dirname));
 const internalMcpNames = async () => (await internalMcpServers()).map((pkg) => pkg.name);
-const internalRows = (servers: Awaited<ReturnType<typeof internalMcpServers>>, snapshot: z.infer<typeof launchSnapshot>, harness?: z.infer<typeof capabilityHarness>) =>
+const internalRows = (servers: Awaited<ReturnType<typeof internalMcpServers>>, snapshot: z.infer<typeof launchSnapshot>, role: PackageRole, harness?: z.infer<typeof capabilityHarness>) =>
   servers.map(({ name, title, description, kind }) => {
-    const selectionReason = internalMcpSelection(snapshot, name, harness);
+    const selected = internalMcpSelection(snapshot, name, harness);
+    const selectionReason = selected === "included" && kind === "package" && !packageServerAllowed(role, name) ? "role_denied" : selected;
     return { name, title, description, kind, transport: "stdio" as const, enabled: !snapshot.disabledInternalMcpServers.includes(name),
       harnesses: snapshot.internalMcpHarnesses?.[name] ?? null, included: selectionReason === "included", selectionReason };
   });
+function accessRole(ctx: RolesContext, roleId: string): PackageRole {
+  const ids = ctx.store.accessRoleIds();
+  return roleId === ids.adminRoleId ? "admin" : roleId === ids.managerRoleId ? "manager"
+    : roleId === ids.workerRoleId ? "worker" : "unassigned";
+}
 /** Refuse a role MCP server a launch would refuse, whether or not it is enabled now. */
 async function ensureRoleMcp(ctx: RolesContext, name?: string, definition?: z.infer<typeof mcpDefinition>): Promise<void> {
   const origins = new Set(ctx.mcpOrigins ?? []);
@@ -136,7 +142,7 @@ export const roleInternalMcpList = operation({
   async call(ctx: RolesContext, { roleId, harness }) {
     const servers = await internalMcpServers();
     const value = ctx.store.role(roleId).snapshot();
-    return { roleId, revision: value.revision, servers: internalRows(servers, value, harness) };
+    return { roleId, revision: value.revision, servers: internalRows(servers, value, accessRole(ctx, roleId), harness) };
   },
 });
 export const roleInternalMcpUpdate = operation({
@@ -196,7 +202,7 @@ export const roleLaunchPreview = operation({
       return message ? [{ id: server.id, name: server.name, message }] : [];
     });
     const enabledProjects = value.trustedProjects.filter((project) => project.enabled);
-    const rows = internalRows(internal, value, harness);
+    const rows = internalRows(internal, value, accessRole(ctx, roleId), harness);
     const excludedCapabilities: z.infer<typeof launchPreview>["excludedCapabilities"] = [];
     for (const [kind, resources] of [["skill", value.skills], ["mcp", value.mcpServers]] as const) for (const resource of resources) {
       const reason = capabilitySelection(resource, harness);

@@ -396,7 +396,7 @@ test("a bot-bound MCP URL forwards verified bot and Codex thread context without
   }
 });
 
-test("Manager Worker turns coordinate default and explicit completion without event-tool grants", { timeout: 30_000 }, async () => {
+test("Manager Worker turns coordinate completion and grant only scoped event reads", { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-manager-watch-"));
   const env = { ...process.env, STACK_STATE_DIR: root, STACK_MCP_PORT: "0" };
   const dir = join(root, "packages", "worker"); await mkdir(dir, { recursive: true });
@@ -444,6 +444,8 @@ test("Manager Worker turns coordinate default and explicit completion without ev
       operation({ name: "worker_runtime_list", description: "Runtime identity", input: z.strictObject({}), output: z.strictObject({ runtimes: z.array(z.strictObject({ id: z.uuid(), state: z.string(), instance: z.uuid() })) }),
         annotations: { readOnlyHint: true }, async call() { return { runtimes: [{ id: accountId, state: "running", instance: runtimeInstance }] }; } }),
       operation({ name: "worker_close", description: "No watch grant", input: z.strictObject({}), output: z.strictObject({}), async call() { return {}; } }),
+      operation({ name: "worker_secret", description: "Excluded read", input: z.strictObject({}), output: z.strictObject({ secret: z.string() }),
+        annotations: { readOnlyHint: true }, async call() { throw new Error("excluded read reached owner"); } }),
     ], events: { topics: { worker_turn_changed: "Turn changed" },
       scope: { description: "Exact request", example: "request:UUID", required: true,
         valid: (_ctx, scope) => /^request:[0-9a-f-]{36}$/.test(scope) } } });
@@ -462,15 +464,26 @@ test("Manager Worker turns coordinate default and explicit completion without ev
   const client = new Client({ name: "manager-watch", version: "1" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(url)));
-    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["worker_start", "worker_send", "worker_account_list", "worker_status", "worker_close"]);
+    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["worker_start", "worker_send", "worker_turn_observation", "worker_account_list", "worker_status", "worker_runtime_list", "worker_close", "events_catalog", "events_subscribe", "events_status", "events_unsubscribe"]);
     assert.deepEqual((await client.callTool({ name: "worker_account_list", arguments: {}, _meta: { threadId: "main" } })).structuredContent,
       { accounts: [{ id: accountId, provider: "codex", enabled: true, ready: true, removing: false }] });
+    const catalog = (await client.callTool({ name: "events_catalog", arguments: {}, _meta: { threadId: "main" } })).structuredContent as { reads: Array<{ name: string }> };
+    assert.ok(catalog.reads.some(read => read.name === "worker_status"));
+    assert.ok(!catalog.reads.some(read => read.name === "worker_secret"));
+    const scope = `request:${randomUUID()}`;
+    assert.equal((await client.callTool({ name: "events_subscribe", arguments: { topic: "worker_turn_changed", scope,
+      readOperation: "worker_secret" }, _meta: { threadId: "main" } })).isError, true);
+    const selected = await client.callTool({ name: "events_subscribe", arguments: { topic: "worker_turn_changed", scope,
+      readOperation: "worker_status", readArguments: { id: workerId } }, _meta: { threadId: "main" } });
+    assert.equal(selected.isError, undefined, JSON.stringify(selected.content));
+    const subscriptionId = (selected.structuredContent as { subscription: { id: string } }).subscription.id;
+    assert.equal((await client.callTool({ name: "events_unsubscribe", arguments: { id: subscriptionId }, _meta: { threadId: "main" } })).isError, undefined);
     const workerClient = new Client({ name: "worker-account-grant", version: "1" });
     try {
       await workerClient.connect(new StreamableHTTPClientTransport(new URL(workerMcpUrl(mcp.urls.worker!, workerId, runtimeInstance, env))));
-      assert.deepEqual((await workerClient.listTools()).tools.map(tool => tool.name), ["worker_status"]);
+      assert.deepEqual((await workerClient.listTools()).tools.map(tool => tool.name), []);
       assert.equal((await workerClient.callTool({ name: "worker_account_list", arguments: {} })).isError, true);
-      assert.equal((await workerClient.callTool({ name: "worker_status", arguments: { id: workerId } })).isError, undefined);
+      assert.equal((await workerClient.callTool({ name: "worker_status", arguments: { id: workerId } })).isError, true);
     } finally { await workerClient.close(); }
     for (const [operationName, subscribe, expectedWatch] of [
       ["worker_start", undefined, true], ["worker_send", undefined, true], ["worker_send", false, false], ["worker_start", true, true],
@@ -483,14 +496,14 @@ test("Manager Worker turns coordinate default and explicit completion without ev
         expectedWatch ? "pending" : null);
       assert.ok(admitted.includes(requestId), `${operationName} admitted the exact request`);
     }
-    assert.equal((await client.callTool({ name: "events_status", arguments: {}, _meta: { threadId: "main" } })).isError, true);
-    assert.equal((await client.callTool({ name: "worker_turn_observation", arguments: {}, _meta: { threadId: "main" } })).isError, true);
+    assert.equal((await client.callTool({ name: "events_status", arguments: {}, _meta: { threadId: "main" } })).isError, undefined);
+    assert.equal((await client.callTool({ name: "worker_turn_observation", arguments: { requestId: randomUUID(), botId: "bot-1", threadId: "main" }, _meta: { threadId: "main" } })).isError, undefined);
     const binding = new URL(url).search.slice(1);
     const relay = await relayMcpEvent(owner, { binding, pkg: "worker", tool: "operation_watch",
       arguments: { operation: "worker_send", input: { requestId: randomUUID() } }, threadId: "main", sessionId: null }, root, env);
     assert.ok((relay as { subscription?: unknown }).subscription, "private stdio relay coordinates the same Manager Worker watch");
-    await assert.rejects(relayMcpEvent(owner, { binding, pkg: "worker", tool: "events_catalog", arguments: {},
-      threadId: "main", sessionId: null }, root, env), /not granted/);
+    assert.ok((await relayMcpEvent(owner, { binding, pkg: "worker", tool: "events_catalog", arguments: {},
+      threadId: "main", sessionId: null }, root, env) as { reads: Array<{ name: string }> }).reads.some(read => read.name === "worker_status"));
     await assert.rejects(relayMcpEvent(owner, { binding, pkg: "worker", tool: "operation_watch",
       arguments: { operation: "worker_close", input: {} }, threadId: "main", sessionId: null }, root, env), /not granted/);
   } finally {
@@ -535,17 +548,17 @@ test("Worker MCP grants include selected content writes, keep existing runtime c
   try {
     assert.deepEqual(parseWorkerMcpIdentity(new URL(url), env), { workerId, instance });
     await client.connect(new StreamableHTTPClientTransport(new URL(url)));
-    assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ["item_get", "item_put", "artifact_publish"]);
+    assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ["item_get", "item_put"]);
     assert.deepEqual((await client.callTool({ name: "item_get", arguments: {} })).structuredContent, { ok: true });
     assert.deepEqual((await client.callTool({ name: "item_put", arguments: {} })).structuredContent, { ok: true });
-    assert.deepEqual((await client.callTool({ name: "artifact_publish", arguments: {} })).structuredContent, { url: "http://127.0.0.1/artifact" });
+    assert.equal((await client.callTool({ name: "artifact_publish", arguments: {} })).isError, true);
     assert.equal(seen[0]?.workerId, workerId);
     assert.equal(seen[0]?.workerInstance, instance);
     assert.equal(seen[0]?.botId, null);
     assert.equal((await client.callTool({ name: "collection_delete", arguments: {} })).isError, true);
     assert.equal((await client.callTool({ name: "events_subscribe", arguments: {} })).isError, true);
     await configure("[item_get]");
-    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["item_get", "item_put", "artifact_publish"],
+    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["item_get", "item_put"],
       "legacy read-only workerOperations cannot remove approved Worker writes");
     await configure("[item_get]", "[item_get]");
     assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["item_get"]);
@@ -561,7 +574,7 @@ test("Worker MCP grants include selected content writes, keep existing runtime c
     assert.equal((await fetch(tampered, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: "{}" })).status, 403);
     instance = "44444444-4444-4444-8444-444444444444";
     await assert.rejects(client.callTool({ name: "item_get", arguments: {} }), /401|Unauthorized/);
-    assert.equal(seen.length, 4);
+    assert.equal(seen.length, 3);
   } finally {
     await client.close(); await served.close(); await content.close(); await workers.close();
     await rm(root, { recursive: true, force: true });

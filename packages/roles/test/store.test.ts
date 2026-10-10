@@ -16,7 +16,7 @@ function openRole(root: string) {
 }
 
 async function internal(root: string) {
-  const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "bot", botId: "bot-1", endpoint: "unix:///fixture/bot.sock" }, { STACK_STATE_DIR: root });
+  const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "bot", botId: "bot-1", endpoint: "unix:///fixture/bot.sock", role: "admin" }, { STACK_STATE_DIR: root });
   return { auth: launches.auth! };
 }
 

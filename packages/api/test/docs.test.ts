@@ -58,11 +58,11 @@ test("the api package serves structured documents for every workspace package", 
     assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 287);
     for (const role of ["manager", "worker"] as const) {
       const selected = roleGrants[role] as Record<string, readonly string[]>;
-      assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 19 : 29);
+      assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 144 : 48);
       for (const [pkg, names] of Object.entries(selected)) for (const name of names)
-        assert.ok(mcpByPackage.get(pkg)?.includes(name), `stale ${role} grant: ${pkg}.${name}`);
+        assert.ok(name.startsWith("events_") || mcpByPackage.get(pkg)?.includes(name), `stale ${role} grant: ${pkg}.${name}`);
       assert.equal(packageToolAllowed(role, "roles", "role_set_default"), false);
-      assert.equal(packageToolAllowed(role, "worker", "worker_respond"), false);
+      assert.equal(packageToolAllowed(role, "worker", "worker_respond"), role === "manager");
     }
     for (const key of forwardTimeouts.keys()) {
       const [pkg, operation] = key.split("/");

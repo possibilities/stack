@@ -1,7 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { internalMcpLaunches, socketCall, socketPath, workspaceRoot } from "@stack/api";
+import { configuredMcpServers, internalMcpLaunches, socketCall, socketPath, workspaceRoot } from "@stack/api";
 import { mcpRecord, roleMcpConflict, type RoleSnapshot } from "@stack/roles";
 
 export type AcpMcp = { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> } |
@@ -25,10 +25,9 @@ export async function sessionMcpServers(snapshot: RoleSnapshot, env: NodeJS.Proc
   const server = await socketCall(socketPath("serve", env), "tools/call", { name: "serve_status", arguments: {} }, { timeoutMs: 5_000 }) as { mcpUrls: Record<string, string> };
   const launches = await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "worker", workerId: worker.id, instance: worker.instance }, env);
   const origins = new Set(Object.values(server.mcpUrls).map(url => new URL(url).origin));
-  const names = new Set<string>();
+  const names = new Set((await configuredMcpServers(workspaceRoot(import.meta.dirname))).map(({ name }) => name.toLowerCase()));
   const output: AcpMcp[] = [];
   for (const [name, launch] of Object.entries(launches)) {
-    names.add(name.toLowerCase());
     if (snapshot.disabledInternalMcpServers.includes(name)) continue;
     output.push({ name, command: launch.command, args: launch.args, env: Object.entries(launch.env).map(([name, value]) => ({ name, value })) });
   }

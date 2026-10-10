@@ -315,11 +315,11 @@ test("owner MCP connections are materialized in each launch bundle without persi
   const cwd = await mkdtemp(join(tmpdir(), "stack-mcp-cwd-"));
   const launches: string[][] = [];
   const { internalMcpLaunches, workspaceRoot } = await import("@stack/api");
-  const exposed = ["auth"];
+  const exposed = ["notify"];
   const supervisor = new Supervisor({
     stateDir,
     endpoint: async () => `ws://127.0.0.1:${43400 + launches.length}`,
-    mcpServers: async (botId, endpoint) => Object.fromEntries(Object.entries(await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "bot", botId, endpoint }, { STACK_STATE_DIR: stateDir })).filter(([name]) => exposed.includes(name))),
+    mcpServers: async (botId, endpoint, role) => Object.fromEntries(Object.entries(await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "bot", botId, endpoint, role }, { STACK_STATE_DIR: stateDir })).filter(([name]) => exposed.includes(name))),
     launch(spec) {
       launches.push(spec.args);
       let finish: (code: number | null) => void = () => undefined;
@@ -339,14 +339,14 @@ test("owner MCP connections are materialized in each launch bundle without persi
     await supervisor.start({ id: "with-mcp", cwd, args: ["-c", 'model="gpt-5.4"'] });
     const firstRoot = launches[0]?.[launches[0].indexOf("--capabilities") + 1];
     assert.ok(firstRoot);
-    assert.match(await readFile(join(firstRoot, "config.toml"), "utf8"), /\[mcp_servers.auth\]/);
+    assert.match(await readFile(join(firstRoot, "config.toml"), "utf8"), /\[mcp_servers.notify\]/);
     assert.deepEqual(supervisor.store.servers()[0]?.args, ["-c", 'model="gpt-5.4"']);
     await supervisor.stop("with-mcp");
-    exposed.push("bots");
+    exposed.push("brain");
     await supervisor.start({ id: "with-mcp", cwd });
     const secondRoot = launches[1]?.[launches[1].indexOf("--capabilities") + 1];
     assert.ok(secondRoot);
-    assert.match(await readFile(join(secondRoot, "config.toml"), "utf8"), /\[mcp_servers.bots\]/);
+    assert.match(await readFile(join(secondRoot, "config.toml"), "utf8"), /\[mcp_servers.brain\]/);
     assert.equal(supervisor.list()[0]?.mainThreadId, null);
   } finally {
     await supervisor.stopAll();

@@ -10,7 +10,7 @@ export const capabilityHarnesses = z.array(capabilityHarness).max(4)
   .describe("Allowed launch harnesses. Null or omission on creation means all; [] means none. Updates preserve omission and null clears the restriction.");
 export type CapabilityHarnesses = z.infer<typeof capabilityHarnesses>;
 export const internalMcpHarnesses = z.record(z.string().min(1), capabilityHarnesses.unwrap());
-export const capabilitySelectionReason = z.enum(["included", "disabled", "harness_required", "harness_mismatch"]);
+export const capabilitySelectionReason = z.enum(["included", "disabled", "harness_required", "harness_mismatch", "role_denied"]);
 export type CapabilitySelectionReason = z.infer<typeof capabilitySelectionReason>;
 
 export function capabilitySelection(resource: { enabled: boolean; harnesses?: CapabilityHarnesses }, harness?: CapabilityHarness): CapabilitySelectionReason {

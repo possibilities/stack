@@ -5,7 +5,7 @@ import type { McpEventSubscriptions } from "./mcp-subscriptions.js";
 import { currentMcpCatalog, currentWorkerCatalog, type SocketCatalog } from "./exposure.js";
 import { listenInput } from "./occurrence-subscriptions.js";
 import { mcpInvocation, packageRole, parseMcpBinding, verifyMcpIdentity } from "./mcp-authority.js";
-import { completionWatchAllowed } from "./role-grants.js";
+import { completionWatchAllowed, packageToolAllowed, type PackageRole } from "./role-grants.js";
 
 export const subscriptionTools: Tool[] = [
   { name: "events_listen", description: "Attach a typed occurrence source to this verified Bot Chat or Worker. Stack owns polling, durable intake and cursor recovery. native uses Codex start-or-steer, or a recorded Worker follow-up after its active prompt ends. interrupt explicitly cancels a Worker's active prompt first. Worker intake is not native acknowledgement or consumption. Repeating identical arguments preserves the existing cursor; unknown deliveries never replay automatically.", inputSchema: {
@@ -28,16 +28,31 @@ export function mcpEventCatalog(doc: SocketCatalog) {
     reads: doc.tools.filter(tool => tool.annotations?.readOnlyHint).map(({ name, description, inputSchema }) => ({ name, description: description ?? "", inputSchema })) };
 }
 
+/** Keep generated catalog reads within the same positive grant as tools/list. */
+export function roleEventCatalog(doc: SocketCatalog, role: PackageRole, pkg: string): SocketCatalog {
+  if (role === "admin") return doc;
+  return { ...doc, tools: doc.tools.filter(tool => packageToolAllowed(role, pkg, tool.name)).map(tool => {
+    if (packageToolAllowed(role, pkg, "events_listen")) return tool;
+    const { eventSource: _source, ...ordinary } = tool;
+    return ordinary;
+  }) };
+}
+
 /** Runs only in the serve owner; both local HTTP and private stdio relays use it. */
 export function subscriptionService(service: McpEventSubscriptions, root: string, env: NodeJS.ProcessEnv): McpEventCall {
   return async (pkg, tool, args, invocation, signal) => {
     signal.throwIfAborted();
-    const listed = invocation.workerId ? await currentWorkerCatalog(root, pkg, env) : await currentMcpCatalog(root, pkg, env);
+    const role = await packageRole(invocation.workerId ? { workerId: invocation.workerId, instance: invocation.workerInstance! }
+      : invocation.botId && invocation.instance ? { botId: invocation.botId, instance: invocation.instance } : null, env);
+    const listed = roleEventCatalog(invocation.workerId ? await currentWorkerCatalog(root, pkg, env) : await currentMcpCatalog(root, pkg, env), role, pkg);
     if (tool === "operation_watch") {
       await service.validateInvocation(invocation);
       const input = z.strictObject({ operation: z.string(), input: z.record(z.string(), z.unknown()) }).parse(args);
+      if (!packageToolAllowed(role, pkg, input.operation) || !completionWatchAllowed(role, pkg, input.operation))
+        throw new Error("completion watch is not granted to this role");
       return service.callAndWatch(pkg, input.operation, input.input, invocation);
     }
+    if (!packageToolAllowed(role, pkg, tool)) throw new Error("event tool is not granted to this role");
     if (tool === "events_listen") {
       if (!service.occurrences) throw new Error("occurrence subscription owner is unavailable");
       return { subscription: await service.occurrences.subscribe(pkg, listenInput.parse(args), invocation) };
@@ -48,8 +63,12 @@ export function subscriptionService(service: McpEventSubscriptions, root: string
       const input = z.strictObject({ completionId: z.uuid().optional() }).parse(args);
       if (!invocation.workerId) await service.validateInvocation(invocation);
       else if (input.completionId) throw new Error("Bot completion receipts are unavailable to Workers");
-      return { ...(invocation.workerId ? { subscriptions: [], completions: [], completionsTruncated: false, lifetime: "durable" } : service.status(invocation, input.completionId)),
-        occurrences: await service.occurrences?.status(invocation) ?? [] };
+      const status = invocation.workerId ? { subscriptions: [], completions: [], completionsTruncated: false, lifetime: "durable" as const }
+        : service.status(invocation, input.completionId);
+      return { ...status,
+        subscriptions: status.subscriptions.filter(item => packageToolAllowed(role, item.pkg, "events_subscribe") && packageToolAllowed(role, item.pkg, item.readOperation)),
+        completions: status.completions.filter(item => packageToolAllowed(role, item.pkg, item.operation) && completionWatchAllowed(role, item.pkg, item.operation)),
+        occurrences: (await service.occurrences?.status(invocation) ?? []).filter(item => packageToolAllowed(role, item.pkg, "events_listen")) };
     }
     if (tool === "events_unsubscribe") {
       const id = z.strictObject({ id: z.uuid() }).parse(args).id;
@@ -80,8 +99,9 @@ export async function relayMcpEvent(service: McpEventSubscriptions, input: z.inf
   await verifyMcpIdentity(identity, env);
   const permitted = async () => {
     const role = await packageRole(identity, env);
-    return role === "admin" || input.tool === "operation_watch" &&
-      completionWatchAllowed(role, input.pkg, input.arguments.operation as string);
+    return input.tool === "operation_watch" ? completionWatchAllowed(role, input.pkg, input.arguments.operation as string)
+      && packageToolAllowed(role, input.pkg, input.arguments.operation as string)
+      : packageToolAllowed(role, input.pkg, input.tool);
   };
   if (!(await permitted())) throw new Error("event relay is not granted to this role");
   const invocation = mcpInvocation(identity, input);

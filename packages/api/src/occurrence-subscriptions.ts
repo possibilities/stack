@@ -9,6 +9,7 @@ import { stateHash } from "./state.js";
 import { pollInput, pollOutput, type Occurrence } from "./occurrence.js";
 import { McpDeliveryRejected } from "./completion-watch.js";
 import { packageRole } from "./mcp-authority.js";
+import { packageToolAllowed } from "./role-grants.js";
 import type { InvocationContext } from "./operation.js";
 
 export type OccurrenceTarget = { kind: "bot"; botId: string; threadId: string; instance: string }
@@ -67,7 +68,8 @@ export class OccurrenceSubscriptions {
     const catalog = await this.catalog(subscription.pkg, subscription.target);
     const source = catalog.tools.find(tool => tool.eventSource?.name === subscription.name);
     if (!source || source.annotations?.readOnlyHint !== true) throw new McpError(-32012, "Forbidden", { kind: "event" });
-    if (await packageRole(subscription.target, this.env) !== "admin")
+    const role = await packageRole(subscription.target, this.env);
+    if (!packageToolAllowed(role, subscription.pkg, "events_listen") || !packageToolAllowed(role, subscription.pkg, source.name))
       throw new McpError(-32012, "Forbidden", { kind: "event" });
     return source;
   }
