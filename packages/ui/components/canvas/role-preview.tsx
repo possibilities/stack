@@ -220,7 +220,7 @@ function LaunchView({ launch, updating }: { launch: RoleLaunchPreview; updating:
             </button>
           ))}
           {launch.internalMcpServers.map((server) => {
-            if (server.included) return <span key={server.name} className={cn(chip, "bg-muted text-muted-foreground")} title={`${server.name} · ${server.transport} · Stack server, bound to each launch. ${server.description}`}>{server.title}</span>;
+            if (server.included) return <span key={server.name} className={cn(chip, "bg-muted text-muted-foreground")} title={`${server.name} · ${server.transport} · selected by Role policy. ${server.description}`}>{server.title}</span>;
             // Stored off is still "Off for this Role"; a harness exclusion is named as one, never as off.
             const reason = exclusionLabel(server.selectionReason as Exclude<typeof server.selectionReason, "included">, launch.harness);
             const suffix = server.selectionReason === "disabled" ? "Off for this Role" : reason;
@@ -228,7 +228,7 @@ function LaunchView({ launch, updating }: { launch: RoleLaunchPreview; updating:
           })}
         </div>
         <p className="px-1.5 text-[0.66rem] text-pretty text-muted-foreground">
-          Stack connections use stdio on future launches when enabled and selected for the actual harness. This preview does not describe running connections. Additional Role connections keep their configured transport.
+          Stack connections use stdio when selected for the actual harness. Codex Role injection omits bridges absent from its live upstream catalog at launch. This preview shows Role policy, not current bridge availability. Additional Role connections keep their configured transport.
         </p>
         <p className="px-1.5 text-[0.66rem] text-pretty text-muted-foreground">{injectionGuidance}</p>
         {launch.config ? (

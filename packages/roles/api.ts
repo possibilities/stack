@@ -45,13 +45,13 @@ const count = z.number().int().nonnegative();
 const internalServer = z.strictObject({ name: z.string().describe("Stable connection key."), title: z.string().describe("Display name; the key for Package APIs."),
   description: z.string(), kind: z.enum(["package", "codex"]).describe("A Package API, or a Codex tool bridge whose availability serve_codex_tools reports."), transport: z.literal("stdio").describe("Native transport for internal Bot, Worker and injected Role connections."),
   enabled: z.boolean().describe("The Role's stored switch, independent of harness selection."), harnesses: capabilityHarnesses,
-  included: z.boolean().describe("Whether this connection enters a launch for the requested harness."), selectionReason: capabilitySelectionReason });
+  included: z.boolean().describe("Whether Role policy selects this connection for the requested harness. Codex Role injection also omits bridges unavailable in its live upstream catalog."), selectionReason: capabilitySelectionReason });
 const launchPreview = z.strictObject({
   roleId, revision, harness: capabilityHarness.nullable().describe("Capability-selection harness; null means unspecified, not inferred from instruction context."),
   instructions: z.strictObject({ bytes: count.describe("UTF-8 size of instruction fragments."), botBytes: count.describe("UTF-8 size of Bot SYSTEM_APPEND.md, including bot.md."), limitBytes: count, fragments: count.describe("Fragments that render.") }),
   skills: z.array(z.strictObject({ id, name: resourceName, description: resourceDescription, files: count.describe("Supporting files beside SKILL.md."),
     bytes: count.describe("Decoded size of the body and supporting files.") })).describe("Skills selected for the requested harness, in order; each becomes skills/<name>/SKILL.md."),
-  internalMcpServers: z.array(internalServer).describe("The default MCP fleet, stored enablement and effective harness selection. Only included connections enter a launch."),
+  internalMcpServers: z.array(internalServer).describe("The default MCP fleet, stored enablement and effective harness selection. Codex Role injection checks bridge availability at launch."),
   mcpServers: z.array(z.strictObject({ id, name: resourceName, type: z.enum(["http", "stdio"]) })).describe("Role MCP servers selected for the requested harness, in order."),
   excludedCapabilities: z.array(z.strictObject({ kind: z.enum(["skill", "mcp", "internal-mcp"]), id: z.string(), name: z.string(), reason: capabilitySelectionReason.exclude(["included"]) }))
     .describe("Capabilities not selected, with stable resource ID (connection name for internal MCP) and the reason. Contains no MCP definitions."),
@@ -185,7 +185,7 @@ export const rolePreview = operation({
   },
 });
 export const roleLaunchPreview = operation({
-  name: "role_launch_preview", description: "Preview launch capabilities selected for an explicit actual harness, exclusions and reasons, MCP config.toml, trusted projects and selected-MCP issues. Omitted harness includes only unrestricted enabled capabilities. Instruction counts independently use rendering context; context.harness never selects capabilities. No setting changes and no runtime starts.",
+  name: "role_launch_preview", description: "Preview Role launch selection, exclusions, MCP config.toml, trusted projects and MCP issues for an explicit harness. Codex injection also checks live bridge availability at launch, so unavailable bridges may be omitted. Omitted harness selects unrestricted capabilities. Instruction rendering context does not select capabilities. Read only; starts no runtime.",
   input: selection.extend({ harness: capabilityHarness.optional(), context: renderContext.optional(), cwds: z.array(z.string().max(4_096).refine(isAbsolute, "working directory must be an absolute path")).max(64).optional()
     .describe("Working directories to match against trusted project roots, such as each Bot's cwd.") }),
   output: launchPreview, annotations: { title: "Preview role launch", readOnlyHint: true },

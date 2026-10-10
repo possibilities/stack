@@ -5,7 +5,7 @@ import { access, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/pr
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { assertInstallationOpen, configuredMcpServers, internalMcpLaunches, mcpPort, mcpToolTimeoutSeconds, stateDir, workspaceRoot } from "@stack/api";
+import { assertInstallationOpen, CodexToolsDiagnostics, configuredMcpServers, internalMcpLaunches, mcpPort, mcpToolTimeoutSeconds, stateDir, workspaceRoot } from "@stack/api";
 import { roleMcpConflict, serverMcpOrigins } from "./bundle.js";
 import { injectArguments, type Harness } from "./inject-args.js";
 import { startOpenCodeHost } from "./inject-opencode.js";
@@ -156,6 +156,17 @@ async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
   try {
     await file(join(root, "launch.json"), json({ harness, roleId: snapshot.id, roleRevision: snapshot.revision, createdAt: new Date().toISOString() }));
     const servers = await connections(snapshot, selected.access, root, lock.birth);
+    if (harness === "codex") {
+      // Codex bridges are shared by Roles, but an unavailable upstream cannot
+      // start a usable MCP server. Probe without a model turn before registering it.
+      const diagnostics = new CodexToolsDiagnostics(process.env);
+      try {
+        diagnostics.check();
+        await diagnostics.settled();
+        for (const connection of diagnostics.snapshot().connections)
+          if (connection.catalog.state !== "available" || !connection.catalog.tools) delete servers[connection.name];
+      } finally { await diagnostics.close(); }
+    }
     let argv: string[];
     if (harness === "claude") {
       // setting-sources gates native home/project customizations without changing

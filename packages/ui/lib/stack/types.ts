@@ -754,7 +754,7 @@ export type RoleLaunchPreview = {
   harness: RoleCapabilityHarness | null;
   instructions: { bytes: number; botBytes?: number; limitBytes: number; fragments: number };
   skills: Array<{ id: string; name: string; description: string; files: number; bytes: number }>;
-  /** Every configured internal connection; only included ones enter this preview's launch. */
+  /** Policy-selected connections; Codex Role injection also checks live bridge availability. */
   internalMcpServers: RoleInternalServer[];
   mcpServers: Array<{ id: string; name: string; type: "http" | "stdio" }>;
   excludedCapabilities: Array<{ kind: "skill" | "mcp" | "internal-mcp"; id: string; name: string; reason: Exclude<RoleCapabilitySelection, "included"> }>;
