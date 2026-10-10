@@ -123,9 +123,10 @@ test("inject provisions missing defaults without a server and regenerates capabi
       if (index === 0) assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
       else assert.equal(report.instructions, "");
       assert.deepEqual(report.skills, {});
-      const binding = JSON.parse(Buffer.from(report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
+      const binding = JSON.parse(Buffer.from(report.config.mcpServers.brain.env.STACK_MCP_INJECT_BINDING, "base64url").toString());
       assert.equal(binding.role, index === 0 ? "manager" : "worker");
-      assert.equal(report.config.mcpServers.roles.env.STACK_MCP_OPERATOR, "");
+      assert.equal(report.config.mcpServers.brain.env.STACK_MCP_OPERATOR, "");
+      assert.equal(report.config.mcpServers.roles, undefined, "restricted Roles omit the ungranted Roles Package server");
     }
     await assert.rejects(stat(socketPath("roles", f.env)), { code: "ENOENT" });
     assert.equal((await stat(f.state)).mode & 0o777, 0o700);
@@ -215,7 +216,7 @@ test("inject launches each native boundary with the selected bytes, private cred
   const f = await setup();
   try {
     const roleId = await populate(f);
-    const names = [...(await configuredMcpServers(workspaceRoot(import.meta.dirname))).map(item => item.name).filter(name => name !== "notify"), "external", "stdio"].sort();
+    const names = [...(await configuredMcpServers(workspaceRoot(import.meta.dirname))).filter(item => item.kind === "codex").map(item => item.name), "external", "stdio"].sort();
     const snapshot = await f.call("role_snapshot", { roleId });
     await f.call("fragment_update", { roleId, expectedRevision: snapshot.revision, id: snapshot.categories[0].fragments[0].id,
       conditions: { model: "render-only-model", harness: "render-only-harness" } });
@@ -244,8 +245,8 @@ test("inject launches each native boundary with the selected bytes, private cred
       assert.equal(result.code, 7, result.stderr);
       const report = JSON.parse(result.stdout);
       assert.ok(!report.argv.some((arg: string) => /with-model|with-harness|render-only/.test(arg)));
-      const binding = harness === "claude" ? report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING
-        : harness === "opencode" ? report.config.mcp.servers.roles.environment.STACK_MCP_INJECT_BINDING
+      const binding = harness === "claude" ? report.config.mcpServers.chrome.env.STACK_MCP_INJECT_BINDING
+        : harness === "opencode" ? report.config.mcp.servers.chrome.environment.STACK_MCP_INJECT_BINDING
           : /"STACK_MCP_INJECT_BINDING" = "([^"]+)"/.exec(report.config)?.[1];
       assert.equal(JSON.parse(Buffer.from(binding, "base64url").toString()).role, "unassigned", "a custom Role keeps its capabilities without acquiring canonical grants");
       assert.deepEqual(harness === "opencode" ? [report.argv[0], ...report.argv.slice(3)] : report.argv.slice(-native.length), native);
@@ -259,13 +260,13 @@ test("inject launches each native boundary with the selected bytes, private cred
         assert.match(report.instructions, /Be a thoughtful, warm and capable collaborator/);
         assert.equal(report.memory, "1");
         assert.equal(report.argv[report.argv.indexOf("--setting-sources") + 1], "");
-        assert.equal(report.config.mcpServers.roles.type, "stdio");
-        assert.equal(report.config.mcpServers.roles.command, process.execPath);
-        assert.equal(report.config.mcpServers.roles.env.STACK_MCP_AUTHORITY, "inject");
-        assert.equal(report.config.mcpServers.roles.env.STACK_MCP_OPERATOR, "");
-        assert.ok(report.config.mcpServers.roles.env.STACK_MCP_INJECT_BINDING);
-        assert.equal(report.config.mcpServers.roles.env.STACK_STATE_DIR, f.state);
-        assert.equal(report.config.mcpServers.roles.env.HOME, f.home);
+        assert.equal(report.config.mcpServers.chrome.type, "stdio");
+        assert.equal(report.config.mcpServers.chrome.command, process.execPath);
+        assert.equal(report.config.mcpServers.chrome.env.STACK_MCP_AUTHORITY, "inject");
+        assert.equal(report.config.mcpServers.chrome.env.STACK_MCP_OPERATOR, "");
+        assert.ok(report.config.mcpServers.chrome.env.STACK_MCP_INJECT_BINDING);
+        assert.equal(report.config.mcpServers.chrome.env.STACK_STATE_DIR, f.state);
+        assert.equal(report.config.mcpServers.chrome.env.HOME, f.home);
         assert.equal(report.config.mcpServers.external.headers.Authorization, "Bearer private-fixture-token");
         assert.equal(report.config.mcpServers.stdio.env.ROLE_TEST_ENV, "private-fixture-env");
         assert.deepEqual(Object.keys(report.config.mcpServers).sort(), selectedNames);
@@ -294,12 +295,12 @@ test("inject launches each native boundary with the selected bytes, private cred
           assert.equal(report.env.db, f.env.OPENCODE_DB);
           assert.equal(report.env.file, undefined); assert.equal(report.env.inline, undefined); assert.equal(report.env.cli, undefined);
           assert.equal(report.config.mcp.servers.external.headers["X-Test"], "private-fixture-header");
-          assert.equal(report.config.mcp.servers.roles.type, "local");
-          assert.equal(report.config.mcp.servers.roles.command[0], process.execPath);
-          assert.equal(report.config.mcp.servers.roles.environment.STACK_MCP_AUTHORITY, "inject");
-          assert.equal(report.config.mcp.servers.roles.environment.STACK_MCP_OPERATOR, "");
-          assert.ok(report.config.mcp.servers.roles.environment.STACK_MCP_INJECT_BINDING);
-          assert.equal(report.config.mcp.servers.roles.environment.STACK_STATE_DIR, f.state);
+          assert.equal(report.config.mcp.servers.chrome.type, "local");
+          assert.equal(report.config.mcp.servers.chrome.command[0], process.execPath);
+          assert.equal(report.config.mcp.servers.chrome.environment.STACK_MCP_AUTHORITY, "inject");
+          assert.equal(report.config.mcp.servers.chrome.environment.STACK_MCP_OPERATOR, "");
+          assert.ok(report.config.mcp.servers.chrome.environment.STACK_MCP_INJECT_BINDING);
+          assert.equal(report.config.mcp.servers.chrome.environment.STACK_STATE_DIR, f.state);
           assert.deepEqual(report.config.mcp.servers.stdio.command, [process.execPath, "--version", "one argument"]);
           assert.deepEqual(Object.keys(report.config.mcp.servers).sort(), selectedNames);
           assert.ok(report.config.plugins.includes("-opencode.config.compatibility"));

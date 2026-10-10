@@ -373,13 +373,14 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.match(chunk.data, /Write an output file/);
     assert.equal(chunk.data.includes("Check your work"), true);
     assert.ok(scopedChanges.includes(id));
-    const fleet = (await configuredMcpServers(workspaceRoot(import.meta.dirname))).map(item => item.name);
-    const selectedNames = [...fleet.filter(name => !["notify", "codex-computer-use"].includes(name)), "fixture-mcp"];
+    const fleet = (await configuredMcpServers(workspaceRoot(import.meta.dirname)))
+      .filter(item => item.kind === "codex" || ["brain", "content", "scrape", "xcom"].includes(item.name)).map(item => item.name);
+    const selectedNames = [...fleet.filter(name => name !== "codex-computer-use"), "fixture-mcp"];
     assert.deepEqual(JSON.parse(await readFile(join(started.worker.cwd!, "mcp-names.json"), "utf8")), selectedNames);
     assert.deepEqual(await readdir(join(started.worker.cwd!, ".opencode", "skills")), ["review"]);
     assert.deepEqual((await loadWorkerRole(root, id)).skills.map(skill => skill.name), ["review", "codex-only"], "private capture retains unselected resources");
     const wiring = JSON.parse(await readFile(join(started.worker.cwd!, "mcp-launches.json"), "utf8")) as Array<{ name: string; command: string; env: Array<{ name: string; value: string }> }>;
-    const internal = wiring.find(item => item.name === "roles")!;
+    const internal = wiring.find(item => item.name === "brain")!;
     assert.equal(internal.command, process.execPath);
     assert.deepEqual(parseMcpBinding(internal.env.find(item => item.name === "STACK_MCP_BINDING")!.value, env), { workerId: id, instance: started.worker.runtimeInstance });
     assert.equal(JSON.stringify(await manager.status(id)).includes("fixture-secret"), false);
@@ -461,7 +462,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     await manager.close(); manager = undefined;
 
     // Recovery retains its captured Role; a changed legacy default pointer cannot redirect new starts.
-    const editedRole = contents.setInternalMcp(applied.revision, "roles", false);
+    const editedRole = contents.setInternalMcp(applied.revision, "brain", false);
     contents.setInternalMcp(editedRole.revision, "codex-computer-use", true, ["opencode"]);
     const roleCatalog = roleStore.createRole(roleStore.catalog().revision, "Next worker");
     const nextRoleId = roleCatalog.roles.at(-1)!.id;
@@ -491,7 +492,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     for (let i = 0; i < 100 && (await manager.status(next.worker.id)).worker.phase !== "idle"; i++) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(next.worker.roleId, roleId, "the mutable legacy pointer cannot redirect new Workers");
     assert.equal(next.worker.roleRevision, roleStore.role(roleId).snapshot().revision);
-    assert.deepEqual(JSON.parse(await readFile(join(next.worker.cwd!, "mcp-names.json"), "utf8")), [...fleet.filter(name => !["roles", "notify"].includes(name)), "fixture-mcp"]);
+    assert.deepEqual(JSON.parse(await readFile(join(next.worker.cwd!, "mcp-names.json"), "utf8")), [...fleet.filter(name => name !== "brain"), "fixture-mcp"]);
     assert.match(await readFile(join(next.worker.cwd!, ".opencode", "skills", "review", "SKILL.md"), "utf8"), /Review the diff/);
     assert.equal(await readFile(join(next.worker.cwd!, "output.txt"), "utf8"), `Check your work.\n\n# Role personality (bot.md)\n\nWorker personality marker.\n\n${start.task}`);
     await manager.closeWorker(next.worker.id);

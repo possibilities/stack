@@ -85,7 +85,7 @@ function sdkFixture() {
           message: { content: [{ type: "tool_result", tool_use_id: tool, content: "written" }] } });
         output.emit({ type: "stream_event", uuid: randomUUID(), session_id: id, parent_tool_use_id: null,
           event: { type: "message_start", message: { id: messageId } } });
-        const internal = options.mcpServers?.roles;
+        const internal = options.mcpServers?.brain;
         const textOutput = text === "SECRETS" && internal && "env" in internal
           ? `This worker must not retain ${internal.env?.STACK_MCP_BINDING} or fixture-bearer-token` : "Done.\n";
         for (let i = 0; i < textOutput.length; i += 7) output.emit({ type: "stream_event", uuid: randomUUID(), session_id: id, parent_tool_use_id: null,
@@ -172,7 +172,8 @@ test("Claude SDK workers preserve account/session continuity, exact permission a
     await assert.rejects(stat(join(plugin.path, "skills", "excluded")), { code: "ENOENT" });
     assert.equal(native.options.mcpServers!["codex-computer-use"], undefined);
     assert.equal(native.options.mcpServers!.excluded, undefined);
-    const internal = native.options.mcpServers!.roles!;
+    assert.equal(native.options.mcpServers!.roles, undefined, "Worker launch omits the ungranted Roles Package server");
+    const internal = native.options.mcpServers!.brain!;
     assert.ok("command" in internal);
     assert.equal(internal.command, process.execPath);
     assert.equal(internal.env?.STACK_STATE_DIR, root);

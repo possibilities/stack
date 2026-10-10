@@ -80,7 +80,9 @@ test("Manager notifications remain owned by their Bot", async () => {
     assert.equal(watched.isError, undefined);
     assert.equal((watched.structuredContent as Send).subscription?.state, "pending",
       "Manager's normal Bot prompt default installs a coordinated completion watch");
-    assert.equal((await mcpCall("events_status", {})).isError, true, "the watch does not grant Manager event tools");
+    const status = await mcpCall("events_status", {});
+    assert.equal(status.isError, undefined, "a managed Manager may inspect its granted event tools");
+    assert.ok((status.structuredContent as { completions: Array<{ id: string }> }).completions.some(item => item.id === (watched.structuredContent as Send).subscription?.id));
     const sent = await callAs(first, "notification_send", { title: "Question", message: "Choose", actions: ["Yes"], group: "assignment", subscribe: false }) as Send;
     assert.equal(sent.subscription, null);
     assert.equal((await callAs(first, "notification_get", { id: sent.id }) as Notification).id, sent.id);
