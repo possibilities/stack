@@ -103,7 +103,7 @@ export function injectCommand(roleName: string | null, context: RoleRenderContex
   return ["stack", "roles", "inject", roleName ? shellWord(roleName) : "default", ...flags, "--"].join(" ");
 }
 
-export const injectionGuidance = "Role injection reads an existing compatible Role store without the Server. It does not create, migrate or repair Roles; a missing or incompatible store is a setup error, not an empty Role. Internal tools can list without the Server, but only explicitly standalone-capable calls can execute without their service. Native runtime/plugin installation, authentication and approvals are separate.";
+export const injectionGuidance = "Role injection reads an existing compatible Role store without the Server. It does not create, migrate or repair Roles; a missing or incompatible store is a setup error, not an empty Role. Internal tools can list without the Server, but only explicitly standalone-capable calls can execute without their service. Injected CLI sessions have no managed delivery target, so thread-owned event tools are omitted. Native runtime/plugin installation, authentication and approvals are separate.";
 
 /** Why a fragment does or does not reach SYSTEM_APPEND.md in a rendering context. A disabled category outranks the fragment's own state. */
 export type FragmentState = "renders" | "off" | "category-off" | "empty" | "missing-context" | "mismatch";

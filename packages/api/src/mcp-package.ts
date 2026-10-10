@@ -34,7 +34,11 @@ export function packageMcpServer(name: string, description: string, root: string
   const eventTools = (topics: string[], catalog: SocketCatalog) => {
     if (!events) return [];
     const occurrences = catalog.tools.some(tool => tool.eventSource);
-    return subscriptionTools.filter(tool => tool.name === "events_listen" ? occurrences : topics.length || occurrences);
+    // Injected Roles have a verified launch but no Bot Chat or Worker intake
+    // target. Their event catalog is local; durable subscription tools cannot
+    // deliver to them and must not appear in their tool inventory.
+    return subscriptionTools.filter(tool => (!injected || tool.name === "events_catalog") &&
+      (tool.name === "events_listen" ? occurrences : topics.length || occurrences));
   };
   // Draft poll methods are protocol requests, not model tools. Internal stdio
   // lists installed descriptors; execution always visits the live source owner.

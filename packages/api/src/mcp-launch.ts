@@ -42,8 +42,9 @@ export async function internalMcpLaunches(root: string, authority: McpLaunchAuth
     const { catalog, exposure } = await installedMcpCatalog(root, entry.name);
     const ordinary = catalog.tools.some(tool => packageToolAllowed(role, entry.name, tool.name));
     const events = exposure.events.length > 0 || catalog.tools.some(tool => tool.eventSource);
-    const generated = events && (["events_catalog", "events_subscribe", "events_status", "events_unsubscribe"].some(name =>
-      packageToolAllowed(role, entry.name, name)) || catalog.tools.some(tool => tool.eventSource) && packageToolAllowed(role, entry.name, "events_listen"));
+    const generated = events && (authority.kind === "inject" ? packageToolAllowed(role, entry.name, "events_catalog")
+      : ["events_catalog", "events_subscribe", "events_status", "events_unsubscribe"].some(name =>
+        packageToolAllowed(role, entry.name, name)) || catalog.tools.some(tool => tool.eventSource) && packageToolAllowed(role, entry.name, "events_listen"));
     if (ordinary || generated) selected.push(entry);
   }
   return Object.fromEntries(selected.map(({ name }) => [name, {

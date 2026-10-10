@@ -220,13 +220,14 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
   const launchPath = join(env.STACK_STATE_DIR, "roles", "inject", "codex-AbC123");
   await mkdir(dir, { recursive: true });
   await mkdir(launchPath, { recursive: true });
-  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Fixture.\nmcp:\n  description: Fixture.\n  operations: all\n  events: []\n");
+  await writeFile(join(dir, "api.yaml"), "name: worker\ndescription: Fixture.\nmcp:\n  description: Fixture.\n  operations: all\n  events: [changed]\n");
   await mkdir(join(dir, "dist"));
   await writeFile(join(dir, "dist", "api.js"), `
     import { operation } from ${JSON.stringify(new URL("../src/operation.js", import.meta.url).href)};
     import { z } from ${JSON.stringify(import.meta.resolve("zod"))};
     export const api = { operations: ["worker_status", "worker_close", "worker_start", "worker_account_list", "worker_state_clear"].map(name =>
-      operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })) };
+      operation({ name, description: "Fixture.", input: z.strictObject({}), output: z.object({ ok: z.boolean() }), async call() {} })),
+      events: { topics: { changed: "Fixture change." } } };
   `);
   const brainDir = join(root, "packages", "brain");
   await mkdir(join(brainDir, "dist"), { recursive: true });
@@ -271,7 +272,10 @@ test("injected canonical Roles enforce grants at list and call, and lose authori
     for (const [role, expected] of [["admin", names], ["manager", names.slice(0, 4)]] as const) {
       const { client, launch } = await connect(role);
       assert.equal(launch.env.STACK_MCP_OPERATOR, "");
-      assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), expected);
+      assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), [...expected, "events_catalog"]);
+      assert.equal((await client.callTool({ name: "events_catalog" })).isError, undefined);
+      for (const name of ["events_subscribe", "events_status", "events_unsubscribe"])
+        assert.equal((await client.callTool({ name })).isError, true, `${role} cannot create a Bot-owned subscription from an injected CLI`);
       for (const name of names) {
         const before = invoked.length;
         const result = await client.callTool({ name });
