@@ -388,7 +388,10 @@
     const tab = t.closest("[data-tab]"); if (tab && !drag) { const id = tab.dataset.tab, hit = findLeaf(cur().tree, id); if (hit) { hit.leaf.a = hit.leaf.p.indexOf(id); cur().focus = id; renderAll(); } return; }
     const v = t.closest("[data-view]"); if (v) { const [id, i] = v.dataset.view.split("="); S.views[id] = +i; renderAll(); return; }
     const gt = t.closest("[data-goto]"); if (gt) { e.preventDefault(); navigate(gt.dataset.goto); return; }
-    const sl = t.closest("[data-sel]"); if (sl && !t.closest("button")) { const [k, val] = sl.dataset.sel.split("="); S.sel[k] = isNaN(+val) ? val : +val; renderAll(); return; }
+    const sl = t.closest("[data-sel]"); if (sl && !t.closest("button")) { const [k, val] = sl.dataset.sel.split("=");
+      /* ⌘/Ctrl-click opens a pinned pane that keeps this record, beside the focused pane. */
+      const pin = (e.metaKey || e.ctrlKey) && { "fleet.bot": "chat", "workers.sel": "worker", "proc.run": "proc-run" }[k]; if (pin) { addPane(`${pin}:${val}`, "right"); return; }
+      S.sel[k] = isNaN(+val) ? val : +val; renderAll(); return; }
     const f = t.closest("[data-focus]"); if (f) { cur().focus = f.dataset.focus; renderAll(); return; }
     const mi = t.closest("[data-mini]"); if (mi) { const col = stripColumns(S.space)[+mi.dataset.mini]; setFocus(col.panes[0]); return; }
     const act = t.closest("[data-act]"); if (!act) return; const a = act.dataset.act;

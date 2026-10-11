@@ -10,7 +10,8 @@
     "stage": "node scripts/stage.mjs",
     "test:portable": "node test/client-portable-check.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "prototype:panes": "node prototypes/pane-spaces/serve.mjs"
   },
   "dependencies": {
     "@stack/access": "workspace:*",
