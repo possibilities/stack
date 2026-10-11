@@ -171,7 +171,7 @@
     const s = SPACES[S.space], sp = cur();
     const presets = shell() === "strip" ? minimapHTML() : `<div class="seg" role="group" aria-label="Layout">${s.presets.map((p, i) => `<button aria-pressed="${i === sp.preset}" data-preset="${i}" title="${p.name} layout${i === sp.preset ? "" : " · [ ]"}">${glyph(p.tree)}${p.name}</button>`).join("")}</div>`;
     return `${S.back ? `<button class="back" data-act="back">${I("back")}${SPACES[S.back.space].title}</button>` : ""}
-      <div class="sp-title"><h1>${s.title}<span class="k">${s.key}</span></h1><p>${s.description}</p></div>
+      <div class="sp-title">${narrow() ? `<button data-act="overview" class="sp-switch" aria-label="Spaces">` : ""}<h1>${s.title}${narrow() ? I("down") : `<span class="k">${s.key}</span>`}</h1>${narrow() ? "</button>" : ""}<p>${s.description}</p></div>
       <div class="head-tools">${S.space === "scrape" ? `<span class="sp-state" title="The scrape WebSocket closed; panes keep their last reads">${H.dot("bad")}Reconnecting · last read 40s ago</span>` : ""}${S.remote ? `<span class="sp-state remote" title="Editing controls require ui:control; sign-in, voice and browser handoff stay local">${I("lock")}Remote · view only</span>` : ""}${presets}<button class="tool" data-act="picker" title="Add or reopen a pane">${I("plus")}<span class="lbl">Pane</span></button>
       <button class="tool" data-act="palette">${I("search")}<span class="lbl">Search</span><kbd>⌘K</kbd></button>
       <button class="tool" data-act="reference" aria-pressed="${S.drawer.open && S.drawer.mode === "reference"}">${I("book")}<span class="lbl">API</span></button>

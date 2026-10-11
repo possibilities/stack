@@ -450,6 +450,9 @@ html.vt-up::view-transition-new(panes) { animation: vt-down-in var(--vt, 260ms) 
   .pane-switch { display: flex; gap: 4px; overflow-x: auto; padding: 0 8px 8px; flex: none; scrollbar-width: none; }
   .pane-switch button { height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; color: var(--muted-foreground); background: var(--card); box-shadow: 0 0 0 1px var(--border); white-space: nowrap; }
   .pane-switch button[aria-pressed="true"] { color: var(--background); background: var(--foreground); box-shadow: none; }
+  .sp-switch h1 { display: inline-flex; align-items: center; gap: 4px; }
+  .ov-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 150px; overflow: auto; }
+  #overview { padding: 4px 8px 8px; }
 }
 
 /* ───────────── Prototype chrome (not part of the design) ───────────── */
