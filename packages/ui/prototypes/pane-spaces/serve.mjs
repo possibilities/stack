@@ -10,9 +10,11 @@ const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 
 createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^(\.\.[/\\])+/, "");
+  // Type the file actually served: "/" resolves to index.html and must go out as HTML, not a download.
+  const file = path.endsWith("/") ? join(path, "index.html") : path;
   try {
-    const body = await readFile(join(root, path === "/" ? "index.html" : path));
-    res.writeHead(200, { "content-type": types[extname(path)] || "application/octet-stream", "cache-control": "no-store" }).end(body);
+    const body = await readFile(join(root, file));
+    res.writeHead(200, { "content-type": types[extname(file)] || "application/octet-stream", "cache-control": "no-store" }).end(body);
   } catch {
     res.writeHead(404).end("not found");
   }
