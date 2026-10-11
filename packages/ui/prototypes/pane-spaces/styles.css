@@ -159,8 +159,6 @@ svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor;
 .cell.shaded { flex: 0 0 38px !important; }
 
 /* Zoom: one pane fills the space; the rest wait. */
-#panes.zoomed .cell:not(.zoom-path) { display: none; }
-#panes.zoomed .divider { display: none; }
 .zoom-chip { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 20; display: inline-flex; gap: 8px; align-items: center; height: 26px; padding: 0 6px 0 10px; border-radius: 999px; background: var(--foreground); color: var(--background); font-size: 12px; box-shadow: 0 8px 24px -8px oklch(0 0 0 / .4); }
 .zoom-chip button { color: inherit; opacity: .7; display: inline-flex; align-items: center; gap: 4px; }
 .zoom-chip .kbd { background: transparent; color: inherit; border-color: color-mix(in oklab, var(--background) 30%, transparent); }
@@ -303,6 +301,14 @@ a.goto:hover, .goto:hover { text-decoration-color: var(--accent); }
 .lanes { display: grid; gap: 0; }
 @container (min-width: 760px) { .lanes.adapt { grid-template-columns: repeat(5, minmax(0, 1fr)); } .lanes.adapt > .lane-col { border-right: 1px solid var(--line); } .lanes.adapt > .lane-col:last-child { border-right: 0; } }
 @container (max-width: 420px) { .hide-narrow { display: none !important; } }
+/* Panes answer to their own width: a narrow pane keeps every action but drops icon-button labels. */
+@container pane (max-width: 400px) { .meta .btn.sm:has(svg) .lbl { display: none; } .meta .btn.sm:has(svg) { padding: 0 6px; } }
+.sp-state { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; color: color-mix(in oklab, var(--destructive) 80%, var(--foreground)); background: color-mix(in oklab, var(--destructive) 8%, transparent); }
+.sp-state.remote { color: var(--foreground); background: color-mix(in oklab, var(--foreground) 6%, transparent); }
+.rail-item.dest { box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--sp) 70%, transparent); color: var(--sp); }
+.ov-mini .mini.foc { border-color: color-mix(in oklab, var(--sp) 65%, var(--border)); background: color-mix(in oklab, var(--sp) 10%, transparent); color: var(--foreground); }
+.pane-num { position: absolute; inset: 0; display: grid; place-items: center; z-index: 25; pointer-events: none; font: 600 56px var(--mono); color: color-mix(in oklab, var(--foreground) 70%, transparent); background: color-mix(in oklab, var(--card) 40%, transparent); }
+.pane.focus .pane-num { color: var(--accent); }
 @container (min-width: 560px) { .two-col { display: grid; grid-template-columns: 1fr 1fr; } }
 
 /* ───────────── Drawer: inspector and API reference, the global scratch column ───────────── */

@@ -103,7 +103,7 @@ window.H = {
   dot: (tone = "", label = "") => `<span class="dot ${tone}" ${label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"'}></span>`,
   sec: (title, n, aside) => `<div class="sec">${title}${n !== undefined && n !== null ? ` <span class="n">${n}</span>` : ""}${aside ? `<span class="aside">${aside}</span>` : ""}</div>`,
   kv: (pairs) => `<dl class="kv">${pairs.map(([k, v, c]) => `<dt>${k}</dt><dd class="${c || ""}">${v}</dd>`).join("")}</dl>`,
-  btn: (label, o = {}) => `<button class="btn ${o.primary ? "primary" : ""} ${o.sm ? "sm" : ""} ${o.danger ? "danger" : ""}" ${o.attrs || ""}>${o.icon ? I(o.icon) : ""}${label}</button>`,
+  btn: (label, o = {}) => `<button class="btn ${o.primary ? "primary" : ""} ${o.sm ? "sm" : ""} ${o.danger ? "danger" : ""}" ${o.icon ? `aria-label="${String(label).replace(/<[^>]+>/g, "")}"` : ""} ${o.attrs || ""}>${o.icon ? I(o.icon) + `<span class="lbl">${label}</span>` : label}</button>`,
   input: (ph, icon = "search", val = "") => `<label class="input">${icon ? I(icon) : ""}<input placeholder="${ph}" value="${H.esc(val)}" aria-label="${ph}"></label>`,
   meter(left) { const tone = left <= 10 ? "bad" : left <= 30 ? "warn" : ""; return `<span class="meter ${tone}" role="meter" aria-valuenow="${left}"><i style="width:${100 - left}%"></i></span>`; },
   sw: (on) => `<span class="switch ${on ? "on" : ""}" role="switch" aria-checked="${on}"></span>`,

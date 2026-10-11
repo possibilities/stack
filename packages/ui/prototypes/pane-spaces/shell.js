@@ -33,7 +33,7 @@
     theme: q.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
     call: q.get("call") !== "0",
     space: SPACES[q.get("space")] ? q.get("space") : "hud",
-    sp: {}, views: {}, overlay: null, menu: null, notes: q.get("notes") === "1", back: null, leader: false, toast: null, pal: { q: "", i: 0 }, ov: 0,
+    sp: {}, views: {}, overlay: null, menu: null, notes: q.get("notes") === "1", back: null, leader: false, paneNums: q.get("panenums") === "1", remote: q.get("remote") === "view", toast: null, pal: { q: "", i: 0 }, ov: 0,
     drawer: { open: Boolean(q.get("drawer")), pinned: q.get("pin") === "1", mode: q.get("drawer") === "reference" ? "reference" : "inspect" },
     sel: { "hud.item": "w2", "fleet.bot": "bot-1", "workers.sel": "7f3a", "inbox.sel": "n41", "source.del": 80, "proc.run": "r-9031", "proc.sched": "s2", "brain.hit": "rd-881", "content.doc": "pane-spaces-design", "roles.role": "Default", "roles.rec": "Worktrees for every change", "browse.handoff": "h-0c1f", "signal.sel": "a1", "accounts.sel": "codex-bot-account-1" },
   };
@@ -122,11 +122,11 @@
       ${tabs ? `<div class="tabs" role="tablist">${leaf.p.map((p, i) => `<button role="tab" aria-selected="${i === leaf.a}" data-tab="${p}">${titleOf(p)}${count(p)}</button>`).join("")}</div>`
         : `<div class="title" data-title="${id}"${d.node || rec ? ' title="Inspect"' : ""}>${titleOf(id)}${count(id)}${rec ? `<span class="rec">${H.esc(rec)}</span>` : ""}</div>`}
       ${views}
-      <div class="pane-acts">${id === "packages" || id === "scrape-queue" ? "" : ""}${S.space === "scrape" && kind(id).startsWith("scrape") ? `<span class="state-note">${H.dot("bad")} Reconnecting…</span>` : ""}
+      <div class="pane-acts">
         ${(d.actions || []).map((a) => iconBtn(ACTIONS[a][0], ACTIONS[a][1], ACTIONS[a][2] || "")).join("")}
         ${iconBtn(sp.zoom === id ? "unzoom" : "zoom", sp.zoom === id ? "Restore layout (z)" : "Zoom pane (z)", `data-act="zoom" data-pane-id="${id}"`)}
         ${iconBtn("more", "Pane menu", `data-act="menu" data-pane-id="${id}"`)}</div></div>`;
-    const body = `<div class="pane-body ${d.flush ? "flush" : ""}" data-sk="${id}">${d.body(ctx)}</div>`;
+    const body = `<div class="pane-body ${d.flush ? "flush" : ""}" data-sk="${id}">${d.body(ctx)}</div>${S.paneNums ? `<div class="pane-num">${slot + 1}</div>` : ""}`;
     const foot = d.foot ? `<div class="pane-foot">${d.foot(ctx)}</div>` : "";
     return `<section class="pane ${focused ? "focus" : ""} ${tabs ? "tabbed" : ""}" data-pane="${id}" data-slot="${slot}" style="--vtn-pane:p-${id.replace(/[^a-z0-9]/gi, "-")};--vtn-slot:slot-${slot}" aria-label="${titleOf(id)}">${head}${views ? `<div class="viewbar">${views}</div>` : ""}${body}${foot}</section>`;
   }
@@ -154,9 +154,9 @@
     const html = sp.tree.t === "stack" ? `<div class="cell" style="flex:1 1 0">${renderNode(sp.tree, ctx)}</div>` : renderNode(sp.tree, ctx);
     SPLITS = ctx.splits; return html;
   }
-  function mini(n, labels) {
-    if (n.t === "stack") return `<div class="mini ${n.p.length > 1 ? "tabs-mini" : ""}">${labels ? titleOf(n.p[n.a]) : ""}</div>`;
-    return `<div class="split ${n.t}" style="gap:${labels ? 3 : 1.5}px">${n.c.map((c) => `<div class="cell" style="flex:${c.s} 1 0">${mini(c.n, labels)}</div>`).join("")}</div>`;
+  function mini(n, labels, focus) {
+    if (n.t === "stack") return `<div class="mini ${n.p.length > 1 ? "tabs-mini" : ""} ${focus && n.p[n.a] === focus ? "foc" : ""}">${labels ? titleOf(n.p[n.a]) : ""}</div>`;
+    return `<div class="split ${n.t}" style="gap:${labels ? 3 : 1.5}px">${n.c.map((c) => `<div class="cell" style="flex:${c.s} 1 0">${mini(c.n, labels, focus)}</div>`).join("")}</div>`;
   }
   const glyph = (tree) => `<span class="glyph" style="display:flex">${mini(tree, false).replace(/class="mini[^"]*"><\/div>/g, 'class="mini" style="flex:1;background:currentColor;opacity:.5;border-radius:1px;min-width:0;min-height:0"></div>')}</span>`;
 
@@ -172,7 +172,7 @@
     const presets = shell() === "strip" ? minimapHTML() : `<div class="seg" role="group" aria-label="Layout">${s.presets.map((p, i) => `<button aria-pressed="${i === sp.preset}" data-preset="${i}" title="${p.name} layout${i === sp.preset ? "" : " · [ ]"}">${glyph(p.tree)}${p.name}</button>`).join("")}</div>`;
     return `${S.back ? `<button class="back" data-act="back">${I("back")}${SPACES[S.back.space].title}</button>` : ""}
       <div class="sp-title"><h1>${s.title}<span class="k">${s.key}</span></h1><p>${s.description}</p></div>
-      <div class="head-tools">${presets}<button class="tool" data-act="picker" title="Add or reopen a pane">${I("plus")}<span class="lbl">Pane</span></button>
+      <div class="head-tools">${S.space === "scrape" ? `<span class="sp-state" title="The scrape WebSocket closed; panes keep their last reads">${H.dot("bad")}Reconnecting · last read 40s ago</span>` : ""}${S.remote ? `<span class="sp-state remote" title="Editing controls require ui:control; sign-in, voice and browser handoff stay local">${I("lock")}Remote · view only</span>` : ""}${presets}<button class="tool" data-act="picker" title="Add or reopen a pane">${I("plus")}<span class="lbl">Pane</span></button>
       <button class="tool" data-act="palette">${I("search")}<span class="lbl">Search</span><kbd>⌘K</kbd></button>
       <button class="tool" data-act="reference" aria-pressed="${S.drawer.open && S.drawer.mode === "reference"}">${I("book")}<span class="lbl">API</span></button>
       <button class="tool" data-act="inspector" aria-pressed="${S.drawer.open && S.drawer.mode === "inspect"}" title="Inspector (i)">${I("panel")}</button></div>`;
@@ -197,7 +197,7 @@
   }
   function overviewHTML() {
     return `<div id="overview"><div class="ov-head"><h2>Overview</h2><p>Every space, its current layout and what needs you. Arrows and ⏎, or a space key.</p></div><div class="ov-grid">${SPACE_ORDER.map((id, i) => { const s = SPACES[id], a = s.attention;
-      return `<button class="ov-card ${id === S.space ? "cur" : ""} ${i === S.ov ? "on" : ""}" data-space="${id}" style="--sp:var(${s.accent})"><div class="top">${I(s.icon)}${s.title}<span class="kbd">${s.key}</span></div><div class="ov-mini">${mini(S.sp[id].tree, true)}</div><div class="ov-att ${a.reasons.length ? "" : "quiet"}">${a.reasons.length ? a.reasons.slice(0, 2).map((r) => `<span>● ${r}</span>`).join("") : "All quiet"}</div></button>`; }).join("")}</div></div>`;
+      return `<button class="ov-card ${id === S.space ? "cur" : ""} ${i === S.ov ? "on" : ""}" data-space="${id}" style="--sp:var(${s.accent})"><div class="top">${I(s.icon)}${s.title}<span class="kbd">${s.key}</span></div><div class="ov-mini">${mini(S.sp[id].tree, true, S.sp[id].focus)}</div><div class="ov-att ${a.reasons.length ? "" : "quiet"}">${a.reasons.length ? a.reasons.slice(0, 2).map((r) => `<span>● ${r}</span>`).join("") : "All quiet"}</div></button>`; }).join("")}</div></div>`;
   }
 
   function renderAll() {
@@ -213,11 +213,11 @@
     for (const [k, v] of Object.entries(scroll)) { if (k.endsWith(":in")) { const el = $(`[data-pane="${k.slice(0, -3)}"] .pane-body .pane-body`); if (el) el.scrollTop = v; } else { const el = $(`[data-sk="${k}"]`); if (el) el.scrollTop = v; } }
     if (shell() === "strip") $("#panes").scrollLeft = stripX;
     renderOverlay(); renderProto();
-    if (shell() === "mux" && S.leader) $("#panes").insertAdjacentHTML("beforeend", whichKeyHTML());
+    if (S.leader) $("#panes").insertAdjacentHTML("beforeend", whichKeyHTML());
     if (loaded && !q.get("shots")) history.replaceState(null, "", `?variant=${S.variant.key}&space=${S.space}${S.theme === "dark" ? "&theme=dark" : ""}`);
     document.title = `Stack · ${SPACES[S.space].title} (prototype ${S.variant.key})`;
   }
-  const whichKeyHTML = () => `<div class="whichkey"><span><b>←↑↓→</b>focus</span><span><b>⇧←↑↓→</b>swap</span><span><b>z</b>zoom</span><span><b>%</b>split right</span><span><b>"</b>split down</span><span><b>x</b>close</span><span><b>[ ]</b>layouts</span><span><b>0-9 h b n p s</b>spaces</span><span><b>o</b>overview</span><span><b>Esc</b>cancel</span></div>`;
+  const whichKeyHTML = () => `<div class="whichkey"><span style="color:var(--accent);font-weight:600">⌃B</span><span><b>←↑↓→ hjkl</b>focus</span><span><b>⇧←↑↓→</b>swap</span><span><b>q</b>pane numbers</span><span><b>z</b>zoom</span><span><b>%</b>split right</span><span><b>"</b>split down</span><span><b>x</b>close</span><span><b>[ ]</b>layouts</span><span><b>0-9 h b n p s</b>spaces</span><span><b>o</b>overview</span><span><b>Esc</b>cancel</span></div>`;
 
   /* ───────── Overlays ───────── */
   function commands() {
@@ -428,8 +428,14 @@
       else if (e.key === "Enter") { const c = items[S.pal.i]; S.overlay = null; renderOverlay(); c?.run(); }
       return;
     }
+    if (S.paneNums && !S.leader) {
+      e.preventDefault(); S.paneNums = false; const n = +e.key;
+      if (n >= 1) { const target = $$("#panes .pane")[n - 1]; if (target) cur().focus = target.dataset.pane; }
+      renderAll(); return;
+    }
     if (S.leader) {
       e.preventDefault(); S.leader = false; const k = e.key;
+      if (k === "q") { S.paneNums = true; renderAll(); return; }
       if (ARROWS[k]) { e.shiftKey ? swapDir(ARROWS[k]) : focusDir(ARROWS[k]); renderAll(); return; }
       const hjkl = { h: "left", j: "down", k: "up", l: "right" }[k]; if (hjkl) { focusDir(hjkl); renderAll(); return; }
       if (k === "z") return toggleZoom(); if (k === "x") return closePane(cur().focus); if (k === "%") return openPicker("right"); if (k === '"') return openPicker("bottom");
@@ -454,6 +460,8 @@
     if (k === "i") { if (S.drawer.open) transition("pane", () => { S.drawer.open = false; renderAll(); }); else openDrawer("inspect"); return; }
     const sp = SPACE_ORDER.find((id) => SPACES[id].key === k); if (sp) go(sp);
   });
+  /* Weave: hovering a link that leaves this space lights the destination in the rail before you go. */
+  document.addEventListener("mouseover", (e) => { const g = e.target.closest?.("[data-goto]"); $$(".rail-item.dest").forEach((el) => el.classList.remove("dest")); if (!g) return; const sp = g.dataset.goto.split("|")[0]; if (sp !== S.space) $(`.rail-item[data-space="${sp}"]`)?.classList.add("dest"); });
   document.addEventListener("input", (e) => { if (e.target.id === "palq") { S.pal.q = e.target.value; S.pal.i = 0; renderOverlay(); } });
   addEventListener("resize", () => { clearTimeout(renderAll.t); renderAll.t = setTimeout(renderAll, 80); });
 
