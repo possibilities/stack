@@ -85,9 +85,11 @@ See [operations](operations.md) for state, shutdown, and recovery, and [security
 All bots use `~/.local/libexec/codexnk/codex`. Sign in to a Codex Bot account through `auth`, read `account_list`, then call `bot_start` with `{ "account": "<enabled Codex Bot account UUID>" }` to allocate the
 next `bot-N` and a private workspace. It defaults to `sandbox_mode="danger-full-access"` and `approval_policy="never"`. Supply `id`, `cwd`, or `args` to override
 those launch choices and narrow access with later `-c` settings; a supplied external directory remains yours. Executable selection
-is not configurable. A new bot returns `mainThreadId: null`; connect a TUI
-with `codex --remote <url>` to create its first thread and send a turn. Once
-durable, that thread becomes `mainThreadId` and can be joined later with
-`codex --remote <url> resume <mainThreadId>`.
+is not configurable. New account-bound Bots allocate a sanctioned main thread and admit one automatic
+orientation turn. `bot_start` returns on admission; read `bot_list` and native
+chat history for the outcome. Use Fleet at `/fleet` to chat, or
+`codex --remote <url> resume <mainThreadId>` to join that exact thread.
+Legacy or explicitly reset Bots without a root use `chat_open` for their first
+input. See [core workflow verification](bot-browser-workflow.md).
 `scripts/install.sh --check` prints the dependency pin and installation plan
 without changes. Setup never starts or restarts services.

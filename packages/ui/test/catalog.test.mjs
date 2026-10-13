@@ -86,7 +86,7 @@ test("standalone reference capability never infers callability from read-only hi
 });
 
 test("watch reference templates preserve exact admission/read identities and independent MCP exposure", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "opencode/stack-reference-"));
+  const directory = await mkdtemp(join(tmpdir(), "stack-reference-"));
   try {
     // Installed declarations and actual manifest selections, without creating any owner contexts.
     const { packages } = await docsSnapshot.call({ root, env: { STACK_STATE_DIR: directory } }, {});
@@ -131,7 +131,7 @@ test("watch reference templates preserve exact admission/read identities and ind
 });
 
 test("occurrence reference examples derive from real source declarations and exact MCP selection", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "opencode/stack-reference-"));
+  const directory = await mkdtemp(join(tmpdir(), "stack-reference-"));
   try {
     // listenInput is not an @stack/api export; pollInput strictly proves the poll example invents no keys.
     const { packages } = await docsSnapshot.call({ root, env: { STACK_STATE_DIR: directory } }, {});

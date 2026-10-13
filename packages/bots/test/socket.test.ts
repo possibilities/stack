@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -141,6 +142,22 @@ test("bots own the complete app-server lifecycle on one socket", { timeout: 120_
     await call(socket, "chat_attachment_remove", { botId: first.id, threadId: opened.threadId, attachmentType: "note", identityKey: "one" });
     const queued = await call(socket, "chat_enqueue", { botId: first.id, threadId: opened.threadId, id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", input: [{ type: "text", text: "queued" }] }) as { id: string };
     assert.equal((await call(socket, "chat_queue_list", { botId: first.id, threadId: opened.threadId }) as { entries: { id: string }[] }).entries[0]?.id, queued.id);
+    // A file mention must reach the model as readable text, not Codex's plugin-only mention.
+    const sample = Buffer.from("Harmless attachment fixture");
+    const uploadId = randomUUID();
+    await call(socket, "chat_upload_start", { botId: first.id, id: uploadId, name: "sample.txt", bytes: sample.length, sha256: createHash("sha256").update(sample).digest("hex") });
+    await call(socket, "chat_upload_chunk", { botId: first.id, id: uploadId, offset: 0, data: sample.toString("base64") });
+    const upload = await call(socket, "chat_upload_finish", { botId: first.id, id: uploadId }) as { path: string };
+    const attachment = await call(socket, "chat_send", { botId: first.id, threadId: opened.threadId, input: [{ type: "mention", name: "sample.txt", path: upload.path }] }) as { turn: { id: string } };
+    const uploadedTurns = await call(socket, "chat_turns", { botId: first.id, threadId: opened.threadId }) as { data: Array<{ id: string; items: Array<{ content: Array<{ type: string; text?: string }> }> }> };
+    const attachmentInput = uploadedTurns.data.find((turn) => turn.id === attachment.turn.id)!.items[0]!.content;
+    assert.equal(attachmentInput[0]!.type, "text");
+    assert.ok(attachmentInput[0]!.text?.includes(upload.path));
+    assert.ok(attachmentInput[0]!.text?.includes("sample.txt"));
+    const outside = join(external, "outside.txt");
+    await writeFile(outside, "not attached");
+    await symlink(outside, join(first.cwd, "escape.txt"));
+    await assert.rejects(call(socket, "chat_send", { botId: first.id, threadId: opened.threadId, input: [{ type: "mention", name: "escape", path: "escape.txt" }] }), /file input must refer/);
     assert.deepEqual(first.settings, initial);
     assert.equal((await lstat(first.cwd)).mode & 0o777, 0o700);
     assert.equal((await lstat(join(stateDir, "bots", "ledger.sqlite"))).mode & 0o777, 0o600);

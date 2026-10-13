@@ -2,15 +2,27 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "@stack/ui#build": {
-      "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
     "test": {
-      "dependsOn": ["build", "^build"],
+      "dependsOn": [
+        "build",
+        "^build"
+      ],
       "cache": false
     },
     "@stack/api#test": {
@@ -33,7 +45,20 @@
       "cache": false
     },
     "@stack/ui#test": {
-      "dependsOn": ["build", "^build", "@stack/hud#build", "@stack/serve#build"],
+      "dependsOn": [
+        "build",
+        "^build",
+        "@stack/hud#build",
+        "@stack/serve#build"
+      ],
+      "cache": false
+    },
+    "@stack/roles#test": {
+      "dependsOn": [
+        "build",
+        "^build",
+        "@stack/serve#build"
+      ],
       "cache": false
     }
   }

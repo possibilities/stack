@@ -230,11 +230,12 @@ const threadChangeMethods = new Set([
   "item/started",
 ]);
 
-export function watchThreadEvents(url: string, onChange: () => void, onNotification?: (method: string, params: unknown) => void, onConnect?: () => void, onDisconnect?: () => void): () => void {
+export function watchThreadEvents(url: string, onChange: () => void, onNotification?: (method: string, params: unknown) => void, onConnect?: () => void, onDisconnect?: () => void, threadId?: string): () => void {
   let stopped = false;
   let ws: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let change: ReturnType<typeof setTimeout> | undefined;
+  let admission: ReturnType<typeof setTimeout> | undefined;
   const invalidate = () => {
     if (change || stopped) return;
     change = setTimeout(() => { change = undefined; if (!stopped) onChange(); }, 25);
@@ -244,9 +245,17 @@ export function watchThreadEvents(url: string, onChange: () => void, onNotificat
     if (stopped) return;
     const current = appServerSocket(url);
     ws = current;
+    admission = setTimeout(() => current.terminate(), 15_000);
+    admission.unref();
+    const connected = () => {
+      if (admission) clearTimeout(admission);
+      admission = undefined;
+      if (!stopped) onConnect?.();
+      if (!stopped) onChange();
+    };
     current.on("open", () => current.send(JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: { name: "stack", version: "0.0.0" }, capabilities: { experimentalApi: true } } })));
     current.on("message", (raw) => {
-      let message: { id?: unknown; result?: unknown; method?: unknown; params?: unknown };
+      let message: { id?: unknown; result?: { thread?: { id?: unknown } }; error?: unknown; method?: unknown; params?: unknown };
       try {
         message = JSON.parse(String(raw)) as typeof message;
       } catch {
@@ -254,8 +263,14 @@ export function watchThreadEvents(url: string, onChange: () => void, onNotificat
       }
       if (message.id === 1 && message.result) {
         current.send(JSON.stringify({ method: "initialized" }));
-        if (!stopped) onConnect?.();
-        if (!stopped) onChange();
+        // initialize alone does not subscribe to native thread events or retain
+        // the thread after Codex's idle unload deadline. Resume the exact root
+        // on this long-lived connection without changing its settings.
+        if (threadId) current.send(JSON.stringify({ id: 2, method: "thread/resume", params: { threadId } }));
+        else connected();
+      } else if (message.id === 2 && threadId) {
+        if (message.error || message.result?.thread?.id !== threadId) current.terminate();
+        else connected();
       } else if (typeof message.method === "string" && !stopped) {
         onNotification?.(message.method, message.params);
         if (threadChangeMethods.has(message.method)) invalidate();
@@ -264,6 +279,8 @@ export function watchThreadEvents(url: string, onChange: () => void, onNotificat
     current.on("error", () => current.terminate());
     current.on("close", () => {
       if (stopped || ws !== current) return;
+      if (admission) clearTimeout(admission);
+      admission = undefined;
       onDisconnect?.();
       invalidate();
       retry = setTimeout(open, 1_000);
@@ -275,6 +292,7 @@ export function watchThreadEvents(url: string, onChange: () => void, onNotificat
     stopped = true;
     if (retry) clearTimeout(retry);
     if (change) clearTimeout(change);
+    if (admission) clearTimeout(admission);
     ws?.terminate();
   };
 }

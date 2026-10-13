@@ -660,7 +660,7 @@ export class Supervisor {
     if (orientationSettled(next)) {
       this.orientationWatches.get(record.id)?.();
       this.orientationWatches.delete(record.id);
-    }
+    } else if (root) this.watchOrientation(record);
     this.notify(record.id);
   }
 
@@ -672,7 +672,7 @@ export class Supervisor {
     const refresh = () => { void this.enqueue(record.id, async () => {
       if (this.records.get(record.id) === record && record.url === url && record.state === "running") await this.reconcileOrientation(record);
     }).catch((error) => console.error(`orientation reconciliation for ${record.id}: ${error}`)); };
-    this.orientationWatches.set(record.id, watchThreadEvents(url, refresh));
+    this.orientationWatches.set(record.id, watchThreadEvents(url, refresh, undefined, undefined, undefined, record.mainThreadId ?? undefined));
   }
 
   private async initializeOrientation(record: RecordFile): Promise<void> {

@@ -221,7 +221,7 @@ const inputPart = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("image"), url: z.string().max(500_000).describe("Data URL or Codex-supported image URL. Large uploads should use Codex's file-upload transport directly.") }),
   z.strictObject({ type: z.literal("localImage"), path: z.string().min(1).describe("Finalized upload path or file inside the Bot workspace.") }),
   z.strictObject({ type: z.literal("localAudio"), path: z.string().min(1).describe("Finalized upload path or file inside the Bot workspace.") }),
-  z.strictObject({ type: z.literal("mention"), name: z.string().min(1), path: z.string().min(1).describe("File reference, restricted to this Bot's workspace.") }),
+  z.strictObject({ type: z.literal("mention"), name: z.string().min(1), path: z.string().min(1).describe("File reference inside this Bot's workspace or finalized uploads; sent to Codex as a readable path, not inline file contents.") }),
 ]);
 function botFor(ctx: BotsContext, id: string): ServerView {
   const bot = ctx.supervisor.list().find((item) => item.id === id);
@@ -259,6 +259,9 @@ async function inputParts(ctx: BotsContext, bot: ServerView, parts: z.infer<type
     const absolute = await realpath(resolve(cwd, part.path));
     const rel = relative(cwd, absolute);
     if ((rel.startsWith("..") || isAbsolute(rel)) && !(await ctx.uploads.within(bot.id, absolute))) throw new Error("file input must refer to the Bot workspace or a finalized upload for this Bot");
+    // Codex native mentions select plugin/tool resources and add no model text.
+    // Stack's file references must remain visible so the Bot can read the file.
+    if (part.type === "mention") return { type: "text", text: `Attached file ${JSON.stringify(part.name)} at ${JSON.stringify(absolute)}. Read this file when needed for the request.` };
     return { ...part, path: absolute };
   }));
 }
@@ -536,7 +539,7 @@ const packageApi: PackageApi<BotsContext, BotsTopic> = {
       valid: (ctx, scope) => ctx.ledger.has(scope) || ctx.ledger.ownsWorkspace(scope) || ctx.supervisor.list().some((bot) => bot.id === scope),
     },
     start(ctx, publish) {
-      const watches = new Map<string, { url: string; stop: () => void }>();
+      const watches = new Map<string, { url: string; threadId: string | null; stop: () => void }>();
       // Streaming deltas arrive per token; followers need at most one read per frame.
       const live = new Map<string, ReturnType<typeof setTimeout>>();
       const liveChanged = (id: string) => {
@@ -546,9 +549,9 @@ const packageApi: PackageApi<BotsContext, BotsTopic> = {
         live.set(id, timer);
       };
       const sync = () => {
-        const active = new Map(ctx.supervisor.list().flatMap((bot) => bot.state === "running" && !bot.recoveryIssue && bot.url ? [[bot.id, bot.url] as const] : []));
-        for (const [id, watch] of watches) if (active.get(id) !== watch.url) { watch.stop(); watches.delete(id); ctx.liveChats.remove(id); liveChanged(id); }
-        for (const [id, url] of active) if (!watches.has(id)) watches.set(id, { url, stop: watchThreadEvents(url, () => {
+        const active = new Map(ctx.supervisor.list().flatMap((bot) => bot.state === "running" && !bot.recoveryIssue && bot.url ? [[bot.id, { url: bot.url, threadId: bot.mainThreadId }] as const] : []));
+        for (const [id, watch] of watches) if (active.get(id)?.url !== watch.url || active.get(id)?.threadId !== watch.threadId) { watch.stop(); watches.delete(id); ctx.liveChats.remove(id); liveChanged(id); }
+        for (const [id, { url, threadId }] of active) if (!watches.has(id)) watches.set(id, { url, threadId, stop: watchThreadEvents(url, () => {
           publish("threads_changed", id);
           publish("chats_changed", id);
           ctx.queue.wakeBot(id);
@@ -564,7 +567,7 @@ const packageApi: PackageApi<BotsContext, BotsTopic> = {
           const before = ctx.liveChats.revision(id);
           ctx.liveChats.observe(id, url, bot.mainThreadId, method, params);
           if (ctx.liveChats.revision(id) !== before) liveChanged(id);
-        }, () => { ctx.liveChats.connected(id, url); liveChanged(id); }, () => { ctx.supervisor.forgetObservedSettings(id); publish("threads_changed", id); }) });
+        }, () => { ctx.liveChats.connected(id, url); liveChanged(id); }, () => { ctx.supervisor.forgetObservedSettings(id); publish("threads_changed", id); }, threadId ?? undefined) });
       };
       ctx.supervisor.onChange = (id) => { sync(); publish("bots_changed", id); publish("threads_changed", id); publish("chats_changed", id); };
       ctx.store.onDefaultsChange = () => publish("defaults_changed");

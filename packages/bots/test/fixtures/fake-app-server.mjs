@@ -33,6 +33,7 @@ if (process.argv.includes("--device-auth")) {
     for (const client of wss.clients) client.send(JSON.stringify({ method }));
   };
   const wss = new WebSocketServer({ server });
+  const subscriptions = new WeakMap();
   wss.on("connection", (peer) => peer.on("message", (raw) => {
     const frame = JSON.parse(String(raw));
     if (frame.method === "initialize") peer.send(JSON.stringify({ id: frame.id, result: {} }));
@@ -50,20 +51,24 @@ if (process.argv.includes("--device-auth")) {
     if (frame.method === "experimentalFeature/list") peer.send(JSON.stringify({ id: frame.id, error: { message: "Fixture feature discovery unavailable" } }));
     if (frame.method === "configRequirements/read") peer.send(JSON.stringify({ id: frame.id, result: { requirements: null } }));
     if (frame.method === "test/notify") {
-      for (const client of wss.clients) client.send(JSON.stringify({ method: frame.params.method, params: frame.params.params }));
+      // Native per-thread item events go only to clients that started or resumed it.
+      for (const client of wss.clients) if (subscriptions.get(client)?.has(frame.params.params.threadId))
+        client.send(JSON.stringify({ method: frame.params.method, params: frame.params.params }));
       peer.send(JSON.stringify({ id: frame.id, result: {} }));
     }
     if (frame.method === "thread/start") {
       const id = randomUUID();
+      subscriptions.set(peer, new Set([...(subscriptions.get(peer) ?? []), id]));
       appendFileSync(log, JSON.stringify({ method: frame.method, cwd: frame.params.cwd ?? process.cwd(), threadId: id }) + "\n");
       peer.send(JSON.stringify({ id: frame.id, result: { thread: { id } } }));
       notify("thread/started");
     }
     if (frame.method === "thread/resume") {
-      if (!entries().some((entry) => entry.method === "turn/start" && entry.threadId === frame.params.threadId)) {
+      if (!entries().some((entry) => entry.method === "thread/start" && entry.threadId === frame.params.threadId)) {
         peer.send(JSON.stringify({ id: frame.id, error: { message: "no rollout found for thread id " + frame.params.threadId } }));
         return;
       }
+      subscriptions.set(peer, new Set([...(subscriptions.get(peer) ?? []), frame.params.threadId]));
       appendFileSync(log, JSON.stringify({ method: frame.method, cwd: frame.params.cwd, threadId: frame.params.threadId }) + "\n");
       peer.send(JSON.stringify({ id: frame.id, result: { thread: { id: frame.params.threadId } } }));
     }

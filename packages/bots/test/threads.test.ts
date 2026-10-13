@@ -129,3 +129,49 @@ async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 100 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(check(), "expected thread event did not arrive");
 }
+
+test("the main-thread event subscription survives refusal and reconnect and ends on stop", async () => {
+  const http = createServer(), wss = new WebSocketServer({ server: http });
+  const subscribers = new Set<import('ws').WebSocket>();
+  let attempts = 0, connected = 0, disconnected = 0, delivered = 0;
+  wss.on("connection", (peer) => {
+    peer.on("close", () => subscribers.delete(peer));
+    peer.on("message", (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (frame.method === "initialize") peer.send(JSON.stringify({ id: frame.id, result: {} }));
+      if (frame.method === "thread/resume") {
+        assert.deepEqual(frame.params, { threadId: "main" }, "joining never changes native thread settings or chooses another root");
+        attempts++;
+        if (attempts === 1) peer.send(JSON.stringify({ id: frame.id, error: { message: "temporarily unavailable" } }));
+        else {
+          subscribers.add(peer);
+          peer.send(JSON.stringify({ id: frame.id, result: { thread: { id: "main" } } }));
+          peer.send(JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "main", delta: "hello" } }));
+        }
+      }
+    });
+  });
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+  const wait = async (predicate: () => boolean) => {
+    for (let n = 0; n < 300 && !predicate(); n++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(predicate(), "expected subscribed event delivery");
+  };
+  const stop = watchThreadEvents(`ws://127.0.0.1:${(http.address() as { port: number }).port}`, () => {},
+    (method) => { if (method === "item/agentMessage/delta") delivered++; }, () => connected++, () => disconnected++, "main");
+  try {
+    await wait(() => delivered === 1);
+    assert.equal(connected, 1, "refused subscriptions must not report readiness");
+    assert.equal(disconnected, 1);
+    for (const peer of subscribers) peer.terminate();
+    await wait(() => delivered === 2);
+    assert.equal(connected, 2);
+    assert.equal(subscribers.size, 1);
+    stop();
+    await wait(() => subscribers.size === 0);
+  } finally {
+    stop();
+    for (const peer of wss.clients) peer.terminate();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  }
+});
