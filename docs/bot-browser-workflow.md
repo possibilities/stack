@@ -85,9 +85,21 @@ passed all 50 tasks and the four install-script checks; UI typechecking passed.
 Browser verification is blocked at the host network boundary. The new QA guest
 reports Chrome/CDP and Neko ready internally, but host connections to its private
 address fail with `EHOSTUNREACH` on ports 9222, 8080 and 10001. A macOS local-network
-permission check requires human coordination; no permission was changed. The old
-unassigned profile separately reports an incarnation/ownership mismatch and stays
-retained. Do not rewrite its receipts, retag its VM or delete its volume to make
+permission change requires human coordination; no permission was changed.
+Read-only diagnosis confirmed `nehelper` logging “Local network denied by preference
+for ChatGPT (com.openai.codex)” during the failures. The exact route is up through
+`bridge100`, ARP matches the guest MAC, the retained guest's virtualization process
+is alive, and host-to-guest TCP fails immediately before HTTP/CDP. Loopback Hypeman
+access succeeds. Guest boot logs show CDP on `0.0.0.0:9222`, Neko on
+`0.0.0.0:8080`, and the kernel API on `:10001`; current service responsiveness
+remains unverified while host access is denied.
+
+The proposed permission is macOS Local Network for that app. It is persistent and
+app-wide, including child processes; the Settings toggle does not restrict the grant
+to this one guest. Keep it unchanged until explicit approval and desktop
+coordination. Do not route connections through another application or reset privacy
+preferences to evade the denial. The old unassigned profile separately reports an
+incarnation/ownership mismatch and stays retained. Do not rewrite its receipts, retag its VM or delete its volume to make
 this test pass.
 
 Private command logs and successor evidence live under
