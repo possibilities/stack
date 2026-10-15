@@ -249,13 +249,17 @@ export function NodeLink({ node, label, children, className }: {
   children: React.ReactNode;
   className?: string;
 }) {
-  const { goTo, space } = useWorkbench();
+  const { goTo, space, hover } = useWorkbench();
   const home = homeOf(node);
   const elsewhere = home.kind === "space" && home.space !== space ? ` in ${spaceTitle(home.space)}` : "";
   return (
     <a
       href={locationHref(navigateTo(emptyLocation(space), node))}
       title={`Go to ${label}${elsewhere}`}
+      onMouseEnter={() => hover(nodeKey(node))}
+      onMouseLeave={() => hover(null)}
+      onFocus={() => hover(nodeKey(node))}
+      onBlur={() => hover(null)}
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();

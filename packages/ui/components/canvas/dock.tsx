@@ -42,7 +42,7 @@ export function Dock({ side, label, open, overlay, floating = false, width, min,
         }
       }}
       className={cn("fixed z-40 flex max-w-full flex-col bg-popover text-popover-foreground outline-none", floating && !overlay ? "top-16 right-3 bottom-3 rounded-2xl border shadow-xl" : "inset-y-0", !open && "!hidden", !floating || overlay ? side === "left" ? "left-0 border-r" : "right-0 border-l" : undefined)}
-      style={{ width: overlay ? "100%" : width }}>
+      style={{ width: overlay ? "100%" : width, bottom: overlay ? "var(--call-height, 0px)" : undefined }}>
       <div role="separator" hidden={overlay} tabIndex={0} aria-label={`Resize ${label}`} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)}
         className={cn("absolute inset-y-0 z-10 w-2 touch-none cursor-col-resize hover:bg-ring/20 focus-visible:bg-ring/30 focus-visible:outline-2 focus-visible:outline-ring", overlay && "hidden", side === "left" ? "-right-1" : "-left-1")}
         onKeyDown={(event) => {

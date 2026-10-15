@@ -8,17 +8,17 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
-import { paneIds, tabStacks, type Placement } from "@/lib/stack/pane-layout";
+import { paneIds, type Placement } from "@/lib/stack/pane-layout";
 import type { PaneLayout, PaneLayoutStore } from "@/lib/stack/pane-state";
 import { paneDescription, type WindowDef } from "./spaces";
 
-export function PaneCatalog({ title, defs, layout, store, side, onClose, onReveal, pin }: {
-  title: string; defs: WindowDef[]; layout: PaneLayout; store: PaneLayoutStore; side?: Placement;
-  onClose(): void; onReveal(id: string): void; pin?: { title: string; create(): void };
+export function PaneCatalog({ title, defs, layout, visible, store, side, onClose, onReveal, pin }: {
+  title: string; defs: WindowDef[]; layout: PaneLayout; visible: string[]; store: PaneLayoutStore; side?: Placement;
+  onClose(): void; onReveal(id: string): void; pin?: { title: string; create(side?: Placement): void };
 }) {
   const [placement, setPlacement] = useState<Placement | "restore">(side ?? "restore");
   const open = new Set(paneIds(layout.tree));
-  const status = (id: string) => !open.has(id) ? "Closed" : layout.zoom && layout.zoom !== id ? "Behind zoom" : tabStacks(layout.tree).find((stack) => stack.tabs.includes(id))?.active !== id ? "Behind tab" : layout.focus === id ? "Focused" : "Open";
+  const status = (id: string) => !open.has(id) ? "Closed" : layout.zoom && layout.zoom !== id ? "Behind zoom" : !visible.includes(id) ? "Behind tab" : layout.focus === id ? "Focused" : "Open";
   const reveal = (id: string) => { store.open(id, placement === "restore" ? undefined : placement); onClose(); onReveal(id); };
   return <Dialog open onOpenChange={(value) => { if (!value) onClose(); }}>
     <DialogContent className="flex max-h-[min(85dvh,680px)] flex-col gap-3 sm:max-w-xl" finalFocus={() => document.querySelector<HTMLElement>(`[data-pane-frame="${CSS.escape(store.getSnapshot().focus ?? "")}"]`)}>
@@ -35,7 +35,7 @@ export function PaneCatalog({ title, defs, layout, store, side, onClose, onRevea
               <def.icon /><span className="flex min-w-0 flex-1 flex-col"><span className="truncate">{def.title}{/-\d+$/.test(def.id) ? ` · ${def.id}` : ""}</span><span className="truncate text-xs text-muted-foreground">{paneDescription(def)}</span></span><Badge variant="secondary">{status(def.id)}</Badge>
             </CommandItem>)}
           </CommandGroup>
-          {pin ? <CommandGroup heading="Additional instance"><CommandItem onSelect={() => { onClose(); pin.create(); }}><PlusIcon />{pin.title}</CommandItem></CommandGroup> : null}
+          {pin ? <CommandGroup heading="Additional instance"><CommandItem onSelect={() => { onClose(); pin.create(placement === "restore" ? undefined : placement); }}><PlusIcon />{pin.title}</CommandItem></CommandGroup> : null}
         </CommandList>
       </Command>
       <Separator />

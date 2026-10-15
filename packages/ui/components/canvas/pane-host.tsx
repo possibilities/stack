@@ -4,6 +4,7 @@ import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { PanelsTopLeftIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { homeOf, spaceTitle, type SpaceId } from "@/lib/stack/spaces";
 import { nodeKey, type NodeRef } from "@/lib/stack/types";
@@ -50,8 +51,9 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [dragging, setDragging] = useState(false);
   const [leader, setLeader] = useState(false);
+  const [help, setHelp] = useState(false);
   const cancelGesture = useRef<(() => void) | null>(null);
-  const pending = useRef<{ ref: NodeRef; pane: string; token: number; notified: boolean } | null>(null);
+  const pending = useRef<{ ref: NodeRef; pane: string; token: number; notified: boolean; placed: boolean; side?: Placement; target: string | null } | null>(null);
   const sequence = useRef(0);
   const [navigation, setNavigation] = useState(0);
   const frame = useRef<number | null>(null);
@@ -80,6 +82,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
   }, []);
   useEffect(() => { cancelGesture.current?.(); }, [signature, size.width, size.height, blocked]);
+  useEffect(() => { if (blocked || catalog) setLeader(false); }, [blocked, catalog]);
   useEffect(() => { if (leader) { const timer = setTimeout(() => setLeader(false), 2500); return () => clearTimeout(timer); } }, [leader]);
 
   const tree = draft ?? layout.tree;
@@ -98,18 +101,21 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   }, []);
   const reveal = useCallback((id: string) => { store.focus(id); focusFrame(id); }, [store, focusFrame]);
   const showCatalog = useCallback((side?: Placement) => setCatalog({ side }), []);
-  const goToNode = useCallback((ref: NodeRef) => {
+  const goToNode = useCallback((ref: NodeRef, side?: Placement) => {
     const home = homeOf(ref);
     if (home.kind !== "space" || home.space !== space) return;
-    pending.current = { ref, pane: home.window, token: ++sequence.current, notified: false };
+    pending.current = { ref, pane: home.window, token: ++sequence.current, notified: false, placed: false, side, target: store.getSnapshot().focus };
     setNavigation(sequence.current);
-    store.open(home.window);
     setCatalog(null);
   }, [space, store]);
   useEffect(() => {
     const request = pending.current;
     if (!request || !ids.includes(request.pane)) return;
-    store.open(request.pane);
+    if (!request.placed) {
+      request.placed = true;
+      if (request.side && request.target && paneIds(store.getSnapshot().tree).includes(request.target)) store.move(request.pane, request.target, request.side);
+      else store.open(request.pane);
+    }
     const rootElement = root.current;
     if (!rootElement) return;
     let done = false;
@@ -151,18 +157,20 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
       }
       if (event.altKey || (!leader && event.target.closest("button,a"))) return;
       const index = leader && /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
-      if (index >= 0 && projection.stacks[index]) { reveal(projection.stacks[index].active); setLeader(false); event.preventDefault(); return; }
+      if (index >= 0) { if (projection.stacks[index]) reveal(projection.stacks[index].active); setLeader(false); event.preventDefault(); return; }
       if (event.key === "Escape" && dragging) cancelGesture.current?.();
       else if (event.key === "Escape" && leader) setLeader(false);
       else if ((event.key === "Escape" && layout.zoom) || event.key === "z") store.zoom();
+      else if (event.key === "?") setHelp(true);
       else if (event.key === "x" && layout.focus) { store.close(layout.focus); const id = store.getSnapshot().focus; if (id) focusFrame(id); }
       else if (event.key === "\\" || event.key === "%") showCatalog("right");
       else if (event.key === "-" || event.key === '"') showCatalog("below");
       else return;
       event.preventDefault(); setLeader(false);
     };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    const element = root.current;
+    element?.addEventListener("keydown", key);
+    return () => element?.removeEventListener("keydown", key);
   }, [blocked, catalog, leader, dragging, layout.focus, layout.zoom, projection, store, reveal, showCatalog, focusFrame]);
 
   const beginDrag = useCallback((id: string, event: React.PointerEvent) => {
@@ -217,10 +225,10 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     cancelGesture.current = cleanup;
   };
 
-  const pin = space === "fleet" ? { title: "Pin another chat", create: () => goToNode({ kind: "chat", id: chatStore.open(null) }) }
-    : space === "workers" ? { title: "Pin another Worker", create: () => goToNode({ kind: "worker-window", id: workerWindows.open(null) }) }
-    : space === "browse" ? { title: "Pin another viewer", create: () => goToNode({ kind: "browser-viewer", id: viewerStore.open(null) }) }
-    : space === "proc" ? { title: "Pin another run", create: () => goToNode({ kind: "proc-run-window", id: procWindows.open(null) }) } : undefined;
+  const pin = space === "fleet" ? { title: "Pin another chat", create: (side?: Placement) => goToNode({ kind: "chat", id: chatStore.open(null) }, side) }
+    : space === "workers" ? { title: "Pin another Worker", create: (side?: Placement) => goToNode({ kind: "worker-window", id: workerWindows.open(null) }, side) }
+    : space === "browse" ? { title: "Pin another viewer", create: (side?: Placement) => goToNode({ kind: "browser-viewer", id: viewerStore.open(null) }, side) }
+    : space === "proc" ? { title: "Pin another run", create: (side?: Placement) => goToNode({ kind: "proc-run-window", id: procWindows.open(null) }, side) } : undefined;
   const open = paneIds(layout.tree);
   const renderPane = (def: WindowDef, rect?: StackRect) => {
     const visible = Boolean(rect && rect.active === def.id);
@@ -236,6 +244,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
       hidden={!visible} inert={!visible} onFocusCapture={() => { if (visible) store.focus(def.id); }}
       className="absolute min-h-0 min-w-0 rounded-xl outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
       style={rect ? { left: rect.x, top: rect.y + tabHeight, width: rect.width, height: Math.max(0, rect.height - tabHeight) } : undefined}>
+      {leader && visible ? <span aria-hidden className="pointer-events-none absolute top-1 right-1 z-20 rounded bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground">{projection.stacks.indexOf(rect!) + 1}</span> : null}
       <PaneContext value={pane}><PlacementContext value={() => placement}><Activity mode={visible ? "visible" : "hidden"}>{visited.current.has(def.id) ? def.element : null}</Activity></PlacementContext></PaneContext>
     </div>;
   };
@@ -258,7 +267,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     if (pending.current) { pending.current = null; setNavigation(++sequence.current); }
     if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; }
   };
-  return <main ref={root} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)" }}>
+  return <main ref={root} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)", bottom: "var(--call-height, 0px)" }}>
     <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 pb-2" data-chrome>
       <div className="flex min-w-0 items-center gap-2 overflow-x-auto"><ToggleGroup size="sm" spacing={0} aria-label={`${spaceTitle(space)} layout preset`} value={[layout.preset]} onValueChange={(values) => { if (values[0]) store.preset(String(values[0])); }}>
         {panePresets[space].map((preset) => <ToggleGroupItem key={preset.id} value={preset.id}>{preset.title}</ToggleGroupItem>)}
@@ -282,7 +291,10 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
         }} />)}
       {drop ? <div aria-hidden className="pointer-events-none absolute rounded-xl border-2 border-ring bg-ring/15" style={{ left: drop.rect.x + (drop.side === "right" ? drop.rect.width / 2 : 0), top: drop.rect.y + (drop.side === "below" ? drop.rect.height / 2 : 0), width: drop.rect.width / (["left", "right"].includes(drop.side) ? 2 : 1), height: drop.rect.height / (["above", "below"].includes(drop.side) ? 2 : 1) }} /> : null}
     </div>
-    <div className="flex h-6 shrink-0 items-center justify-between gap-2 pt-1 text-[0.65rem] text-muted-foreground"><span>{projection.compact ? "Compact · desktop layout retained" : `${open.length} open · ${defs.length} available`}</span><span>{leader ? "1–9 focus · Z zoom · X close · \\ beside · − below · Esc cancel" : "⌥ arrows focus · Z zoom · ⌃B pane keys"}</span></div>
-    {catalog ? <PaneCatalog key={catalog.side ?? "restore"} title={spaceTitle(space)} defs={defs} layout={layout} store={store} side={catalog.side} onClose={() => setCatalog(null)} onReveal={focusFrame} pin={pin} /> : null}
+    <div className="flex min-h-7 shrink-0 items-center justify-between gap-2 pt-1 text-[0.65rem] text-muted-foreground"><span>{projection.compact ? "Compact · desktop layout retained" : `${open.length} open · ${defs.length} available`}</span><span className="hidden md:inline">{leader ? "1–9 focus · Z zoom · X close · \\ beside · − below · Esc cancel" : "⌥ arrows focus · Z zoom · ⌃B pane keys"}</span><Button variant="ghost" size="xs" aria-label="Pane keyboard shortcuts" onClick={() => setHelp(true)}>Keys</Button></div>
+    <Dialog open={help} onOpenChange={setHelp}><DialogContent finalFocus={() => root.current}><DialogHeader><DialogTitle>Pane keyboard shortcuts</DialogTitle><DialogDescription>Use these in the workspace, not while typing or using a dialog. Every arrangement also has a pane menu.</DialogDescription></DialogHeader><dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+      <dt>Option + arrows</dt><dd>Focus a neighboring pane</dd><dt>Option + Shift + arrows</dt><dd>Swap neighboring panes</dd><dt>Ctrl B, then 1–9</dt><dd>Focus a numbered pane; expires after 2.5 seconds</dd><dt>Z / Escape</dt><dd>Zoom / restore the focused pane</dd><dt>X</dt><dd>Close the focused pane; keep at least one open</dd><dt>\ / −</dt><dd>Open the catalog beside / below</dd><dt>Arrows / Home</dt><dd>Resize / equalize a focused separator</dd><dt>O / Cmd or Ctrl K</dt><dd>Space overview / command palette</dd><dt>Escape</dt><dd>Cancel a gesture or leader first</dd>
+    </dl></DialogContent></Dialog>
+    {catalog ? <PaneCatalog key={catalog.side ?? "restore"} title={spaceTitle(space)} defs={defs} layout={layout} visible={projection.stacks.map((stack) => stack.active)} store={store} side={catalog.side} onClose={() => setCatalog(null)} onReveal={focusFrame} pin={pin} /> : null}
   </main>;
 }

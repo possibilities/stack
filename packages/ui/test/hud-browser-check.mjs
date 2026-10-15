@@ -24,6 +24,7 @@ const env = { ...process.env, STACK_STATE_DIR: dir, NEXT_TELEMETRY_DISABLED: "1"
 const now = Date.now();
 const lateModel = "late-hidden-resource-proof", lateFrame = Promise.withResolvers();
 let heldResources = null;
+let activeCall = null;
 const resourceGates = [];
 const bounded = (promise, timeout = 10_000) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Resource proof did not reach its transport barrier")), timeout).unref())]);
 
@@ -54,7 +55,7 @@ const handlers = {
   account_login_current: () => ({ login: null }), worker_account_login_current: () => ({ logins: [] }),
   bot_list: () => ({ bots: [{ id: "bot-1", state: "running", pid: 321, cwd: "/fixture/workspace", url: null, account: null, runningAccount: null, mainThreadId: "main-bot-1", recoveryIssue: null, roleRevision: null, settings: null }] }),
   bot_defaults_get: () => ({ model: "fixture", reasoningEffort: "medium", sandboxMode: "danger-full-access", approvalPolicy: "never" }),
-  voice_status: () => ({ call: null }), chat_list: () => ({ chats: [] }), chat_thread_read: () => ({ messages: [] }), chat_records: () => ({ records: [] }),
+  voice_status: () => ({ call: activeCall }), chat_list: () => ({ chats: [] }), chat_thread_read: () => ({ messages: [] }), chat_records: () => ({ records: [] }),
   worker_list: () => ({ workers: [session] }), worker_runtime_list: () => ({ runtimes: [] }),
   worker_work_list: async ({ workItemId }) => {
     if (workItemId === ids.salvage) throw new Error("worker owner unavailable");
@@ -219,6 +220,94 @@ try {
   await page.getByRole("button", { name: "Reset pane layout", exact: true }).click();
   await timeline.waitFor({ state: "visible" });
   await retained("reset after rearrangement");
+  const paneHost = page.locator('[data-canvas="workbench"][data-space="hud"]');
+  const frames = paneHost.locator('[data-pane-frame]:visible');
+  assert.deepEqual(await frames.evaluateAll((elements) => elements.map((element) => element.dataset.paneFrame)), ["hud-attention", "hud-work", "hud-item", "hud-timeline", "hud-resources"], "reading order follows the composed columns");
+  await objective.focus();
+  await page.keyboard.press("Control+b");
+  assert.equal(await objective.inputValue(), "Human draft objective", "the pane leader does not intercept an editor");
+  await paneHost.focus();
+  await page.keyboard.press("Control+b");
+  await page.keyboard.press("3");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-pane-frame") === "hud-item");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForFunction(() => ["hud-attention", "hud-work"].includes(document.activeElement?.getAttribute("data-pane-frame")));
+  const separator = paneHost.getByRole("separator", { name: "Resize pane split" }).first();
+  await separator.focus();
+  const fraction = Number(await separator.getAttribute("aria-valuenow"));
+  await page.keyboard.press((await separator.getAttribute("aria-orientation")) === "vertical" ? "ArrowRight" : "ArrowDown");
+  await page.waitForFunction(({ fraction, space }) => Number(document.querySelector(`[data-space="${space}"] [role="separator"]`)?.getAttribute("aria-valuenow")) > fraction, { fraction, space: "hud" });
+  await page.keyboard.press("Home");
+  await paneHost.focus();
+  await page.keyboard.press("Control+b");
+  await page.keyboard.press("9");
+  assert.equal(new URL(page.url()).pathname, "/", "an absent pane number never falls through to space navigation");
+  await retained("keyboard focus and separator resize");
+  const geometry = () => frames.evaluateAll((elements) => elements.map((element) => { const { x, y, width, height } = element.getBoundingClientRect(); return [element.dataset.paneFrame, x, y, width, height].map((value) => typeof value === "number" ? Math.round(value) : value); }));
+  const beforeDrag = await geometry();
+  const header = await item.locator("header").first().boundingBox(), target = await timeline.boundingBox();
+  const drag = async () => {
+    await page.mouse.move(header.x + header.width / 2, header.y + header.height - 6);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 6 });
+  };
+  await drag();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  assert.deepEqual(await geometry(), beforeDrag, "Escape cancels a captured drag without changing the arrangement");
+  await drag();
+  await page.mouse.up();
+  await page.getByRole("tab", { name: "Timeline", exact: true }).waitFor();
+  await retained("pointer docking across parents");
+  await page.getByRole("tab", { name: "Work item", exact: true }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-selected") === "true" && document.activeElement?.textContent === "Timeline");
+  assert.equal(await objective.isVisible(), false, "keyboard tab activation suspends the editor");
+  await page.keyboard.press("ArrowRight");
+  await retained("keyboard tab return");
+  await page.getByRole("button", { name: "Pane keyboard shortcuts" }).click();
+  await page.getByRole("dialog", { name: "Pane keyboard shortcuts" }).waitFor();
+  await page.keyboard.press("Escape");
+  await paneHost.getByRole("button", { name: "Reset pane layout", exact: true }).click();
+  const mountedWindows = await page.locator("[data-window]").count();
+  await page.getByRole("button", { name: "Space overview", exact: true }).click();
+  const overview = page.getByRole("dialog", { name: "Space overview" });
+  assert.equal(await overview.getByRole("link").count(), 15);
+  await overview.getByRole("link", { name: /^HUD/ }).getByText("Triage · 5 open · 0 closed", { exact: true }).waitFor();
+  assert.equal(await page.locator("[data-window]").count(), mountedWindows, "overview does not mount duplicate record views");
+  await page.screenshot({ path: join(evidence, "space-overview.png"), animations: "disabled" });
+  await page.keyboard.press("Escape");
+  await retained("overview close");
+  activeCall = { sessionId: randomUUID(), botId: "bot-1", threadId: "main-bot-1", phase: "connected" };
+  sockets.get("bots").publish("voice_changed");
+  const callDock = page.getByRole("complementary", { name: "Voice call", exact: true });
+  await callDock.getByRole("button", { name: "End call", exact: true }).waitFor();
+  const heldCall = await callDock.elementHandle();
+  await page.waitForFunction(() => document.querySelector('[data-space="hud"][data-canvas]')?.getBoundingClientRect().bottom <= document.querySelector('[aria-label="Voice call"]')?.getBoundingClientRect().top);
+  await resources.getByRole("link", { name: "bot-1", exact: true }).click();
+  await page.waitForURL((url) => url.pathname === "/fleet");
+  await page.getByRole("button", { name: "Back to HUD", exact: true }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+  assert.equal(await callDock.evaluate((element, original) => element === original, heldCall), true, "call controls retain identity across a cross-space link and browser-history return");
+  await retained("cross-space history return");
+  await page.setViewportSize({ width: 420, height: 900 });
+  await paneHost.getByRole("button", { name: /^Panes/ }).click();
+  await page.getByRole("combobox", { name: "Find a pane in HUD" }).fill("hud-item");
+  await page.keyboard.press("Enter");
+  await item.getByRole("button", { name: "Inspect Implement windows", exact: true }).click();
+  const inspector = page.getByRole("complementary", { name: "Inspector", exact: true });
+  await inspector.waitFor();
+  assert.equal(await callDock.getByRole("button", { name: "End call", exact: true }).isVisible(), true);
+  assert.ok((await inspector.boundingBox()).y + (await inspector.boundingBox()).height <= (await callDock.boundingBox()).y, "compact inspection leaves the call controls unobscured");
+  await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth);
+  await page.screenshot({ path: join(evidence, "call-inspector-narrow.png"), animations: "disabled" });
+  await inspector.getByRole("button", { name: "Close inspector", exact: true }).click();
+  await page.setViewportSize({ width: 2400, height: 1300 });
+  await retained("compact inspection during a call");
+  activeCall = null;
+  sockets.get("bots").publish("voice_changed");
+  await callDock.waitFor({ state: "hidden" });
+  await heldCall.dispose();
   await page.screenshot({ path: join(evidence, "hud-pane-draft.png"), animations: "disabled" });
   assert.equal((await get(ids.implement)).objective, "Build the windows and their tests", "layout operations never submit the draft");
   await heldDraft.dispose();

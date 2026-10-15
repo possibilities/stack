@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { StatusDot } from "./primitives";
 import { useChatWindows, useNow, useStack, useStore, useWorkbench } from "./provider";
 import { Window } from "./window";
+import { usePane } from "./pane-context";
 
 /** One shared feed per Bot while any window shows it. */
 function useMainChat(botId: string | null): { view: MainChatView | null; loadOlder(): void } {
@@ -37,6 +38,7 @@ function useMainChat(botId: string | null): { view: MainChatView | null; loadOld
 }
 
 export function ChatWindow({ id }: { id: string }) {
+  const pane = usePane();
   const { windows, chats } = useChatWindows();
   const { bots } = useStack();
   const { goTo } = useWorkbench();
@@ -55,7 +57,7 @@ export function ChatWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New chat window</TooltipContent>
       </Tooltip>
-      {primary ? null : (
+      {primary || pane ? null : (
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close chat window" className="text-muted-foreground" onClick={() => chats.close(id)} />}>
             <XIcon className="size-3.5" />

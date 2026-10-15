@@ -23,6 +23,7 @@ import { RecordTree } from "./record-tree";
 import { useNow, useStack, useStore, useWorkbench, useWorkerWindows } from "./provider";
 import { phaseTitle, phaseTone } from "./worker-windows";
 import { Window } from "./window";
+import { usePane } from "./pane-context";
 import { WorkerSettingsTab } from "./worker-settings";
 import { WorkContextLink } from "./hud-shared";
 import { WorkerMaintenance, WorkerSessionMaintenance, workerStateOperations } from "./worker-maintenance";
@@ -155,6 +156,7 @@ async function readTools(store: StackStore, id: string, pages: number): Promise<
   * window reads, except for managed settings and explicit local state maintenance.
  */
 export function WorkerWindow({ id }: { id: string }) {
+  const pane = usePane();
   const { windows, workerWindows, turnFocus } = useWorkerWindows();
   const { workerSessions, workerAccounts, remote } = useStack();
   const { goTo } = useWorkbench();
@@ -184,7 +186,7 @@ export function WorkerWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New Worker window</TooltipContent>
       </Tooltip>
-      {primary ? null : (
+      {primary || pane ? null : (
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close Worker window" className="text-muted-foreground" onClick={() => workerWindows.close(id)} />}>
             <XIcon className="size-3.5" />

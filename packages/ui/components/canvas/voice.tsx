@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, use, useEffect, useRef, useState } from "react";
+import { createContext, use, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon, Volume2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,7 @@ function callClock(since: number, now: number): string {
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const store = useStore();
   const { voice, status } = useStack();
+  const [dockHeight, setDockHeight] = useState(0);
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [sessionId, setSessionIdState] = useState<string | null>(null);
   const [dialedBot, setDialedBot] = useState<string | null>(null);
@@ -253,11 +254,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <VoiceContext value={value}>
+    <VoiceContext value={value}><div className="contents" style={{ "--call-height": `${dockHeight}px` } as React.CSSProperties}>
       {children}
       <audio ref={audio} autoPlay playsInline className="hidden" />
-      <CallDock />
-    </VoiceContext>
+      <CallDock onHeight={setDockHeight} />
+    </div></VoiceContext>
   );
 }
 
@@ -304,11 +305,20 @@ function Meter({ stream, label, className }: { stream: MediaStream | null; label
 
 /* ─── Call dock ──────────────────────────────────────────────────────── */
 
-function CallDock() {
+function CallDock({ onHeight }: { onHeight(height: number): void }) {
   const voice = useVoice();
   const { voice: remote, bots } = useStack();
   const { goTo } = useWorkbench();
   const now = useNow();
+  const dock = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const element = dock.current;
+    if (!element) { onHeight(0); return; }
+    const measure = () => onHeight(Math.ceil(element.getBoundingClientRect().height) + 16);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element); measure();
+    return () => { observer.disconnect(); onHeight(0); };
+  }, [voice.busy, onHeight]);
   if (!voice.busy) return null;
   // While our own call is ending, voice.data may still report it — a call only
   // belongs elsewhere when this page never dialed it.
@@ -322,12 +332,12 @@ function CallDock() {
     : "Connecting…";
 
   return (
-    <aside data-chrome aria-label="Voice call" className="fixed top-16 z-30 -translate-x-1/2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-3" style={{ left: "calc((100% - var(--sheet))/2)" }}>
-      <div className="flex items-center gap-3 rounded-2xl border bg-card/80 py-1.5 pr-1.5 pl-2 whitespace-nowrap shadow-sm backdrop-blur-xl">
+    <aside ref={dock} data-chrome aria-label="Voice call" className="fixed bottom-2 z-30 motion-safe:animate-in motion-safe:fade-in-0" style={{ left: "calc(var(--rail, 0px) + 8px)", right: "calc(var(--sheet, 0px) + 8px)" }}>
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card/95 p-2 shadow-sm">
         {elsewhere ? (
           <>
             <span className="flex size-9 items-center justify-center rounded-xl bg-pkg-bots/12 text-pkg-bots"><PhoneIcon className="size-4" /></span>
-            <span className="text-[0.8rem] font-medium">On call elsewhere{voice.botId ? ` · ${voice.botId}` : ""}</span>
+            <span className="min-w-0 flex-1 truncate text-[0.8rem] font-medium">On call elsewhere{voice.botId ? ` · ${voice.botId}` : ""}</span>
             <Button size="sm" variant="destructive" className="ml-1" disabled={voice.phase === "ending"} onClick={voice.hangup}>End call</Button>
           </>
         ) : (
@@ -340,8 +350,8 @@ function CallDock() {
             >
               <BotTile bot={bot} className="size-9 rounded-lg text-sm [&_svg]:size-4" />
             </button>
-            <div className="flex min-w-0 flex-col leading-tight">
-              <span className="font-mono text-[0.8rem] font-semibold whitespace-nowrap">{voice.botId}</span>
+            <div className="flex min-w-0 flex-1 flex-col leading-tight">
+              <span className="truncate font-mono text-[0.8rem] font-semibold">{voice.botId}</span>
               <span role="status" className="flex items-center gap-1 text-[0.68rem] whitespace-nowrap text-muted-foreground tabular-nums">
                 {voice.phase === "connected" ? <span aria-hidden className="size-1.5 rounded-full bg-success motion-safe:animate-pulse" /> : <Spinner className="size-2.5" />}
                 {statusText}

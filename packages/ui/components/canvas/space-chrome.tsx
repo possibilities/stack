@@ -1,14 +1,17 @@
 "use client";
 
-import { BookOpenIcon, BotIcon, BrainIcon, ChevronDownIcon, CompassIcon, FileTextIcon, FlaskConicalIcon, GlobeIcon, InboxIcon, LayoutDashboardIcon, LibraryIcon, ListTreeIcon, MonitorIcon, PanelRightIcon, RadioIcon, SearchIcon, Settings2Icon, SquareTerminalIcon, UsersIcon, WebhookIcon } from "lucide-react";
+import { ArrowLeftIcon, BookOpenIcon, BotIcon, BrainIcon, ChevronDownIcon, CompassIcon, FileTextIcon, FlaskConicalIcon, GlobeIcon, InboxIcon, LayoutDashboardIcon, LibraryIcon, ListTreeIcon, MonitorIcon, PanelRightIcon, RadioIcon, SearchIcon, Settings2Icon, SquareTerminalIcon, UsersIcon, WebhookIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { spaceGroups } from "@/lib/stack/pane-presets";
+import { panePresets, spaceGroups } from "@/lib/stack/pane-presets";
 import { homeOf, parseNodeKey, spaceAttention, spaceHref, spaces, spaceTitle, type SpaceId } from "@/lib/stack/spaces";
 import { cn } from "@/lib/utils";
-import { useStack, useWorkbench } from "./provider";
+import { useChatWindows, useProcWindows, useStack, useViewerWindows, useWorkbench, useWorkerWindows } from "./provider";
+import { paneDefinitions } from "./spaces";
+import { paneIds, projectLayout, tabs } from "@/lib/stack/pane-layout";
+import type { PaneLayout } from "@/lib/stack/pane-state";
 import { CallLauncher } from "./voice";
 
 const icons: Record<SpaceId, typeof BotIcon> = { hud: ListTreeIcon, fleet: BotIcon, accounts: UsersIcon, workers: SquareTerminalIcon, roles: Settings2Icon, browse: MonitorIcon, brain: BrainIcon, inbox: InboxIcon, signal: RadioIcon, content: LibraryIcon, scrape: GlobeIcon, proc: SquareTerminalIcon, source: WebhookIcon, system: LayoutDashboardIcon, lab: FlaskConicalIcon };
@@ -40,8 +43,8 @@ export function SpaceRail({ compact, openOverview }: { compact: boolean; openOve
 }
 function LayersMark() { return <FileTextIcon className="size-4" />; }
 
-export function SpaceBar({ space, setSpace, reference, inspectorAvailable, openInspector, toggleReference, openPalette, openOverview }: {
-  space: SpaceId; setSpace(space: SpaceId): void; reference: boolean; inspectorAvailable: boolean; openInspector(): void; toggleReference(): void; openPalette(): void; openOverview(): void;
+export function SpaceBar({ space, setSpace, back, reference, inspectorAvailable, openInspector, toggleReference, openPalette, openOverview }: {
+  space: SpaceId; setSpace(space: SpaceId): void; back?: { title: string; run(): void }; reference: boolean; inspectorAvailable: boolean; openInspector(): void; toggleReference(): void; openPalette(): void; openOverview(): void;
 }) {
   const state = useStack();
   const attention = spaceAttention(state);
@@ -54,6 +57,7 @@ export function SpaceBar({ space, setSpace, reference, inspectorAvailable, openI
           <DropdownMenuGroup><DropdownMenuItem onClick={openOverview}><CompassIcon />Space overview</DropdownMenuItem></DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+      {back ? <Button variant="ghost" size="sm" aria-label={`Back to ${back.title}`} title={`Back to ${back.title}`} onClick={back.run}><ArrowLeftIcon data-icon="inline-start" /><span className="hidden sm:inline">{back.title}</span></Button> : null}
       <p className="hidden max-w-72 truncate border-l pl-3 text-xs text-muted-foreground lg:block" title={item.description}>{item.description}</p>
     </div>
     <div className="flex shrink-0 items-center gap-1">
@@ -65,14 +69,21 @@ export function SpaceBar({ space, setSpace, reference, inspectorAvailable, openI
   </header>;
 }
 
-export function SpaceOverview({ onClose }: { onClose(): void }) {
+export function SpaceOverview({ layouts, onClose }: { layouts: Partial<Record<SpaceId, PaneLayout>>; onClose(): void }) {
   const { space, setSpace } = useWorkbench();
   const state = useStack(), attention = spaceAttention(state);
-  return <Dialog open onOpenChange={(value) => { if (!value) onClose(); }}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>Space overview</DialogTitle><DialogDescription>Choose a space. Attention comes from the current owner observations.</DialogDescription></DialogHeader>
-    <div className="grid gap-5 sm:grid-cols-2">
+  const { windows: chats } = useChatWindows(), { windows: workers } = useWorkerWindows(), { windows: viewers } = useViewerWindows(), { windows: procRuns } = useProcWindows();
+  return <Dialog open onOpenChange={(value) => { if (!value) onClose(); }}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-6xl"><DialogHeader><DialogTitle>Space overview</DialogTitle><DialogDescription>Choose a space. Attention comes from the current owner observations.</DialogDescription></DialogHeader>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {spaceGroups.map((group) => <section key={group.title} className="flex flex-col gap-2"><h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">{group.title}</h2>{group.spaces.map((id) => {
         const item = spaces.find((item) => item.id === id)!, Icon = icons[id];
-        return <a key={id} href={spaceHref(id)} aria-current={space === id ? "page" : undefined} onClick={(event) => { if (plainClick(event)) { event.preventDefault(); setSpace(id); onClose(); } }} className="flex items-start gap-3 rounded-xl border p-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"><Icon className={cn("mt-0.5 size-4 shrink-0", accent[id])} /><span className="flex min-w-0 flex-col gap-1"><span className="text-sm font-medium">{item.title}</span><span className="line-clamp-2 text-xs text-muted-foreground">{item.description}</span>{attention[id].length ? <span className="text-xs text-warning">{attention[id].join(" · ")}</span> : null}</span></a>;
+        const ids = paneDefinitions(id, state, { chats, workers, viewers, procRuns }).map((def) => def.id), layout = layouts[id];
+        const tree = layout ? layout.zoom ? tabs(layout.zoom) : layout.tree : panePresets[id][0].build(ids);
+        const preview = projectLayout(tree, { width: 1600, height: 1000 });
+        const open = layout ? paneIds(layout.tree).length : paneIds(tree).length;
+        return <a key={id} href={spaceHref(id)} aria-current={space === id ? "page" : undefined} onClick={(event) => { if (plainClick(event)) { event.preventDefault(); setSpace(id); onClose(); } }} className="flex items-start gap-3 rounded-xl border p-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"><Icon className={cn("mt-0.5 size-4 shrink-0", accent[id])} /><span className="flex min-w-0 flex-1 flex-col gap-1"><span className="text-sm font-medium">{item.title}</span>
+          <svg aria-hidden viewBox="0 0 1600 1000" className="my-1 h-12 w-full rounded bg-muted/30">{preview.stacks.map((rect) => <rect key={rect.id} x={rect.x + 8} y={rect.y + 8} width={Math.max(0, rect.width - 16)} height={Math.max(0, rect.height - 16)} rx={24} fill={rect.active === layout?.focus ? "var(--primary)" : "var(--muted)"} fillOpacity={rect.active === layout?.focus ? 0.4 : 1} stroke="var(--border)" strokeWidth={8} />)}</svg>
+          <span className="text-xs text-muted-foreground">{layout?.modified ? "Modified layout" : layout ? panePresets[id].find((preset) => preset.id === layout.preset)?.title : "Default layout"} · {open} open · {layout?.closed.length ?? Math.max(0, ids.length - open)} closed</span><span className="line-clamp-2 text-xs text-muted-foreground">{item.description}</span>{attention[id].length ? <span className="text-xs text-warning">{attention[id].join(" · ")}</span> : null}</span></a>;
       })}</section>)}
     </div>
   </DialogContent></Dialog>;

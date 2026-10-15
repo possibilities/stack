@@ -451,7 +451,7 @@ export function ViewerWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New viewer</TooltipContent>
       </Tooltip>
-      {primary ? null : (
+      {primary || pane ? null : (
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close viewer" className="text-muted-foreground" onClick={() => viewers.close(id)} />}>
             <XIcon className="size-3.5" />

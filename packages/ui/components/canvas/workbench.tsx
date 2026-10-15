@@ -44,6 +44,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const sequence = useRef(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [layouts, setLayouts] = useState<Partial<Record<SpaceId, PaneControls["layout"]>>>({});
+  const [backLink, setBackLink] = useState<{ space: SpaceId; href: string } | null>(null);
   const [paneControls, setPaneControls] = useState<PaneControls | null>(null);
   const [controls, setControls] = useState<BenchControls | null>(null);
   const controlsRef = useRef<BenchControls | null>(null);
@@ -106,6 +108,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   }, []);
   const reportPanes = useCallback((next: PaneControls | null) => {
     setPaneControls(next);
+    if (next) setLayouts((held) => held[next.space] === next.layout ? held : { ...held, [next.space]: next.layout });
     reportControls(next ? {
       space: next.space, goToNode: next.goToNode, fit: () => { if (next.layout.zoom) next.zoom(); },
       tidy: () => next.preset(next.layout.preset), zoom: next.zoom,
@@ -124,6 +127,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   }, []);
   const setSpace = useCallback((space: SpaceId) => {
     pending.current = null;
+    setBackLink(null);
     write({ ...locationRef.current, space, focus: null }, "bench");
     focusBench();
   }, [focusBench, write]);
@@ -131,7 +135,9 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     const home = homeOf(ref);
     if (home.kind === "reference" && !locationRef.current.reference) referenceReturn.current = document.activeElement as HTMLElement;
     if (home.kind === "reference" && !locationRef.current.reference && !locationRef.current.inspect) inspectorReturn.current = document.activeElement as HTMLElement;
+    const from = locationRef.current.space;
     write(navigateTo(locationRef.current, ref), home.kind === "space" ? "bench" : "right");
+    if (home.kind === "space" && home.space !== from) setBackLink({ space: from, href: `${window.location.pathname}${window.location.search}` });
     if (home.kind === "space") {
       if (controlsRef.current?.space === home.space) controlsRef.current.goToNode(ref);
       else pending.current = { space: home.space, ref };
@@ -174,6 +180,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
       const query = new URLSearchParams(window.location.search);
       const next = parseLocation(window.location.pathname, query);
       if (!next) return;
+      setBackLink(null);
       const previous = locationRef.current;
       locationRef.current = next; setLocation(next);
       const nextSurface = activeSurface(query.get("surface"), openDocks(next));
@@ -258,8 +265,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
         </Activity>
       </div>)}
       <SpaceRail compact={railWidth < 100} openOverview={() => setOverviewOpen(true)} />
-      <SpaceBar space={location.space} setSpace={setSpace} reference={Boolean(location.reference) && rightVisible} inspectorAvailable={Boolean(location.inspect) && !rightVisible} openInspector={openInspector} toggleReference={Boolean(location.reference) && rightVisible ? closeRight : openReference} openPalette={() => setPaletteOpen(true)} openOverview={() => setOverviewOpen(true)} />
-      {overviewOpen ? <SpaceOverview onClose={() => setOverviewOpen(false)} /> : null}
+      <SpaceBar space={location.space} setSpace={setSpace} back={backLink && typeof window !== "undefined" && `${window.location.pathname}${window.location.search}` === backLink.href ? { title: spaceTitle(backLink.space), run: () => window.history.back() } : undefined} reference={Boolean(location.reference) && rightVisible} inspectorAvailable={Boolean(location.inspect) && !rightVisible} openInspector={openInspector} toggleReference={Boolean(location.reference) && rightVisible ? closeRight : openReference} openPalette={() => setPaletteOpen(true)} openOverview={() => setOverviewOpen(true)} />
+      {overviewOpen ? <SpaceOverview layouts={layouts} onClose={() => setOverviewOpen(false)} /> : null}
       {remote ? <p role="status" data-remote-scope={remote.scope} className="pointer-events-none fixed top-16 left-4 z-30 rounded-md border bg-card/95 px-2 py-1 text-xs shadow-sm">
         Remote Access · {remote.scope === "view" ? "View only. Editing controls require ui:control; sign-in, voice and browser handoff stay local." : "Control granted. Sign-in, voice and browser handoff stay local."}
       </p> : null}
