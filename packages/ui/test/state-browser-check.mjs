@@ -6,6 +6,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/state-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable; STATE_EVIDENCE_DIR keeps the screenshots.
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -286,20 +287,24 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const shot = (name, locator) => (locator ?? page).screenshot({ path: join(evidence, `${name}.png`), animations: "disabled" });
-  /** Pan the bench so a window is centered, then show it at 100% for a legible element screenshot. */
+  /** Reveal the owning pane before taking a legible element screenshot. */
   const frame = async (target, locator, space = "system") => {
-    const box = await locator.boundingBox();
+    const close = target.getByRole("button", { name: "Close inspector", exact: true });
+    if (await close.isVisible()) await close.click();
+    await revealPane(target, space === "system" ? "System" : "Workers", await locator.evaluate((element) => element.closest("[data-window]").dataset.window));
+  };
+  const narrow = async (target, locator) => {
     const size = target.viewportSize();
-    await target.locator(`[data-canvas="workbench"][data-space="${space}"]`).evaluate((main, delta) => main.dispatchEvent(new WheelEvent("wheel", { deltaX: delta.x, deltaY: delta.y, bubbles: true, cancelable: true })),
-      { x: box.x + box.width / 2 - size.width / 2, y: box.y + Math.min(box.height, size.height - 160) / 2 - size.height / 2 });
-    await target.getByRole("button", { name: "Actual size" }).click();
+    await target.setViewportSize({ width: 360, height: size.height });
+    await target.waitForFunction((element) => { const width = element.getBoundingClientRect().width; return width > 0 && width < 352; }, await locator.elementHandle(), { timeout: 2000 });
+    return () => target.setViewportSize(size);
   };
   const framedShot = async (target, name, locator) => { await frame(target, locator); await locator.screenshot({ path: join(evidence, `${name}.png`), animations: "disabled" }); };
   await page.goto(`${origin}/system`);
   const state = page.locator('[data-window="state"]');
   const subs = page.locator('[data-window="subscriptions"]');
   const inspector = page.getByRole("region", { name: "Inspector" });
-  await page.getByRole("button", { name: /Fit bench/ }).click().catch(() => undefined);
+  await revealPane(page, "System", "state");
 
   // Populated, with an unavailable owner kept as a gap and unmeasured bytes named as such.
   await state.getByRole("region", { name: "bots state" }).waitFor();
@@ -345,6 +350,7 @@ try {
   await shot("state-measured", state);
 
   // Subscriptions: listed without arguments; arguments only on explicit reveal.
+  await revealPane(page, "System", "subscriptions");
   await subs.getByText("notify.notify_changed").waitFor();
   assert.equal(await subs.getByText("filter", { exact: false }).count(), 0, "read arguments are not listed");
   await subs.getByRole("button", { name: "Reveal arguments" }).nth(1).click();
@@ -441,6 +447,21 @@ try {
   await completionRow(unsupportedReceipt.id).getByRole("button", { name: "Details" }).click();
   await completionRow(unsupportedReceipt.id).getByText("Linking not supported", { exact: false }).waitFor();
 
+  const heldReceipt = await completionRow(workerReceipt.id).elementHandle();
+  await subs.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await subs.waitFor({ state: "hidden" });
+  const closedHistory = historyCalls.length, closedDetails = detailCalls.length;
+  serveSock.publish("serve_subscriptions_changed");
+  await wait(100);
+  assert.equal(historyCalls.length, closedHistory, "closing the pane releases history demand");
+  assert.equal(detailCalls.length, closedDetails, "closed receipt details stop reading");
+  await revealPane(page, "System", "subscriptions");
+  await completionRow(workerReceipt.id).getByRole("button", { name: "Hide details" }).waitFor();
+  for (let i = 0; i < 100 && (historyCalls.length === closedHistory || detailCalls.length === closedDetails); i++) await wait(20);
+  assert.ok(historyCalls.length > closedHistory && detailCalls.length > closedDetails, "reopening reacquires both observations");
+  assert.equal(await completionRow(workerReceipt.id).evaluate((element, held) => element === held, heldReceipt), true, "the retained receipt keeps its DOM identity");
+  await heldReceipt.dispose();
+
   // Activity hides release view demand but preserve the open detail and its evidence. Returning
   // reads both the first history page and each still-open keyed detail again.
   const switchSpace = async (name) => {
@@ -529,19 +550,13 @@ try {
 
   // Narrow: both list views stay usable at the smallest width.
   await frame(page, subs);
-  const subsGrip = subs.locator('span[title="Resize Subscriptions"]').first();
-  const subsEdge = await subsGrip.boundingBox();
-  const subsGripY = Math.min(subsEdge.y + subsEdge.height / 2, (page.viewportSize()?.height ?? 0) - 24);
-  await page.mouse.move(subsEdge.x + subsEdge.width / 2, subsGripY);
-  await page.mouse.down();
-  await page.mouse.move(subsEdge.x - 320, subsGripY, { steps: 6 });
-  await page.mouse.up();
+  const restoreSubscriptions = await narrow(page, subs);
   assert.ok((await subs.boundingBox()).width < 352, "resized narrow");
   await shot("subscriptions-occurrences-narrow", subs);
   await subs.getByRole("button", { name: "History", exact: true }).click();
   await subs.getByText(/Showing 100 of 105 retained receipts/).waitFor();
   await shot("subscriptions-history-narrow", subs);
-  await subsGrip.dblclick();
+  await restoreSubscriptions();
 
   // The resolved Worker link opens the exact turn, not the latest one.
   await completionRow(workerReceipt.id).getByRole("button", { name: "Details" }).click();
@@ -562,6 +577,7 @@ try {
   await subs.getByText("hud.hud_changed").waitFor();
 
   await page.emulateMedia({ colorScheme: "dark" });
+  await revealPane(page, "System", "state");
   await shot("state-dark", state);
   assert.ok(!devCalls.includes("serve_harness_releases"), "a page with developer mode off never reads releases");
   await page.close();
@@ -570,7 +586,7 @@ try {
   const factory = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2, reducedMotion: "reduce" });
   await authorizeBrowser(factory, origin, env);
   factory.on("pageerror", (error) => errors.push(error.message));
-  await factory.goto(`${origin}/system?focus=state`);
+  await factory.goto(`${origin}/system?focus=state-entry:serve:factory-reset`);
   const fstate = factory.locator('[data-window="state"]');
   const resetRow = fstate.locator('article[data-node="state-entry:serve:factory-reset"]');
   for (let attempt = 0; !(await resetRow.count()); attempt++) {
@@ -612,14 +628,8 @@ try {
 
   // Narrow: the whole State window, including owner-group headers, reflows without horizontal overflow.
   await frame(factory, fstate);
-  const stateGrip = fstate.locator('span[title="Resize State"]').first();
-  const stateEdge = await stateGrip.boundingBox();
-  // The opened disclosure stretches the window past the viewport, so press the grip inside the viewport.
-  const gripY = Math.min(stateEdge.y + stateEdge.height / 2, (factory.viewportSize()?.height ?? 0) - 24);
-  await factory.mouse.move(stateEdge.x + stateEdge.width / 2, gripY);
-  await factory.mouse.down();
-  await factory.mouse.move(stateEdge.x - 320, gripY, { steps: 6 });
-  await factory.mouse.up();
+  // The opened disclosure stays within its own scroller at phone width.
+  const restoreState = await narrow(factory, fstate);
   assert.ok((await fstate.boundingBox()).width < 352, "resized narrow");
   assert.ok(await fstate.locator("[data-scroll]").evaluate((el) => el.scrollWidth <= el.clientWidth), "the State window has no horizontal overflow");
   assert.ok(await disclosure.evaluate((el) => el.scrollWidth <= el.clientWidth), "the disclosure has no horizontal overflow");
@@ -628,7 +638,7 @@ try {
   const [disclosureBox, scrollBox] = await Promise.all([disclosure.boundingBox(), fstate.locator("[data-scroll]").boundingBox()]);
   assert.ok(disclosureBox.x + disclosureBox.width <= scrollBox.x + scrollBox.width + 1, "the disclosure stays inside the window's scroll body");
   await framedShot(factory, "factory-reset-narrow", fstate);
-  await stateGrip.dblclick();
+  await restoreState();
   await factory.close();
 
   // Developer mode, on a fresh local page at 2x so the evidence is legible.
@@ -664,8 +674,10 @@ try {
   await dev.keyboard.press("Space");
   await developer.waitFor();
   assert.deepEqual(settingsUpdates, [{ developerMode: true, expectedRevision: 0 }]);
+  await revealPane(dev, "System", "server");
   await server.getByText(/^On · saved/).waitFor();
   assert.equal(await toggle.getAttribute("aria-checked"), "true");
+  await revealPane(dev, "System", "developer");
   await developer.getByText("Changed upstream").waitFor();
   await developer.getByText(/^was 2\.0\.13 · 2h/).waitFor();
   await developer.getByText("Not checked", { exact: true }).waitFor();
@@ -681,8 +693,7 @@ try {
   assert.equal(await developer.getByRole("button", { name: /install|upgrade/i }).count(), 0, "and no install or upgrade action");
   await framedShot(dev, "developer-settings-on", server);
   await framedShot(dev, "developer-light", developer);
-  // It joins the Server column below Packages; nothing else moves.
-  await dev.getByRole("button", { name: /Fit bench/ }).click();
+  // The enabled Developer pane appears within the tiled workspace.
   await dev.screenshot({ path: join(evidence, "developer-bench.png"), animations: "disabled" });
 
   // Check now returns on admission; the started check's progress arrives through the event-driven read.
@@ -708,17 +719,12 @@ try {
 
   // Narrow: the four columns reflow to two lines per harness without horizontal overflow.
   await frame(dev, developer);
-  const grip = developer.locator('span[title="Resize Developer"]').first();
-  const edge = await grip.boundingBox();
-  await dev.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
-  await dev.mouse.down();
-  await dev.mouse.move(edge.x - 70, edge.y + edge.height / 2, { steps: 6 });
-  await dev.mouse.up();
+  const restoreDeveloper = await narrow(dev, developer);
   assert.ok((await developer.boundingBox()).width < 352, "resized narrow");
   assert.equal(await developer.locator("li[aria-hidden]").isVisible(), false, "the column header gives way to two-line rows");
   assert.ok(await developer.locator("[data-scroll]").evaluate((body) => body.scrollWidth <= body.clientWidth), "no horizontal overflow");
   await framedShot(dev, "developer-narrow", developer);
-  await grip.dblclick();
+  await restoreDeveloper();
 
   // A save at a revision another client has since replaced is refused once, the current value is shown, nothing retries.
   devSettings = { developerMode: true, revision: devSettings.revision + 2, updatedAt: new Date().toISOString() };
@@ -748,7 +754,7 @@ try {
   devSettings = { developerMode: false, revision: devSettings.revision + 1, updatedAt: new Date().toISOString() };
   serveSock.publish("serve_settings_changed");
   await developer.waitFor({ state: "detached" });
-  await dev.waitForFunction(() => document.activeElement?.getAttribute("data-canvas") === "workbench");
+  await dev.waitForFunction(() => Boolean(document.activeElement?.closest('[data-canvas="workbench"][data-space="system"]')) && !document.activeElement.closest("[hidden],[inert]"));
   assert.equal(await toggle.getAttribute("aria-checked"), "false");
   const reads = releaseReads();
   serveSock.publish("harness_releases_changed");

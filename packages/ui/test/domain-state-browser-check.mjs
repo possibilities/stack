@@ -526,12 +526,14 @@ try {
   // System State: unsupported coverage is stated, and each owner links to its controls.
   await go("system");
   const state = page.locator('[data-window="state"]');
+  await revealPane(page, "System", "state");
   await state.getByText("Native purge requires disabled/drained accounts", { exact: false }).waitFor();
   await state.getByRole("region", { name: "worker state" }).getByRole("button", { name: "Open in Workers" }).waitFor();
   await shot("state-owner-links", state);
 
   // Xcom: pausing observes the running sync until it drains; post removal needs explicit choices.
   const xw = page.locator('[data-window="xcom-state"]');
+  await revealPane(page, "System", "xcom-state");
   await xw.getByText("Syncing head").waitFor();
   await xw.getByText("Pause Xcom first.").waitFor();
   await xw.getByRole("switch", { name: "Admit Xcom scans" }).click();

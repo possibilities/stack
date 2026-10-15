@@ -100,6 +100,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, reducedMotion: "reduce" });
   await authorizeBrowser(page, origin, env);
   page.on("pageerror", (error) => issues.push(error.message));
+  await page.goto(`${origin}/system`);
+  await page.getByRole("group", { name: "System layout preset", exact: true }).getByRole("button", { name: "Monitor", exact: true }).click();
+  const host = page.locator('[data-window="host"]');
+  await host.getByText("fixture-host", { exact: true }).first().waitFor();
+  await host.getByText("Apple M4", { exact: false }).waitFor();
+  for (const value of ["darwin_ps", "server_tree"]) await page.locator('[data-window="sampling"]').getByText(value, { exact: true }).waitFor();
   if (process.env.REFERENCE_ONLY) {
     const evidence = process.env.REFERENCE_EVIDENCE_DIR ?? join(uiDir, ".next", "reference-evidence");
     await mkdir(evidence, { recursive: true });

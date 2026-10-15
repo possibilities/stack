@@ -44,7 +44,7 @@ const session = { id: worker, botId: "bot-1", threadId: "main-bot-1", accountId:
 
 const handlers = {
   serve_status: () => ({ serverId: fixtureServerId, pid: process.pid, children: [], mcpUrls: {}, indexUrl: null, uiUrl: null, inspectorUrl: null }),
-  serve_resource_history: () => ({ snapshots: [], nextCursor: null }),
+  serve_resource_history: () => { throw new Error("not observed in this fixture"); },
   // The gateway admits serve only with every operation its manifest selects; this check reads none of them.
   serve_codex_tools: () => { throw new Error("not observed in this fixture"); },
   serve_codex_tools_check: () => { throw new Error("not observed in this fixture"); },

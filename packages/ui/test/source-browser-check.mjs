@@ -6,6 +6,7 @@
 // CHROME_BIN may override the local headless Chrome executable. SOURCE_NEXT=start uses a prior `next build`.
 // SOURCE_EVIDENCE_DIR keeps screenshots. The state directory is short on purpose: Unix socket paths are limited to ~104 bytes on macOS.
 import assert from "node:assert/strict";
+import { revealPane, verifyPaneDraft } from "./pane-spaces-browser.mjs";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -70,21 +71,24 @@ const until = async (probe, ms = 30_000) => {
 const issuePayload = (number, extra = {}, issue = {}) => ({ action: "opened", repository: { id: 3, full_name: "owner/project", owner: { login: "owner" } }, sender: { login: "human" },
   issue: { id: 1000 + number, number, title: `Issue ${number}`, html_url: `https://example.test/issues/${number}`, state: "open", locked: false, milestone: null, labels: ["bug"], ...issue }, ...extra });
 
-// Light, dark and narrow evidence. A window cannot be narrower than its registration on the bench, so the narrow frame temporarily
-// sets the window to a phone-sized width (as a person resizing it would) and asserts nothing inside it overflows sideways.
+// Light, dark and narrow evidence. The pane host projects the chosen pane into the phone viewport.
+// Its real width and descendants are checked without overriding the window geometry.
 const captures = async (locator, name) => {
+  const closeInspector = page.getByRole("button", { name: "Close inspector", exact: true });
+  if (await closeInspector.isVisible()) await closeInspector.click();
+  await revealPane(page, "Source", await locator.evaluate((element) => element.closest("[data-window]").dataset.window));
   await page.emulateMedia({ colorScheme: "light" });
   await locator.screenshot({ path: join(evidence, `${name}-light.png`), animations: "disabled" });
   await page.emulateMedia({ colorScheme: "dark" });
   await locator.screenshot({ path: join(evidence, `${name}-dark.png`), animations: "disabled" });
   const frame = locator.locator("xpath=ancestor-or-self::section[@data-window]");
   await page.setViewportSize({ width: 390, height: 844 });
-  await frame.evaluate((el) => { el.dataset.restore = el.style.width; el.style.width = "360px"; });
+  await page.waitForFunction((element) => { const width = element.getBoundingClientRect().width; return width > 0 && width < 400; }, await frame.elementHandle(), { timeout: 2000 });
   await locator.screenshot({ path: join(evidence, `${name}-narrow.png`), animations: "disabled" });
   const overflowing = await frame.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX === "visible" && node.clientWidth > 0
     && !node.closest("pre,[data-slot=native-select-wrapper],button,[class*=truncate],svg") && node.scrollWidth > el.clientWidth).map((node) => `${node.tagName}.${String(node.className).slice(0, 60)}`));
   assert.deepEqual(overflowing, [], `${name} overflows at a narrow width`);
-  await frame.evaluate((el) => { el.style.width = el.dataset.restore; });
+
   await page.setViewportSize({ width: 2600, height: 1300 });
   await page.emulateMedia({ colorScheme: "light" });
 };
@@ -260,6 +264,8 @@ try {
 
   // Keyboard: rows are reachable and arrow keys move between them; Enter opens the reader.
   const open = (n) => ledger.getByRole("button", { name: new RegExp(`^Open delivery ${n},`) });
+  await reader.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await reader.waitFor({ state: "hidden" });
   await open(1).focus();
   await page.keyboard.press("ArrowDown");
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")?.startsWith("Open delivery 2,")), true);
@@ -269,6 +275,7 @@ try {
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
+  await reader.waitFor({ state: "visible", timeout: 5000 });
   await reader.getByText("#3", { exact: true }).first().waitFor();
 
   // Concurrent arrivals: announced, never moving the page being read; the watermark stays pinned until asked.
@@ -461,6 +468,7 @@ try {
   await activate(maintenance.getByRole("button", { name: "Close receipt" }));
 
   // Catalog: variants, hook types and search; a schema loads one chunk at a time and never claims to validate.
+  await revealPane(page, "Source", "source-catalog");
   await catalogWindow.getByText(/\d+ of \d+ events/).waitFor();
   await catalogWindow.getByLabel("Search events and actions").fill("review_requested");
   await catalogWindow.getByRole("button", { name: /^pull_request/ }).first().click();
@@ -503,6 +511,7 @@ try {
   const head = (await call("github_status")).latestSequence;
 
   await page.goto(`${origin}/source`);
+  await revealPane(page, "Source", "source-watches");
   await watchesWindow.getByText("No watches", { exact: true }).waitFor();
   await watchesWindow.getByText(/Polling, native admission and Worker intake never advance the consumption cursor/).waitFor();
   assert.deepEqual(ackCalls(), [], "viewing the empty space acknowledges nothing");
@@ -521,6 +530,8 @@ try {
   await createForm.getByRole("button", { name: "From current ledger filter" }).click();
   assert.equal(await createForm.getByLabel("Events").inputValue(), "pull_request", "the ledger's filter is the watch's draft");
   await createForm.getByLabel("Label", { exact: true }).fill("Pull requests");
+  await verifyPaneDraft(page, { title: "Source", id: "source-watches", field: createForm.getByLabel("Label", { exact: true }) });
+  assert.equal((await call("github_watch_list")).watches.length, 0, "layout changes never create a watch draft");
   assert.equal(await createForm.getByRole("radio", { name: /^Now \(default\)/ }).isChecked(), true, "start now is the default");
   await captures(createForm, "source-watch-create-edit");
   await createForm.getByRole("button", { name: "Review definition" }).click();
@@ -1473,7 +1484,9 @@ try {
   await rReader.getByRole("button", { name: "Read original body" }).click();
   await rReader.locator("[data-payload-text]").waitFor();
   await rReader.getByText(/Digest verified\./).waitFor();
+  await revealPane(remotePage, "Source", "source-catalog");
   await rCatalog.getByText(/\d+ of \d+ events/).waitFor();
+  await revealPane(remotePage, "Source", "source-receivers");
   const rOrg = rReceivers.locator(`li[data-node="github-receiver:${org.endpoint.id}"]`);
   await activate(rOrg.getByRole("button", { name: "Setup facts" }));
   await rOrg.getByText("Public prerequisite").waitFor();
@@ -1490,6 +1503,7 @@ try {
   // Watches read on a remote session (definitions, counts, inbox entries) and nothing about them can be changed or acknowledged.
   const issuesNow = await ownerWatch(issuesId);
   const rWatches = remotePage.locator('[data-window="source-watches"]');
+  await revealPane(remotePage, "Source", "source-watches");
   const rIssues = rWatches.locator(`li[data-node="github-watch:${issuesId}"]`);
   await rIssues.waitFor();
   await rIssues.getByLabel("Consumption").getByText(`#${issuesNow.acknowledgedThrough}`, { exact: true }).first().waitFor();

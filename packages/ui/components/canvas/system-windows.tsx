@@ -135,6 +135,7 @@ export function ServerWindow() {
 function StackSettings() {
   const { serveSettings, status, remote } = useStack();
   const store = useStore();
+  const { revealPane } = useWorkbench();
   const now = useNow(30_000);
   const id = useId();
   const [saving, setSaving] = useState(false);
@@ -145,7 +146,7 @@ function StackSettings() {
   const save = (developerMode: boolean) => {
     setSaving(true);
     setProblem(null);
-    store.saveServeSettings(developerMode).catch((error) => setProblem(settingsSaveProblem(errorMessage(error)))).finally(() => setSaving(false));
+    store.saveServeSettings(developerMode).then(() => { if (developerMode) revealPane("system", "developer"); }).catch((error) => setProblem(settingsSaveProblem(errorMessage(error)))).finally(() => setSaving(false));
   };
   const note = status.serve !== "open" ? "Unknown until the server connection opens."
     : serveSettings.error ? `Unknown: ${serveSettings.error}`

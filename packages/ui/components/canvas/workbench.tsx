@@ -27,7 +27,7 @@ import { SpaceBar, SpaceOverview, SpaceRail } from "./space-chrome";
 import { panePresets } from "@/lib/stack/pane-presets";
 import { CallLauncher, VoiceProvider } from "./voice";
 
-const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox", "roles", "content", "signal", "brain", "scrape"]);
+const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox", "roles", "content", "signal", "brain", "scrape", "source", "system"]);
 
 export function Workbench({ snapshot, initialSpace, initialFocus, initialLocation }: { snapshot: Snapshot; initialSpace: SpaceId; initialFocus: NodeRef | null; initialLocation?: BenchLocation }) {
   const start = initialLocation ?? (initialFocus ? navigateTo(emptyLocation(initialSpace), initialFocus) : emptyLocation(initialSpace));
@@ -276,7 +276,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   ], [controls, paneControls, location.inspect, openReference, openInspector]);
   const revealPane = useCallback((space: SpaceId, pane: string) => {
     if (locationRef.current.space !== space) return;
-    if (paneControlsRef.current?.space === space) paneControlsRef.current.reveal(pane, false);
+    if (paneControlsRef.current?.space === space && paneControlsRef.current.panes.some(({ id }) => id === pane)) paneControlsRef.current.reveal(pane, false);
     else {
       const panes = pending.current?.space === space ? pending.current.panes ?? [] : [];
       pending.current = { space, ref: null, panes: [...panes.filter((id) => id !== pane), pane], focus: false };

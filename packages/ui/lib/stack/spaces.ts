@@ -266,7 +266,7 @@ export function parseNodeKey(key: string): NodeRef | null {
   if (kind === "document" || kind === "collection" || kind === "item" || kind === "artifact") return { kind, id: rest };
   if (kind === "worker" || kind === "worker-runtime" || kind === "worker-window") return { kind, id: rest };
   if (kind === "preset" || kind === "scrape-job") return { kind, id: rest };
-  if (kind === "codex-tool") return { kind, id: rest };
+  if (kind === "codex-tool" || kind === "state-entry" || kind === "subscription" || kind === "bot-state") return { kind, id: rest };
   if (kind === "browser-profile" || kind === "browser-handoff" || kind === "browser-controller" || kind === "browser-viewer") return { kind, id: rest };
   if (kind === "research-document" || kind === "ingestion-job" || kind === "research-source") return { kind, id: rest };
   if (kind === "proc-schedule" || kind === "proc-execution" || kind === "proc-run" || kind === "proc-run-window") return { kind, id: rest };

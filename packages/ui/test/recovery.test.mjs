@@ -149,7 +149,7 @@ test("the root UI renders the canvas without losing local links, processes, or B
     ]);
     assert.match(system, /Filter activity/);
     for (const value of ["MCP Inspector", "Packages", "inspector", "9876", "worker", "Fixture spawn failure", server.inspectorUrl, server.mcpUrls.serve,
-      "fixture-host", "Apple M4", "Fresh", "server_tree", "Stack", "darwin_ps"]) {
+      "Fresh", "Stack"]) {
       assert.ok(system.includes(value), `System is missing ${value}`);
     }
     assert.doesNotMatch(system, /Runtime index/);
