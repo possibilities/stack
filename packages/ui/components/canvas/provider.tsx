@@ -21,8 +21,8 @@ const ProcWindowsContext = createContext<ProcWindowStore | null>(null);
 const HudViewContext = createContext<HudViewStore | null>(null);
 
 /** This tree's destination: the complete identity once the server has named itself, and storage that belongs to it alone. */
-type DestinationValue = { identity: DestinationIdentity | null; local: ScopedStorage | null; session: ScopedStorage | null };
-const DestinationContext = createContext<DestinationValue>({ identity: null, local: null, session: null });
+type DestinationValue = { identity: DestinationIdentity | null; local: ScopedStorage | null; session: ScopedStorage | null; restored: boolean };
+const DestinationContext = createContext<DestinationValue>({ identity: null, local: null, session: null, restored: false });
 
 /**
  * The browser storage this page may use, scoped to its destination. Both areas are null until the server has named
@@ -54,7 +54,9 @@ function StackTree({ snapshot, children, connections, onMoved }: { snapshot: Sna
   const identity = useMemo(() => destinationIdentity(destination), [destination]);
   const scope = identity ? `${identity.serverId} ${identity.authority} ${identity.origin}` : null;
   // Storage objects are only wrappers; the browser is touched when a store or view uses them, after mount.
-  const value = useMemo<DestinationValue>(() => ({ identity, ...destinationStorages(identity) }), [scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [restoredStorage, setRestoredStorage] = useState<ScopedStorage | null>(null);
+  const storage = useMemo(() => destinationStorages(identity), [scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo<DestinationValue>(() => ({ identity, ...storage, restored: storage.local !== null && storage.local === restoredStorage }), [identity, storage, restoredStorage]);
   useEffect(() => {
     store.onDestinationMoved(onMoved);
     return () => store.onDestinationMoved(null);
@@ -68,6 +70,7 @@ function StackTree({ snapshot, children, connections, onMoved }: { snapshot: Sna
     viewers.attach(value.local);
     procWindows.attach(value.local);
     hudView.attach(value.local);
+    setRestoredStorage(value.local);
   }, [store, chats, workerWindows, viewers, procWindows, hudView, value.local]);
   useEffect(() => {
     store.start(connections);

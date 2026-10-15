@@ -92,9 +92,13 @@ export function paneAnchor(tree: PaneNode | null, id: string): { neighbor: strin
   return { neighbor: tabStacks(neighbor)[0].active, side: tree.axis === "x" ? index === 0 ? "left" : "right" : index === 0 ? "above" : "below" };
 }
 
-export function minimumSize(node: PaneNode): { width: number; height: number } {
-  if (node.type === "stack") return paneMinimum;
-  const children = node.children.map(minimumSize);
+export type PaneMinimums = Readonly<Record<string, { width: number; height: number }>>;
+export function minimumSize(node: PaneNode, minimums: PaneMinimums = {}): { width: number; height: number } {
+  if (node.type === "stack") return {
+    width: Math.max(...node.tabs.map((id) => minimums[id]?.width ?? paneMinimum.width)),
+    height: Math.max(...node.tabs.map((id) => minimums[id]?.height ?? paneMinimum.height)),
+  };
+  const children = node.children.map((child) => minimumSize(child, minimums));
   return {
     width: node.axis === "x" ? children.reduce((sum, size) => sum + size.width, paneGap * (children.length - 1)) : Math.max(...children.map((size) => size.width)),
     height: node.axis === "y" ? children.reduce((sum, size) => sum + size.height, paneGap * (children.length - 1)) : Math.max(...children.map((size) => size.height)),
@@ -112,11 +116,11 @@ function extents(total: number, weights: number[], minimum: number[]): number[] 
   }
   return sizes;
 }
-export function projectLayout(tree: PaneNode | null, viewport: { width: number; height: number }, focus?: string | null): { stacks: StackRect[]; dividers: Divider[]; compact: boolean } {
+export function projectLayout(tree: PaneNode | null, viewport: { width: number; height: number }, focus?: string | null, minimums: PaneMinimums = {}): { stacks: StackRect[]; dividers: Divider[]; compact: boolean } {
   const stacks: StackRect[] = [], dividers: Divider[] = [];
   if (!tree) return { stacks, dividers, compact: false };
   const width = Math.max(0, viewport.width), height = Math.max(0, viewport.height);
-  const min = minimumSize(tree), compact = width < min.width || height < min.height;
+  const min = minimumSize(tree, minimums), compact = width < min.width || height < min.height;
   if (compact) {
     const ids = paneIds(tree);
     return { stacks: [{ ...tabs(...ids), id: "compact", active: focus && ids.includes(focus) ? focus : tabStacks(tree)[0].active, x: 0, y: 0, width, height }], dividers, compact };
@@ -124,7 +128,7 @@ export function projectLayout(tree: PaneNode | null, viewport: { width: number; 
   const visit = (node: PaneNode, rect: PaneRect) => {
     if (node.type === "stack") { stacks.push({ ...node, ...rect }); return; }
     const dimension = node.axis === "x" ? "width" : "height", coordinate = node.axis;
-    const minimum = node.children.map((child) => minimumSize(child)[dimension]);
+    const minimum = node.children.map((child) => minimumSize(child, minimums)[dimension]);
     const sizes = extents(rect[dimension] - paneGap * (node.children.length - 1), node.weights, minimum);
     let cursor = rect[coordinate];
     node.children.forEach((child, index) => {

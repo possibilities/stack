@@ -370,7 +370,7 @@ export function Bench({ space, blocked, onControls, onScale, onArrive }: {
   return (
     <PlacementContext value={placement}>
       <main ref={viewport} data-canvas="workbench" data-space={space} tabIndex={0} aria-label="Open bench" aria-describedby={`bench-gestures-${space}`} className={cn("canvas-dots fixed inset-y-0 right-[var(--sheet)] left-0 touch-none overflow-hidden overscroll-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", dragging ? "cursor-grabbing" : "cursor-grab")}
-        style={{ backgroundSize: `${22 * camera.k}px ${22 * camera.k}px`, backgroundPosition: `${camera.x}px ${camera.y}px` }}
+        style={{ left: "var(--rail, 0px)", backgroundSize: `${22 * camera.k}px ${22 * camera.k}px`, backgroundPosition: `${camera.x}px ${camera.y}px` }}
         onPointerDown={(event) => {
           if ((event.button !== 0 && event.button !== 1) || (event.target as Element).closest("[data-window],[data-chrome]")) return;
           event.currentTarget.focus({ preventScroll: true });

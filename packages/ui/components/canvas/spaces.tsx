@@ -73,6 +73,7 @@ import { ResourcesWindow as WorkResourcesWindow } from "./hud-resources";
 import { AttentionWindow as WorkAttentionWindow } from "./hud-attention";
 
 export type WindowDef = {
+  description?: string;
   /** Globally unique across spaces; also used by Window and node destinations. */
   id: string;
   title: string;
@@ -275,3 +276,35 @@ export const spaceViews: Record<SpaceId, {
     ],
   },
 };
+
+const paneDescriptions: Record<string, string> = {
+  "hud-attention": "Work that needs someone next", "hud-work": "Shared Work hierarchy and selection", "hud-item": "Selected Work item, details and edits", "hud-timeline": "Collaboration history for selected Work", "hud-resources": "Resources deployed on selected Work",
+  bots: "Bots and their existing controls", "bot-state": "Stored state and recovery for a selected Bot", chat: "A Bot's main thread and composer",
+  workers: "Worker sessions, filters and attention", worker: "A Worker's conversation, changes, turns and tools", "worker-runtimes": "Worker runtimes and availability",
+  accounts: "Accounts, sign-in and linked Workers", usage: "Observed quota and reset times", "model-catalogs": "Available models and effort choices",
+  "call-speech": "Speech controls for the current call", inference: "Inference requests and their durable ledger",
+  "notify-inbox": "Notifications to read and answer", "notify-detail": "Selected Notification and response choices", "notify-compose": "Compose an operator Notification",
+  signal: "Processing settings and health", attention: "What conversations ask of you", "attention-messages": "Captured conversation evidence", "attention-runs": "Interpretation runs and traces", "attention-changes": "Attention change history",
+  "role-catalog": "Named Roles and launch defaults", "role-instructions": "Instruction Categories and Fragments", "role-editor": "Edit the selected Role resource", "role-preview": "Assembled instructions and launch preview", "role-skills": "Role skills and capability filters", "role-mcp-servers": "Role MCP servers and internal connections", "role-projects": "Trusted launch projects", "role-shims": "Local commands that launch Roles",
+  "browse-handoffs": "Requests for human browser help", "browse-viewer": "A profile's live observation or granted control", "browse-profiles": "Browser profiles and their state", "browse-controllers": "Connected browser controllers", "browse-toolchain": "Browser tools and owned volumes",
+  "content-documents": "Vault documents and selection", "content-library": "Collections and Content items", "content-editor": "Document drafts and editing", "content-preview": "Read the selected document or item", "content-artifacts": "Published Artifacts", "content-storage": "Content storage and retained history",
+  "brain-search": "Find collected research", "brain-reader": "Read selected research and evidence", "brain-ingest": "Admit material for ingestion", "brain-jobs": "Ingestion jobs, Runs and recovery", "brain-sources": "Recurring Research sources",
+  "scrape-extract": "Extract a specific source", "scrape-feeds": "Discover feed entries", "scrape-convert": "Convert document content", "scrape-presets": "Extraction presets", "scrape-status": "Extraction capability and health", "scrape-checks": "Local corpus checks", "scrape-queue": "Scrape-to-file jobs and receipts",
+  "proc-schedules": "Scheduled tasks and filters", "proc-schedule": "Selected schedule and executions", "proc-runs": "Process runs and filters", "proc-run": "One run's output and status", "proc-timeline": "Schedule and run timing",
+  "source-receivers": "Webhook receiver setup and state", "source-catalog": "Official event definitions", "source-deliveries": "Accepted deliveries and filters", "source-delivery": "Selected delivery and original payload", "source-watches": "Filtered inboxes and reviewed acknowledgments",
+  server: "Server status and Stack settings", access: "Local Access approvals and credentials", packages: "Package channels and endpoints", resources: "Observed host resource usage", host: "Host resources and configuration", "codex-tools": "Codex tool availability", processes: "Observed processes", sampling: "Process sampling", activity: "Package activity", state: "Owner state inventories and recovery", subscriptions: "Event subscriptions and completion evidence", "xcom-state": "Following archive state", developer: "Upstream harness release observations",
+};
+
+export function paneDescription(def: WindowDef): string {
+  const kind = def.id.replace(/-\d+$/, "");
+  return def.description ?? paneDescriptions[kind] ?? def.title;
+}
+
+export type PaneDefinition = WindowDef & { kind: string; space: SpaceId; description: string; minimum: { width: number; height: number } };
+const readingPanes = new Set(["chat", "worker", "browse-viewer", "role-editor", "role-preview", "content-editor", "content-preview", "brain-reader", "proc-run", "source-delivery"]);
+export function paneDefinitions(space: SpaceId, state: StackState, arrangement: Parameters<(typeof spaceViews)[SpaceId]["windows"]>[1]): PaneDefinition[] {
+  return spaceViews[space].windows(state, arrangement).map((def) => {
+    const kind = def.id.replace(/-\d+$/, "");
+    return { ...def, kind, space, description: paneDescription(def), minimum: readingPanes.has(kind) ? { width: 360, height: 240 } : { width: 280, height: 180 } };
+  });
+}

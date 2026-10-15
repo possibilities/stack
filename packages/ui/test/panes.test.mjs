@@ -66,6 +66,9 @@ test("narrow projection does not rewrite desktop proportions or create unreadabl
   assert.equal(narrow.stacks[0].width, 320);
   assert.deepEqual(narrow.dividers, []);
   assert.equal(JSON.stringify(tree), saved);
+  const reading = projectLayout(tree, { width: 1200, height: 800 }, "editor", { editor: { width: 1000, height: 240 } });
+  assert.equal(reading.compact, true);
+  assert.equal(reading.stacks[0].active, "editor");
 });
 
 test("stored trees reject ambiguous identities, invalid weights and excessive depth before traversal", () => {

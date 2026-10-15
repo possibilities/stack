@@ -157,6 +157,60 @@ try {
   await item.getByRole("button", { name: "Edit objective" }).click();
   const objective = item.getByRole("textbox", { name: "Objective" });
   await objective.fill("Human draft objective");
+  const heldDraft = await objective.elementHandle();
+  const retained = async (operation) => {
+    assert.equal(await objective.inputValue(), "Human draft objective", `${operation} preserves the unsaved objective`);
+    assert.equal(await objective.evaluate((element, original) => element === original, heldDraft), true, `${operation} retains the mounted editor`);
+  };
+  const layouts = page.locator('[aria-label="HUD layout preset"]');
+  for (const preset of ["Focus", "Board", "Triage"]) {
+    await layouts.getByRole("button", { name: preset, exact: true }).click();
+    await retained(preset);
+  }
+  const arrange = async (side, target) => {
+    await item.getByRole("button", { name: "Arrange Implement windows", exact: true }).click();
+    await page.getByRole("menuitem", { name: side, exact: true }).hover();
+    await page.getByRole("menu", { name: side, exact: true }).getByRole("menuitem", { name: target, exact: true }).click();
+  };
+  await arrange("Move below", "Work");
+  await page.waitForFunction(() => {
+    const item = document.querySelector('[data-pane-frame="hud-item"]').getBoundingClientRect();
+    const work = document.querySelector('[data-pane-frame="hud-work"]').getBoundingClientRect();
+    return item.top >= work.bottom && Math.abs(item.left - work.left) < 1;
+  }, undefined, { timeout: 10_000 });
+  await retained("moving between split parents");
+  await arrange("Stack with", "Timeline");
+  await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+  assert.equal(await objective.isVisible(), false);
+  await page.getByRole("tab", { name: "Work item", exact: true }).click();
+  await retained("tab switch");
+  await item.getByRole("button", { name: "Zoom Implement windows", exact: true }).click();
+  assert.equal(await page.locator('[data-pane-frame]:visible').count(), 1);
+  await item.getByRole("button", { name: "Close Implement windows", exact: true }).click();
+  assert.equal(await objective.isVisible(), false);
+  await page.getByRole("button", { name: "Undo close", exact: true }).click();
+  await retained("close and undo");
+  await item.getByRole("button", { name: "Restore Implement windows", exact: true }).click();
+  await item.getByRole("button", { name: "Close Implement windows", exact: true }).click();
+  await page.getByRole("button", { name: "Panes 1 closed", exact: true }).click();
+  await page.getByRole("combobox", { name: "Find a pane in HUD" }).fill("hud-item");
+  await page.keyboard.press("Enter");
+  await retained("catalog reopen");
+  await page.setViewportSize({ width: 420, height: 900 });
+  await retained("compact projection");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: join(evidence, "hud-pane-draft-narrow.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 2400, height: 1300 });
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "Fleet", exact: true }).click();
+  assert.equal(await objective.isVisible(), false);
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "HUD", exact: true }).click();
+  await retained("space switch");
+  await page.getByRole("button", { name: "Reset pane layout", exact: true }).click();
+  await timeline.waitFor({ state: "visible" });
+  await retained("reset after rearrangement");
+  await page.screenshot({ path: join(evidence, "hud-pane-draft.png"), animations: "disabled" });
+  assert.equal((await get(ids.implement)).objective, "Build the windows and their tests", "layout operations never submit the draft");
+  await heldDraft.dispose();
   const before = await get(ids.implement);
   await call("work_update", { requestId: randomUUID(), id: ids.implement, expectedRevision: before.revision, patch: { objective: "Agent's concurrent objective" } });
   await item.getByText(/changed this while you were editing/).waitFor();
@@ -211,7 +265,7 @@ try {
 
   // Arriving from a link selects the item and reveals it.
   await page.goto(`${origin}/?focus=${encodeURIComponent(`work-item:${ids.design}`)}`);
-  await item.getByText("Information architecture").waitFor();
+  await item.getByText("Information architecture").waitFor({ timeout: 10_000 });
 
   await page.emulateMedia({ colorScheme: "dark" });
   await page.screenshot({ path: join(evidence, "hud-dark.png"), animations: "disabled" });

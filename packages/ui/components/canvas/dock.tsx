@@ -7,11 +7,12 @@ import { clamp } from "@/lib/stack/geometry";
 import { useDestination } from "./provider";
 
 /** A nonmodal landmark, not a dialog: the bench stays reachable by keyboard. */
-export function Dock({ side, label, open, overlay, width, min, max, onResize, onClose, returnFocus, restoreFocusOnHide = true, children }: {
+export function Dock({ side, label, open, overlay, floating = false, width, min, max, onResize, onClose, returnFocus, restoreFocusOnHide = true, children }: {
   side: "left" | "right"; label: string; open: boolean; width: number; min: number; max: number;
   onResize(width: number): void; onClose(): void; children: React.ReactNode;
   returnFocus: React.RefObject<HTMLElement | null>;
   overlay: boolean;
+  floating?: boolean;
   restoreFocusOnHide?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -40,7 +41,7 @@ export function Dock({ side, label, open, overlay, width, min, max, onResize, on
           event.preventDefault(); event.stopPropagation(); onClose();
         }
       }}
-      className={cn("fixed inset-y-0 z-40 flex max-w-full flex-col bg-popover text-popover-foreground outline-none", !open && "!hidden", side === "left" ? "left-0 border-r" : "right-0 border-l")}
+      className={cn("fixed z-40 flex max-w-full flex-col bg-popover text-popover-foreground outline-none", floating && !overlay ? "top-16 right-3 bottom-3 rounded-2xl border shadow-xl" : "inset-y-0", !open && "!hidden", !floating || overlay ? side === "left" ? "left-0 border-r" : "right-0 border-l" : undefined)}
       style={{ width: overlay ? "100%" : width }}>
       <div role="separator" hidden={overlay} tabIndex={0} aria-label={`Resize ${label}`} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)}
         className={cn("absolute inset-y-0 z-10 w-2 touch-none cursor-col-resize hover:bg-ring/20 focus-visible:bg-ring/30 focus-visible:outline-2 focus-visible:outline-ring", overlay && "hidden", side === "left" ? "-right-1" : "-left-1")}

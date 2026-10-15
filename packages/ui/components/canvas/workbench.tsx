@@ -22,6 +22,9 @@ import { RoleActionsProvider } from "./role-actions";
 import { ShimActionsProvider } from "./role-shims";
 import { ContentActionsProvider } from "./content-actions";
 import { Bench, type BenchControls } from "./bench";
+import { PaneHost, type PaneControls } from "./pane-host";
+import { SpaceBar, SpaceOverview, SpaceRail } from "./space-chrome";
+import { panePresets } from "@/lib/stack/pane-presets";
 import { CallLauncher, VoiceProvider } from "./voice";
 
 export function Workbench({ snapshot, initialSpace, initialFocus, initialLocation }: { snapshot: Snapshot; initialSpace: SpaceId; initialFocus: NodeRef | null; initialLocation?: BenchLocation }) {
@@ -40,6 +43,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const sequence = useRef(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [overviewOpen, setOverviewOpen] = useState(false);
+  const [paneControls, setPaneControls] = useState<PaneControls | null>(null);
   const [controls, setControls] = useState<BenchControls | null>(null);
   const controlsRef = useRef<BenchControls | null>(null);
   const pending = useRef<{ space: SpaceId; ref: NodeRef | null } | null>({ space: initialLocation.space, ref: initialLocation.focus });
@@ -55,8 +60,9 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const rightOpen = Boolean(location.reference || location.inspect);
   // Contraction retains the inspection and hides the dock; reference mode and overlay surfaces are exempt.
   const collapsed = contracted && !pinned && Boolean(location.inspect) && !location.reference;
+  const railWidth = screenWidth < 640 ? 0 : screenWidth < 1100 ? 60 : 168;
   const { overlay, rightVisible, rightWidth, rightMax, right } = dockGeometry({
-    screenWidth, ...openDocks(location), surface,
+    screenWidth: screenWidth - railWidth, ...openDocks(location), surface,
     rightWidth: location.reference ? sizes.reference : sizes.inspector, expanded: expanded && Boolean(location.reference),
     contracted: collapsed,
   });
@@ -74,6 +80,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     return () => window.removeEventListener("resize", update);
   }, []);
   const flashNow = useCallback((ref: NodeRef) => {
+    if (pending.current?.ref && nodeKey(pending.current.ref) === nodeKey(ref)) pending.current = null;
     setFlash({ key: nodeKey(ref), seq: ++sequence.current });
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), 1400);
@@ -92,11 +99,18 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const reportControls = useCallback((next: BenchControls | null) => {
     controlsRef.current = next; setControls(next);
     if (next && pending.current?.space === next.space) {
-      const target = pending.current; pending.current = null;
-      if (target.ref) next.goToNode(target.ref);
+      const target = pending.current;
+      if (target.ref) next.goToNode(target.ref); else pending.current = null;
       // Space-only navigation restores that bench's independent camera.
     }
   }, []);
+  const reportPanes = useCallback((next: PaneControls | null) => {
+    setPaneControls(next);
+    reportControls(next ? {
+      space: next.space, goToNode: next.goToNode, fit: () => { if (next.layout.zoom) next.zoom(); },
+      tidy: () => next.preset(next.layout.preset), zoom: next.zoom,
+    } : null);
+  }, [reportControls]);
   const write = useCallback((next: BenchLocation, requestedSurface: BenchSurface = surfaceRef.current) => {
     const nextSurface = activeSurface(requestedSurface, openDocks(next));
     const url = new URL(locationHref(next), window.location.origin);
@@ -178,7 +192,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setPaletteOpen((value) => !value); return; }
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || paletteOpen || (event.target as Element).closest("input,textarea,select,button,a,[contenteditable=true],[role=dialog],[role=alertdialog]")) return;
+      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || paletteOpen || overviewOpen || (event.target as Element).closest("input,textarea,select,button,a,[contenteditable=true],[role=dialog],[role=alertdialog],[role=menu],[role=listbox],[role=tablist],[role=separator]")) return;
+      if (event.key === "o") { event.preventDefault(); setOverviewOpen(true); return; }
       if (event.key === "Escape") {
         if (rightVisible) closeRight(); else return;
         event.preventDefault();
@@ -188,7 +203,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [paletteOpen, rightVisible, closeRight, setSpace]);
+  }, [paletteOpen, overviewOpen, rightVisible, closeRight, setSpace]);
 
   const pinInspector = useCallback((value: boolean) => { setPinned(value); setContracted(false); }, [setPinned]);
   // An unpinned inspector contracts on bench or chrome interaction. The dock itself and portaled popups are not "outside".
@@ -220,26 +235,35 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const actions: PaletteAction[] = useMemo(() => [
     { id: "reference", label: "Open API reference", icon: BookOpenIcon, run: openReference },
     ...(location.inspect ? [{ id: "inspector", label: "Return to inspector", icon: PanelRightIcon, run: openInspector }] : []),
-    ...(controls ? [
+    { id: "overview", label: "Space overview", shortcut: "O", icon: LayersIcon, run: () => setOverviewOpen(true) },
+    ...(paneControls ? [
+      { id: "panes", label: "Open pane catalog", icon: LayersIcon, run: paneControls.catalog },
+      { id: "zoom-pane", label: paneControls.layout.zoom ? "Restore panes" : "Zoom focused pane", shortcut: "Z", icon: ScanIcon, run: paneControls.zoom },
+      ...paneControls.panes.map((pane) => ({ id: `pane:${pane.id}`, label: `${paneControls.layout.closed.includes(pane.id) ? "Reopen" : "Reveal"} ${pane.title}`, icon: LayersIcon, run: () => paneControls.reveal(pane.id) })),
+      ...panePresets[paneControls.space].map((preset) => ({ id: `preset:${preset.id}`, label: `Layout: ${preset.title}`, icon: LayoutDashboardIcon, run: () => paneControls.preset(preset.id) })),
+      ...(paneControls.layout.canUndo ? [{ id: "undo-close", label: "Undo closed pane", icon: LayersIcon, run: paneControls.undo }] : []),
+    ] : controls ? [
       { id: "fit", label: "Fit bench", shortcut: "F", icon: ScanIcon, run: controls.fit },
       { id: "tidy", label: "Reset local window positions", shortcut: "T", icon: LayoutDashboardIcon, run: controls.tidy },
     ] : []),
-  ], [controls, location.inspect, openReference, openInspector]);
+  ], [controls, paneControls, location.inspect, openReference, openInspector]);
   const workbench: WorkbenchValue = useMemo(() => ({ space: location.space, setSpace, selected: collapsed ? null : location.inspect, hovered, select, hover, goTo, flash }), [location.space, location.inspect, collapsed, setSpace, hovered, select, goTo, flash]);
-  return <div className="contents" style={{ "--sheet": `${right}px` } as React.CSSProperties}>
+  return <div className="contents" onPointerDownCapture={() => { pending.current = null; }} onKeyDownCapture={() => { pending.current = null; }} style={{ "--sheet": `${location.reference || pinned ? right : 0}px`, "--rail": `${railWidth}px` } as React.CSSProperties}>
     <WorkbenchContext value={workbench}><AuthActionsProvider><VoiceProvider><BotActionsProvider><RoleActionsProvider><ShimActionsProvider><NotifyActionsProvider><ContentActionsProvider>
-      {spaces.map(({ id }) => <div key={id} hidden={id !== location.space} inert={id !== location.space}>
-        <Activity mode={id === location.space ? "visible" : "hidden"}>
+      {spaces.map(({ id }) => <div key={id} hidden={id !== location.space || (overlay && rightVisible)} inert={id !== location.space || (overlay && rightVisible)}>
+        <Activity mode={id === location.space && !(overlay && rightVisible) ? "visible" : "hidden"}>
           <div className={id === location.space ? "bench-enter" : undefined}>
-            <Bench space={id} blocked={paletteOpen} onControls={reportControls} onScale={setScale} onArrive={flashNow} />
+            {id === "hud" ? <PaneHost space={id} blocked={paletteOpen || overviewOpen} onControls={reportPanes} onArrive={flashNow} /> : <Bench space={id} blocked={paletteOpen} onControls={reportControls} onScale={setScale} onArrive={flashNow} />}
           </div>
         </Activity>
       </div>)}
-      <TopBar space={location.space} setSpace={setSpace} compact={screenWidth - right < 440} reference={Boolean(location.reference) && rightVisible} inspectorAvailable={Boolean(location.inspect) && !rightVisible} openInspector={openInspector} toggleReference={Boolean(location.reference) && rightVisible ? closeRight : openReference} openPalette={() => setPaletteOpen(true)} fit={() => controls?.fit()} />
+      <SpaceRail compact={railWidth < 100} openOverview={() => setOverviewOpen(true)} />
+      <SpaceBar space={location.space} setSpace={setSpace} reference={Boolean(location.reference) && rightVisible} inspectorAvailable={Boolean(location.inspect) && !rightVisible} openInspector={openInspector} toggleReference={Boolean(location.reference) && rightVisible ? closeRight : openReference} openPalette={() => setPaletteOpen(true)} openOverview={() => setOverviewOpen(true)} />
+      {overviewOpen ? <SpaceOverview onClose={() => setOverviewOpen(false)} /> : null}
       {remote ? <p role="status" data-remote-scope={remote.scope} className="pointer-events-none fixed top-16 left-4 z-30 rounded-md border bg-card/95 px-2 py-1 text-xs shadow-sm">
         Remote Access · {remote.scope === "view" ? "View only. Editing controls require ui:control; sign-in, voice and browser handoff stay local." : "Control granted. Sign-in, voice and browser handoff stay local."}
       </p> : null}
-      <div data-chrome className="fixed bottom-4 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-card/95 p-1 shadow-sm" style={{ left: "calc((100% - var(--sheet))/2)" }}>
+      <div data-chrome hidden={location.space === "hud"} className="fixed bottom-4 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-card/95 p-1 shadow-sm" style={{ left: "calc((100% - var(--sheet))/2)" }}>
         <Tool label="Zoom out" onClick={() => controls?.zoom(1 / 1.2)}><MinusIcon /></Tool>
         <Button variant="ghost" size="sm" aria-label="Actual size" className="w-14 tabular-nums" onClick={() => controls?.zoom(1 / scale)}>{Math.round(scale * 100)}%</Button>
         <Tool label="Zoom in" onClick={() => controls?.zoom(1.2)}><PlusIcon /></Tool>
@@ -247,7 +271,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
         <Tool label="Fit bench (F)" onClick={() => controls?.fit()}><ScanIcon /></Tool>
         <Tool label="Reset window positions (T)" onClick={() => controls?.tidy()}><LayoutDashboardIcon /></Tool>
       </div>
-      <Dock side="right" label={location.reference ? "API reference" : "Inspector"} open={rightVisible} overlay={overlay} width={rightWidth} min={dockMinimum.right} max={rightMax}
+      <Dock side="right" label={location.reference ? "API reference" : "Inspector"} open={rightVisible} overlay={overlay} floating={!pinned && !location.reference} width={rightWidth} min={dockMinimum.right} max={rightMax}
         onResize={(width) => { setExpanded(false); setSizes((s) => ({ ...s, [location.reference ? "reference" : "inspector"]: width })); }} onClose={closeRight} returnFocus={inspectorReturn} restoreFocusOnHide={!rightOpen && (!overlay || surface === "bench")}>
         <Inspector hidden={Boolean(location.reference)} onGone={dropInspect} pinned={pinned} onPinnedChange={overlay ? undefined : pinInspector} />
         {location.reference ? <Reference target={location.reference} onOverview={referenceOverview} onClose={closeRight} hasInspection={Boolean(location.inspect)} expanded={expanded} onExpand={() => setExpanded((value) => !value)} /> : null}

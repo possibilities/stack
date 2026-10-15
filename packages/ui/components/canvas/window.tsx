@@ -7,6 +7,8 @@ import { nodeKey, type ChannelStatus, type NodeRef } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { StatusDot, Time } from "./primitives";
 import { useWorkbench } from "./provider";
+import { usePane } from "./pane-context";
+import { PaneActions } from "./pane-actions";
 
 export type Accent = "server" | "auth" | "bots" | "api" | "events" | "roles" | "notify" | "content" | "worker" | "scrape" | "browse" | "brain" | "proc" | "source" | "hud";
 
@@ -128,6 +130,7 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
   bleed?: boolean;
   children: React.ReactNode;
 }) {
+  const pane = usePane();
   const placement = use(PlacementContext)?.(id);
   if (!placement) throw new Error("Window requires PlacementContext");
   const { selected, select, flash } = useWorkbench();
@@ -162,8 +165,10 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
         placement.dragging && !placement.active && !placement.animating && "transition-[top] duration-200 ease-out motion-reduce:transition-none",
         placement.dragging && "shadow-[0_1px_0_0_rgb(255_255_255/0.06)_inset,0_40px_80px_-24px_rgb(0_0_0/0.45)] ring-1 ring-foreground/10",
         isSelected && "border-foreground/30 ring-3 ring-ring/25",
+        pane && "relative size-full min-h-0 min-w-0 rounded-xl shadow-sm backdrop-blur-none",
+        pane?.focused && "border-ring/60",
       )}
-      style={{ left: placement.x, top: placement.y, width: placement.width, [placement.sized && !placement.collapsed && !empty ? "height" : "maxHeight"]: placement.height, zIndex: placement.z }}
+      style={pane ? undefined : { left: placement.x, top: placement.y, width: placement.width, [placement.sized && !placement.collapsed && !empty ? "height" : "maxHeight"]: placement.height, zIndex: placement.z }}
     >
       {flashing ? <span key={flash!.seq} aria-hidden className="pointer-events-none absolute inset-0 rounded-[inherit] animate-ui-flash-in" /> : null}
       <header
@@ -173,6 +178,8 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
           // Controls the drag ignores (see onHeaderPointerDown) keep their own cursor.
           "[&_:where(button,[data-interactive],[tabindex])]:cursor-default",
           !placement.collapsed && "border-b border-border/60",
+          pane && "gap-2 px-2.5 py-2",
+          pane && "touch-none",
         )}
       >
         {/* The drag hint overlays the header's top edge so it never holds a slot among the controls. */}
@@ -209,7 +216,7 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
               </TooltipContent>
             </Tooltip>
           ) : null}
-          <button
+          {pane ? <PaneActions title={title} pane={pane} /> : <button
             type="button"
             aria-label={placement.collapsed ? `Expand ${title}` : `Collapse ${title}`}
             aria-expanded={!placement.collapsed}
@@ -217,12 +224,12 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           >
             <ChevronDownIcon className={cn("size-4 transition-transform duration-200", placement.collapsed && "-rotate-90")} />
-          </button>
+          </button>}
         </div>
       </header>
       {placement.collapsed ? null : <div data-scroll className={cn("flex min-h-0 flex-1 flex-col", bleed ? "overflow-hidden" : "gap-4 overflow-y-auto overscroll-contain p-3.5")}>{children}</div>}
       {placement.collapsed || !footer ? null : <footer className="shrink-0 border-t border-border/60 p-1.5">{footer}</footer>}
-      {placement.collapsed ? null : <ResizeHandles title={title} placement={placement} />}
+      {pane || placement.collapsed ? null : <ResizeHandles title={title} placement={placement} />}
     </section>
     </>
   );
