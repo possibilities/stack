@@ -147,6 +147,7 @@ Overview as the space picker. ([narrow](shots/a-inbox-narrow.png))
 - **Following and pinned panes.** A detail pane follows its list's selection. ⌘-click a
   row, or *Open a pinned pane beside*, creates a pane that keeps its record — today's
   "additional chat / Worker / viewer / run windows", now splits you can zoom or tile.
+
 ![Pane catalog after closing Timeline](shots/a-catalog.png)
 
 - **Links.** A link goes to the record's home pane in its space (re-tiling there),
