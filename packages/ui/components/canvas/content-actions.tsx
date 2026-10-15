@@ -78,7 +78,7 @@ const contentKinds = new Set(["document", "collection", "item", "artifact"]);
 export function ContentActionsProvider({ children }: { children: React.ReactNode }) {
   const store = useStore();
   const { contentGeneration, status } = useStack();
-  const { selected } = useWorkbench();
+  const { selected, revealPane } = useWorkbench();
   const [target, setTarget] = useState<ContentTarget | null>(null);
   const [selection, setSelection] = useState<ContentSelection | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -110,15 +110,17 @@ export function ContentActionsProvider({ children }: { children: React.ReactNode
     }
   }, [store]);
 
+  const edit = useCallback((next: ContentTarget | null) => { setTarget(next); if (next) revealPane("content", "content-editor"); }, [revealPane]);
+  const preview = useCallback((next: ContentSelection | null) => { setSelection(next); if (next) revealPane("content", "content-preview"); }, [revealPane]);
   const open = useCallback((record: { kind: "document"; slug: string } | { kind: "item"; id: string; itemKind?: ContentItem["kind"] }) => {
     if (record.kind === "document") {
-      setTarget({ kind: "document", slug: record.slug });
-      setSelection({ kind: "document", slug: record.slug });
+      preview({ kind: "document", slug: record.slug });
+      edit({ kind: "document", slug: record.slug });
       return;
     }
-    if (!record.itemKind || record.itemKind === "document") setTarget({ kind: "item", id: record.id });
-    setSelection({ kind: "item", id: record.id });
-  }, []);
+    preview({ kind: "item", id: record.id });
+    if (!record.itemKind || record.itemKind === "document") edit({ kind: "item", id: record.id });
+  }, [edit, preview]);
 
   // Leaving the page drops unsaved drafts and interrupts uploads, so ask first.
   useEffect(() => {
@@ -148,11 +150,11 @@ export function ContentActionsProvider({ children }: { children: React.ReactNode
   }, []);
 
   const value = useMemo<ContentActions>(() => ({
-    target, edit: setTarget, selection, preview: setSelection, open, drafts, setDraft, pending, run,
+    target, edit, selection, preview, open, drafts, setDraft, pending, run,
     confirmRemoveDocument: setRemovingDocument, confirmDeleteItem: setDeletingItem, confirmDeleteCollection: setDeletingCollection,
     editCollection: (collection) => setCollectionForm({ collection }), confirmRemoveArtifact: setRemovingArtifact,
     restoreByName: setRestoring, upload,
-  }), [target, selection, open, drafts, setDraft, pending, run, upload]);
+  }), [target, edit, selection, preview, open, drafts, setDraft, pending, run, upload]);
 
   return (
     <ContentActionsContext value={value}>
@@ -172,7 +174,7 @@ export function ContentActionsProvider({ children }: { children: React.ReactNode
       <CollectionDialog form={collectionForm} onClose={() => setCollectionForm(null)} run={run} pending={pending} />
       <RemoveArtifactDialog removal={removingArtifact} onClose={() => setRemovingArtifact(null)} run={run} pending={pending} />
       <RestoreDialog kind={restoring} onClose={() => setRestoring(null)} run={run} pending={pending}
-        onRestored={(kind, name) => kind === "document" ? setSelection({ kind: "document", slug: name }) : setSelection({ kind: "artifact", name })} />
+        onRestored={(kind, name) => preview(kind === "document" ? { kind: "document", slug: name } : { kind: "artifact", name })} />
     </ContentActionsContext>
   );
 }

@@ -92,10 +92,11 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   }, [tree, size, layout.zoom, layout.focus, minimums]);
   const current = useRef({ projection, layout, ids });
   useLayoutEffect(() => { current.current = { projection, layout, ids }; });
-  const focusFrame = useCallback((id: string) => {
+  const focusFrame = useCallback((id: string, preserve = false) => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
-      root.current?.querySelector<HTMLElement>(`[data-pane-frame="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+      const pane = root.current?.querySelector<HTMLElement>(`[data-pane-frame="${CSS.escape(id)}"]`);
+      if (pane && (!preserve || !pane.contains(document.activeElement))) pane.focus({ preventScroll: true });
       frame.current = null;
     });
   }, []);
@@ -104,7 +105,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     const { projection } = current.current;
     const replacesFocus = focused !== id && (projection.compact || projection.stacks.some((stack) => stack.tabs.includes(id) && stack.tabs.includes(focused ?? "")));
     pending.current = null; store.focus(id);
-    if (focus || replacesFocus) focusFrame(id);
+    if (focus || replacesFocus) focusFrame(id, !focus);
   }, [store, focusFrame]);
   const showCatalog = useCallback((side?: Placement) => setCatalog({ side }), []);
   const goToNode = useCallback((ref: NodeRef, side?: Placement) => {
@@ -150,34 +151,29 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const controls = useMemo<PaneControls>(() => ({ space, layout, panes: defs.map(({ id, title }) => ({ id, title })), goToNode, catalog: showCatalog, preset: (id) => store.preset(id), zoom: () => store.zoom(), reveal, undo: () => store.undo() }), [space, layout, signature, goToNode, showCatalog, store, reveal]);
   useEffect(() => { onControls(controls); return () => onControls(null); }, [controls, onControls]);
 
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || blocked || catalog || !(event.target instanceof Element) || event.target.closest(excluded) || !root.current?.contains(event.target)) return;
-      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "b") { event.preventDefault(); setLeader((value) => !value); return; }
-      if (event.metaKey || event.ctrlKey) return;
-      const direction = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as Record<string, Direction>)[event.key];
-      if (event.altKey && direction && layout.focus) {
-        const next = neighborPane(projection.stacks, layout.focus, direction);
-        if (next) { if (event.shiftKey) store.swap(layout.focus, next); else reveal(next); }
-        event.preventDefault(); return;
-      }
-      if (event.altKey || (!leader && event.target.closest("button,a"))) return;
-      const index = leader && /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
-      if (index >= 0) { if (projection.stacks[index]) reveal(projection.stacks[index].active); setLeader(false); event.preventDefault(); return; }
-      if (event.key === "Escape" && dragging) cancelGesture.current?.();
-      else if (event.key === "Escape" && leader) setLeader(false);
-      else if ((event.key === "Escape" && layout.zoom) || event.key === "z") store.zoom();
-      else if (event.key === "?") setHelp(true);
-      else if (event.key === "x" && layout.focus) { store.close(layout.focus); const id = store.getSnapshot().focus; if (id) focusFrame(id); }
-      else if (event.key === "\\" || event.key === "%") showCatalog("right");
-      else if (event.key === "-" || event.key === '"') showCatalog("below");
-      else return;
-      event.preventDefault(); setLeader(false);
-    };
-    const element = root.current;
-    element?.addEventListener("keydown", key);
-    return () => element?.removeEventListener("keydown", key);
-  }, [blocked, catalog, leader, dragging, layout.focus, layout.zoom, projection, store, reveal, showCatalog, focusFrame]);
+  const key = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || blocked || catalog || !(event.target instanceof Element) || event.target.closest(excluded) || !root.current?.contains(event.target)) return;
+    if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "b") { event.preventDefault(); setLeader((value) => !value); return; }
+    if (event.metaKey || event.ctrlKey) return;
+    const direction = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as Record<string, Direction>)[event.key];
+    if (event.altKey && direction && layout.focus) {
+      const next = neighborPane(projection.stacks, layout.focus, direction);
+      if (next) { if (event.shiftKey) store.swap(layout.focus, next); else reveal(next); }
+      event.preventDefault(); return;
+    }
+    if (event.altKey || (!leader && event.target.closest("button,a"))) return;
+    const index = leader && /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+    if (index >= 0) { if (projection.stacks[index]) reveal(projection.stacks[index].active); setLeader(false); event.preventDefault(); return; }
+    if (event.key === "Escape" && dragging) cancelGesture.current?.();
+    else if (event.key === "Escape" && leader) setLeader(false);
+    else if ((event.key === "Escape" && layout.zoom) || event.key === "z") store.zoom();
+    else if (event.key === "?") setHelp(true);
+    else if (event.key === "x" && layout.focus) { store.close(layout.focus); const id = store.getSnapshot().focus; if (id) focusFrame(id); }
+    else if (event.key === "\\" || event.key === "%") showCatalog("right");
+    else if (event.key === "-" || event.key === '"') showCatalog("below");
+    else return;
+    event.preventDefault(); setLeader(false);
+  };
 
   const beginDrag = useCallback((id: string, event: React.PointerEvent) => {
     const interactive = (event.target as Element).closest("button,a,input,select,textarea,[data-interactive],[tabindex]");
@@ -273,7 +269,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     if (pending.current) { pending.current = null; setNavigation(++sequence.current); }
     if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; }
   };
-  return <main ref={root} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)", bottom: "var(--call-height, 0px)" }}>
+  return <main ref={root} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} onKeyDown={key} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)", bottom: "var(--call-height, 0px)" }}>
     <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 pb-2" data-chrome>
       <div className="flex min-w-0 items-center gap-2 overflow-x-auto"><ToggleGroup size="sm" spacing={0} aria-label={`${spaceTitle(space)} layout preset`} value={[layout.preset]} onValueChange={(values) => { if (values[0]) store.preset(String(values[0])); }}>
         {panePresets[space].map((preset) => <ToggleGroupItem key={preset.id} value={preset.id}>{preset.title}</ToggleGroupItem>)}

@@ -820,8 +820,8 @@ function ContentRecordControls({ target }: { target: { kind: "document"; slug: s
   const { goTo } = useWorkbench();
   return (
     <Button size="sm" variant="outline" className="w-fit" onClick={() => {
-      actions.open(target.kind === "document" ? target : { kind: "item", id: target.id, itemKind: "document" });
       goTo(target.kind === "document" ? { kind: "document", id: target.slug } : { kind: "item", id: target.id });
+      actions.open(target.kind === "document" ? target : { kind: "item", id: target.id, itemKind: "document" });
     }}>
       <PencilIcon data-icon="inline-start" />Edit in Content
     </Button>
@@ -863,7 +863,7 @@ function RoleCatalogControls({ id }: { id: string }) {
   const actions = useRoleActions();
   const { goTo } = useWorkbench();
   return (
-    <Button size="sm" variant="outline" className="w-fit" onClick={() => { actions.openIn(id, { kind: "role", id }); goTo({ kind: "role", id }); }}>
+    <Button size="sm" variant="outline" className="w-fit" onClick={() => { goTo({ kind: "role", id }); actions.openIn(id, { kind: "role", id }); }}>
       <PencilIcon data-icon="inline-start" />Edit in Roles
     </Button>
   );
@@ -874,7 +874,7 @@ function RoleRecordControls({ target }: { target: { kind: "category" | "fragment
   const actions = useRoleActions();
   const { goTo } = useWorkbench();
   return (
-    <Button size="sm" variant="outline" className="w-fit" onClick={() => { actions.open(target); goTo(target); }}>
+    <Button size="sm" variant="outline" className="w-fit" onClick={() => { goTo(target); actions.open(target); }}>
       <PencilIcon data-icon="inline-start" />Edit in Roles
     </Button>
   );

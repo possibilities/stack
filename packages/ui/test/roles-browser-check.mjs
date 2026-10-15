@@ -3,6 +3,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/roles-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable.
 import assert from "node:assert/strict";
+import { revealPane, verifyPaneDraft } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
@@ -159,7 +160,7 @@ try {
   const dialog = page.getByRole("alertdialog");
   const roleRow = (name) => catalogWindow.locator('li[data-node^="role:"]').filter({ has: page.getByText(name, { exact: true }) });
   // Editing pans the bench toward the Editor; a click on the Roles window fits the bench first when it has scrolled away.
-  const tap = (locator) => locator.click({ timeout: 2_000 }).catch(async () => { await page.getByRole("button", { name: /Fit bench/ }).click(); await locator.click(); });
+  const tap = (locator) => locator.click();
   const selectRole = (name) => tap(roleRow(name).getByRole("button").first());
   const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text }).first();
   // Switches are named by display title; Package API titles are their keys.
@@ -169,7 +170,7 @@ try {
   // A fresh installation provisions Manager as the Bot default and Worker as the Worker Role; the page edits the Bot default first.
   const provisioned = await rolesCall("roles_snapshot");
   assert.deepEqual(provisioned.roles.map((role) => [role.name, role.id === provisioned.defaultRoleId, role.id === provisioned.workerDefaultRoleId]),
-    [["Manager", true, false], ["Worker", false, true]]);
+    [["Manager", true, false], ["Worker", false, true], ["Admin", false, false]]);
   W = provisioned.workerDefaultRoleId;
   await roleRow("Manager").getByText("Bot default", { exact: true }).waitFor();
   await roleRow("Worker").getByText("Worker Role", { exact: true }).waitFor();
@@ -206,7 +207,11 @@ try {
     .then(() => assert.fail("the API accepted Worker Role reassignment"), (error) => assert.match(error.message, /unknown operation|not found/i));
 
   // New role opens a draft in the Editor; the new Role is selected and is neither default.
-  await tap(catalogWindow.getByRole("button", { name: "New role", exact: true }));
+  await editor.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "HUD", exact: true }).click();
+  await page.keyboard.press("Meta+k");
+  await page.getByRole("dialog", { name: "Jump to", exact: true }).getByRole("combobox").fill("role new");
+  await page.getByRole("option", { name: "New role", exact: true }).click();
   const newRole = editor.getByRole("form", { name: "New role" });
   await newRole.waitFor();
   assert.equal(await newRole.getByLabel("Name", { exact: true }).evaluate((el) => el === document.activeElement), true);
@@ -214,6 +219,9 @@ try {
    await newRole.getByText("A new Role starts with a starter bot.md and no fragments or resources. It is not a launch default; existing sessions keep their Role.").waitFor();
   await newRole.getByLabel("Name", { exact: true }).fill("Researcher");
   await newRole.getByLabel(/^Description/).fill("Reads sources and reports what they say");
+  const beforeLayout = await rolesCall("roles_snapshot");
+  await verifyPaneDraft(page, { title: "Roles", id: "role-editor", field: newRole.getByLabel("Name", { exact: true }) });
+  assert.deepEqual(await rolesCall("roles_snapshot"), beforeLayout, "arranging an unsaved Role never writes it");
   await newRole.getByLabel("Name", { exact: true }).press("Meta+s");
   const researcher = roleRow("Researcher");
   await researcher.getByText("Editing", { exact: true }).waitFor();
@@ -422,6 +430,7 @@ try {
   assert.deepEqual(snapshot.categories.flatMap((category) => category.fragments.map((fragment) => fragment.title)), ["Plan before acting", "Plain words"]);
 
   // Skills, MCP servers and trusted projects: list windows, the shared editor and the launch preview.
+  await revealPane(page, "Roles", "role-skills");
   await skills.getByText("No skills", { exact: true }).waitFor();
   await skills.getByRole("button", { name: "New skill", exact: true }).click();
   const newSkill = editor.getByRole("form", { name: "New skill" });
@@ -456,6 +465,7 @@ try {
     snapshot = await snap(A);
   }
   assert.deepEqual(snapshot.skills.map((skill) => skill.name), ["review-changes-copy", "review-changes"]);
+  assert.equal(await skills.evaluate((pane) => pane.contains(document.activeElement)), true, "a resource reorder keeps keyboard focus in Skills instead of navigating the pane layout");
   assert.deepEqual(snapshot.skills.map((skill) => skill.harnesses), [["claude"], ["claude"]], "list duplication retains the API-configured filter");
   await skills.getByRole("switch", { name: "review-changes-copy enabled" }).click();
   await skills.locator('li[data-node^="skill:"]').filter({ hasText: "review-changes-copy" }).getByText("Off", { exact: true }).waitFor();
@@ -463,6 +473,7 @@ try {
   assert.deepEqual(snapshot.skills[0].harnesses, ["claude"], "the enabled switch does not clear a filter");
 
   // An MCP server cannot take an internal Package API's name; its TOML is shown before saving.
+  await revealPane(page, "Roles", "role-mcp-servers");
   await servers.getByRole("button", { name: "New MCP server", exact: true }).click();
   const newServer = editor.getByRole("form", { name: "New MCP server" });
   await newServer.getByLabel("Name", { exact: true }).fill("roles");
@@ -508,6 +519,7 @@ try {
   await rolesCall("mcp_server_update", { roleId: A, expectedRevision: snapshot.revision, id: snapshot.mcpServers[0].id, harnesses: null });
 
   // Trusting a project shows which running Bots launch inside it.
+  await revealPane(page, "Roles", "role-projects");
   await projects.getByRole("button", { name: "Trust a project", exact: true }).click();
   const newProject = editor.getByRole("form", { name: "New trusted project" });
   await newProject.getByText("Trust covers the whole project config").waitFor();
@@ -521,16 +533,19 @@ try {
   await page.screenshot({ path: join(evidence, "roles-resources.png"), animations: "disabled" });
 
   // Inspecting a skill lists its files by path, not bytes; deleting asks first.
+  await revealPane(page, "Roles", "role-mcp-servers");
   await servers.getByRole("button", { name: "docs actions" }).click();
   await page.getByRole("menuitem", { name: "Inspect record" }).click();
   await inspector.getByText("Role MCP server", { exact: true }).waitFor();
   await inspector.getByRole("button", { name: "Edit in Roles" }).click();
   await page.keyboard.press("Escape");
+  await revealPane(page, "Roles", "role-skills");
   await tap(skills.getByRole("button", { name: "review-changes-copy actions" }));
   await page.getByRole("menuitem", { name: "Delete…" }).click();
   await dialog.getByText("Delete skill “review-changes-copy”?", { exact: true }).waitFor();
   await dialog.getByRole("button", { name: "Delete", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
+  await revealPane(page, "Roles", "role-projects");
   await projects.getByRole("button", { name: "project actions" }).click();
   await page.getByRole("menuitem", { name: "Remove…" }).click();
   await dialog.getByText(`Stop trusting “${canonical}”?`, { exact: true }).waitFor();
@@ -548,6 +563,7 @@ try {
   const internalList = (id) => rolesCall("role_internal_mcp_list", { roleId: id }).then((list) => Object.fromEntries(list.servers.map((server) => [server.name, server])));
 
   // A skill created through the editor starts unrestricted: Any harness is checked and nothing is written.
+  await revealPane(page, "Roles", "role-skills");
   await skills.getByRole("button", { name: "New skill", exact: true }).click();
   const newHarnessSkill = editor.getByRole("form", { name: "New skill" });
   await newHarnessSkill.waitFor();
@@ -641,6 +657,7 @@ try {
   await editor.getByText("All changes saved", { exact: true }).waitFor();
 
   // The same control edits an additional MCP connection; create takes the chosen list.
+  await revealPane(page, "Roles", "role-mcp-servers");
   await servers.getByRole("button", { name: "New MCP server", exact: true }).click();
   const newHarnessServer = editor.getByRole("form", { name: "New MCP server" });
   await newHarnessServer.waitFor();
@@ -781,6 +798,7 @@ try {
   assert.deepEqual([afterSecond.defaultRoleId, afterSecond.workerDefaultRoleId], [A, W], "creating a Role never changes a default");
   assert.equal(await researcher.getByText("Editing", { exact: true }).count(), 0, "only the selected Role reads as being edited");
   await researcher.getByText("Bot default", { exact: true }).waitFor();
+  await revealPane(page, "Roles", "role-instructions");
   await instructions.getByText("Reviewer · revision 0", { exact: true }).waitFor();
   await instructions.getByText("No instructions", { exact: true }).waitFor();
   // Editing a Role that is neither default says who receives it, and offers Make Bot default.
@@ -989,7 +1007,7 @@ try {
   await toast("“Research” is now the Bot default").waitFor();
   assert.equal(await defaultId(), A);
   await roleRow("Third").waitFor();
-  assert.deepEqual((await rolesCall("roles_snapshot")).roles.map((role) => role.name), ["Manager", "Worker", "Research", "Reviewer", "Foo", "Third"]);
+  assert.deepEqual((await rolesCall("roles_snapshot")).roles.map((role) => role.name), ["Manager", "Worker", "Admin", "Research", "Reviewer", "Foo", "Third"]);
   await drop(false);
   // A stale Role revision likewise: another client edited this Role, then a switch here is rebuilt and applied.
   await drop(true);
@@ -1004,25 +1022,29 @@ try {
 
   /* ─── Internal Stack MCP servers ───────────────────────────────── */
 
-  const internalNames = (await rolesCall("role_internal_mcp_list", { roleId: A })).servers.map((server) => server.name);
+  const internalServers = (await rolesCall("role_internal_mcp_list", { roleId: A })).servers;
+  const internalNames = internalServers.map((server) => server.name);
+  const nativeConnections = internalServers.filter((server) => server.kind === "codex").length;
   assert.ok(internalNames.length >= 3 && internalNames.includes("roles"), `the repository configures several internal MCP servers: ${internalNames}`);
   const total = internalNames.length;
   const count = (on) => servers.getByText(`${on} of ${total} on`, { exact: true }).first();
   const enabledNow = async (id) => Object.fromEntries((await rolesCall("role_internal_mcp_list", { roleId: id })).servers.map((server) => [server.name, server.enabled]));
+  await revealPane(page, "Roles", "role-mcp-servers");
   await servers.getByText("Stack servers", { exact: true }).waitFor();
   await count(total).waitFor();
   assert.deepEqual(Object.values(await enabledNow(A)).every(Boolean), true, "every server is on in a newly created Role");
   assert.deepEqual(Object.values(await enabledNow(B)).every(Boolean), true);
   await servers.getByText("Stack connections use stdio for Bot and Worker launches and stack roles inject when switched on and allowed by their harness filter. Switches and filters are independent. Running sessions keep their connections. New Stack connections start on and unrestricted.").waitFor();
   await preview.getByRole("button", { name: "Launch", exact: false }).click();
-  await preview.getByText(`${total} of ${total} Stack connections included · 1 from the Role`).waitFor();
+  await preview.getByText(`${nativeConnections} of ${total} Stack connections included · 1 from the Role`).waitFor();
+  await preview.getByText("Outside this Role's tool grants", { exact: true }).first().waitFor();
   // Off for this Role only, and the preview tells enabled from configured.
   await stackSwitch("bots").click();
   await until(() => enabledNow(A), (value) => value.bots === false, "bots to switch off");
   assert.equal((await enabledNow(B)).bots, true, "switches belong to their own Role");
   await count(total - 1).waitFor();
   await servers.locator("li").filter({ has: page.getByText("bots", { exact: true }) }).getByText("Off", { exact: true }).waitFor();
-  await preview.getByText(`${total - 1} of ${total} Stack connections included · 1 from the Role`).waitFor();
+  await preview.getByText(`${nativeConnections} of ${total} Stack connections included · 1 from the Role`).waitFor();
   assert.equal(await preview.locator('[title$="Off for this Role"]').count(), 1);
   assert.deepEqual((await rolesCall("role_launch_preview", { roleId: A })).internalMcpServers.filter((server) => !server.enabled).map((server) => server.name), ["bots"]);
   await shot("roles-internal-off");
@@ -1056,6 +1078,7 @@ try {
   assert.equal(Object.values(await enabledNow(A)).some(Boolean), false);
   assert.equal(Object.values(await enabledNow(B)).every(Boolean), true, "the default Role is unaffected");
   // A switched-off name is still reserved against an external MCP server.
+  await revealPane(page, "Roles", "role-mcp-servers");
   await servers.getByRole("button", { name: "New MCP server", exact: true }).click();
   const external = editor.getByRole("form", { name: "New MCP server" });
   await external.getByLabel("Name", { exact: true }).fill("roles");
@@ -1082,7 +1105,10 @@ try {
   assert.equal((await enabledNow(A)).roles, false);
   await drop(false);
   // Restore A's switches and confirm the second Role's independence from the first.
-  for (const name of internalNames.filter((item) => item !== "roles" && item !== "bots")) await stackSwitch(name).click();
+  for (const name of internalNames.filter((item) => item !== "roles" && item !== "bots")) {
+    await stackSwitch(name).click();
+    await until(() => enabledNow(A), (value) => value[name] === true, `${name} to switch on`);
+  }
   await stackSwitch("roles").click();
   await until(() => enabledNow(A), (value) => Object.values(value).every(Boolean), "every switch to return on");
   await selectRole("Reviewer");
@@ -1114,7 +1140,7 @@ try {
   await dialog.getByRole("button", { name: "Delete Role" }).click();
   await dialog.waitFor({ state: "hidden" });
   await toast("Deleted “Third”").waitFor();
-  assert.deepEqual((await rolesCall("roles_snapshot")).roles.map((role) => role.name), ["Manager", "Worker", "Research", "Reviewer", "Foo"]);
+  assert.deepEqual((await rolesCall("roles_snapshot")).roles.map((role) => role.name), ["Manager", "Worker", "Admin", "Research", "Reviewer", "Foo"]);
   await roleRow("Third").waitFor({ state: "detached" });
   assert.equal(await roleRow("Research").getByText("Editing", { exact: true }).count(), 1, "deleting your own selected Role selects the default");
   assert.equal(await page.getByText("was deleted in another window").count(), 0, "a deletion made here is not reported as made elsewhere");
@@ -1131,6 +1157,7 @@ try {
   await editor.getByText("Text that must survive", { exact: true }).waitFor();
   await editor.getByRole("button", { name: "Copy description text" }).waitFor();
   await catalogWindow.getByText("was deleted in another window. Its unsaved edits are still here.").waitFor();
+  await revealPane(page, "Roles", "role-instructions");
   await instructions.getByText("Role deleted", { exact: true }).waitFor();
   assert.equal(await defaultId(), A);
   await shot("roles-deleted-elsewhere");
@@ -1154,6 +1181,7 @@ try {
   await page.reload();
   await roleRow("Reviewer").getByText("Editing", { exact: true }).waitFor();
   await roleRow("Research").getByText("Bot default", { exact: true }).waitFor();
+  await revealPane(page, "Roles", "role-instructions");
   await instructions.getByText("Reviewer · revision", { exact: false }).first().waitFor();
 
   // Inspecting a Role hands back to the Editor, which selects it; the palette finds Roles and offers New role.
@@ -1190,6 +1218,7 @@ try {
   // System shows the same observations server-wide; a Roles row links to its System card and inspector record.
   await page.setViewportSize({ width: 2400, height: 1400 });
   await page.emulateMedia({ colorScheme: "light" });
+  await revealPane(page, "Roles", "role-mcp-servers");
   const messages = servers.getByRole("list", { name: "Codex tools availability" }).locator("li").filter({ has: page.getByText("Messages", { exact: true }) });
   if (!(await messages.locator("details").evaluate((node) => node.open))) await tap(messages.locator("summary"));
   await tap(messages.getByRole("link", { name: "Open in System" }));

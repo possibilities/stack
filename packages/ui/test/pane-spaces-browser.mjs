@@ -2,6 +2,43 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+export async function revealPane(page, title, id) {
+  await page.getByRole("main", { name: `${title} panes`, exact: true }).getByRole("button", { name: /^Panes/ }).click();
+  const catalog = page.getByRole("dialog", { name: `Panes in ${title}`, exact: true });
+  await catalog.getByRole("combobox", { name: `Find a pane in ${title}` }).fill(id);
+  await catalog.locator(`[role="option"][data-value^="${id} "]`).click();
+  await page.locator(`[data-pane-frame="${id}"]`).waitFor({ state: "visible" });
+}
+
+export async function verifyPaneDraft(page, { title, id, field }) {
+  const original = await field.inputValue(), retained = await field.elementHandle();
+  await field.press("Home"); await field.press("Shift+ArrowRight");
+  const selection = await field.evaluate((element) => [element.selectionStart, element.selectionEnd]);
+  const host = page.getByRole("main", { name: `${title} panes`, exact: true });
+  const presets = host.getByRole("group", { name: `${title} layout preset`, exact: true });
+  const previous = await presets.locator('[aria-pressed="true"]').innerText();
+  const verify = async () => {
+    await revealPane(page, title, id);
+    assert.equal(await field.inputValue(), original, "layout never changes an unsaved field");
+    assert.equal(await field.evaluate((element, held) => element === held, retained), true, "the live editor is not replaced during layout");
+    assert.deepEqual(await field.evaluate((element) => [element.selectionStart, element.selectionEnd]), selection, "the retained editor keeps its selection");
+  };
+  for (const name of await presets.getByRole("button").allTextContents()) {
+    await presets.getByRole("button", { name, exact: true }).click();
+    await verify();
+  }
+  await host.locator(`[data-window="${id}"]`).locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await field.waitFor({ state: "hidden" });
+  await verify();
+  const rail = page.getByRole("navigation", { name: "Canvas spaces" });
+  await rail.getByRole("link", { name: "HUD", exact: true }).click();
+  await rail.getByRole("link", { name: title, exact: true }).click();
+  await verify();
+  await presets.getByRole("button", { name: previous, exact: true }).click();
+  await revealPane(page, title, id);
+  await retained.dispose();
+}
+
 export async function verifyPaneSpaces(page, { evidence, spaces }) {
   const rail = page.getByRole("navigation", { name: "Canvas spaces" });
   const routes = await rail.getByRole("link").evaluateAll((links) => links.map((link) => ({ title: link.getAttribute("aria-label"), path: new URL(link.href).pathname })));
@@ -21,12 +58,7 @@ export async function verifyPaneSpaces(page, { evidence, spaces }) {
     assert.ok(names.length >= 2, `${title} offers alternate task layouts`);
     const catalog = page.getByRole("dialog", { name: `Panes in ${title}`, exact: true });
     const openCatalog = async () => { await host.getByRole("button", { name: /^Panes/ }).click(); await catalog.waitFor(); };
-    const reveal = async (id) => {
-      await openCatalog();
-      await catalog.getByRole("combobox", { name: `Find a pane in ${title}` }).fill(id);
-      await catalog.locator(`[role="option"][data-value^="${id} "]`).click();
-      await page.locator(`[data-pane-frame="${id}"]`).waitFor({ state: "visible" });
-    };
+    const reveal = (id) => revealPane(page, title, id);
     const fits = () => page.waitForFunction((space) => {
       const host = document.querySelector(`[data-canvas][data-space="${space}"]`), bounds = host.getBoundingClientRect();
       return document.documentElement.scrollWidth <= innerWidth && [...host.querySelectorAll('[data-pane-frame]:not([hidden])')].every((pane) => {

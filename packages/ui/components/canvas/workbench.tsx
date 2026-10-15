@@ -27,7 +27,7 @@ import { SpaceBar, SpaceOverview, SpaceRail } from "./space-chrome";
 import { panePresets } from "@/lib/stack/pane-presets";
 import { CallLauncher, VoiceProvider } from "./voice";
 
-const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox"]);
+const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox", "roles", "content"]);
 
 export function Workbench({ snapshot, initialSpace, initialFocus, initialLocation }: { snapshot: Snapshot; initialSpace: SpaceId; initialFocus: NodeRef | null; initialLocation?: BenchLocation }) {
   const start = initialLocation ?? (initialFocus ? navigateTo(emptyLocation(initialSpace), initialFocus) : emptyLocation(initialSpace));
@@ -52,7 +52,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const paneControlsRef = useRef<PaneControls | null>(null);
   const [controls, setControls] = useState<BenchControls | null>(null);
   const controlsRef = useRef<BenchControls | null>(null);
-  const pending = useRef<{ space: SpaceId; ref: NodeRef | null; pane?: string } | null>({ space: initialLocation.space, ref: initialLocation.focus });
+  const pending = useRef<{ space: SpaceId; ref: NodeRef | null; panes?: string[]; focus?: boolean } | null>({ space: initialLocation.space, ref: initialLocation.focus });
   const [scale, setScale] = useState(1);
   const [screenWidth, setScreenWidth] = useState(1200);
   const [sizes, setSizes] = useDockSizes();
@@ -73,7 +73,9 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   });
 
   useLayoutEffect(() => {
-    const initialSurface = activeSurface(new URLSearchParams(window.location.search).get("surface"), openDocks(initialLocation));
+    const requested = new URLSearchParams(window.location.search).get("surface");
+    const initialSurface = activeSurface(requested, openDocks(initialLocation));
+    if (requested === "bench") setContracted(true);
     surfaceRef.current = initialSurface;
     setSurface(initialSurface);
     setScreenWidth(window.innerWidth);
@@ -97,7 +99,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const focusBench = useCallback(() => {
     if (benchFocusFrame.current !== undefined) cancelAnimationFrame(benchFocusFrame.current);
     benchFocusFrame.current = requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>(`[data-canvas=workbench][data-space="${locationRef.current.space}"]`)?.focus({ preventScroll: true });
+      const canvas = document.querySelector<HTMLElement>(`[data-canvas=workbench][data-space="${locationRef.current.space}"]`);
+      if (canvas && !canvas.contains(document.activeElement)) canvas.focus({ preventScroll: true });
       benchFocusFrame.current = undefined;
     });
   }, []);
@@ -105,15 +108,16 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     controlsRef.current = next; setControls(next);
     if (next && pending.current?.space === next.space) {
       const target = pending.current;
-      if (target.ref) next.goToNode(target.ref); else if (!target.pane) pending.current = null;
+      if (target.ref) next.goToNode(target.ref); else if (!target.panes) pending.current = null;
       // Space-only navigation restores that bench's independent camera.
     }
   }, []);
   const reportPanes = useCallback((next: PaneControls | null) => {
     setPaneControls(next); paneControlsRef.current = next;
     const target = pending.current;
-    if (next && target?.space === next.space && target.pane && next.panes.some((pane) => pane.id === target.pane)) {
-      pending.current = null; next.reveal(target.pane);
+    if (next && target?.space === next.space && target.panes && target.panes.every((id) => next.panes.some((pane) => pane.id === id))) {
+      pending.current = null;
+      for (const id of target.panes) next.reveal(id, target.focus);
     }
     if (next) setLayouts((held) => held[next.space] === next.layout ? held : { ...held, [next.space]: next.layout });
     reportControls(next ? {
@@ -130,10 +134,11 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     locationRef.current = next; setLocation(next);
     surfaceRef.current = nextSurface; setSurface(nextSurface);
     if (nextSurface === "right") setContracted(false);
+    else if (!pinned) setContracted(true);
     document.title = `Stack · ${next.reference && nextSurface === "right" ? "API reference" : spaceTitle(next.space)}`;
-  }, []);
+  }, [pinned]);
   const setSpace = useCallback((space: SpaceId, pane?: string) => {
-    pending.current = pane ? { space, ref: null, pane } : null;
+    pending.current = pane ? { space, ref: null, panes: [pane] } : null;
     setBackLink(null);
     write({ ...locationRef.current, space, focus: null }, "bench");
     focusBench();
@@ -193,6 +198,8 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
       locationRef.current = next; setLocation(next);
       const nextSurface = activeSurface(query.get("surface"), openDocks(next));
       surfaceRef.current = nextSurface; setSurface(nextSurface);
+      if (nextSurface === "right") setContracted(false);
+      else if (!pinned) setContracted(true);
       document.title = `Stack · ${next.reference && nextSurface === "right" ? "API reference" : spaceTitle(next.space)}`;
       // Dock/inspection history must never move the camera.
       if (nodeKeyOrNull(next.focus) !== nodeKeyOrNull(previous.focus) || next.space !== previous.space) {
@@ -203,7 +210,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
-  }, [focusBench]);
+  }, [focusBench, pinned]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setPaletteOpen((value) => !value); return; }
@@ -263,7 +270,12 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
     ] : []),
   ], [controls, paneControls, location.inspect, openReference, openInspector]);
   const revealPane = useCallback((space: SpaceId, pane: string) => {
-    if (locationRef.current.space === space && paneControlsRef.current?.space === space) paneControlsRef.current.reveal(pane, false);
+    if (locationRef.current.space !== space) return;
+    if (paneControlsRef.current?.space === space) paneControlsRef.current.reveal(pane, false);
+    else {
+      const panes = pending.current?.space === space ? pending.current.panes ?? [] : [];
+      pending.current = { space, ref: null, panes: [...panes.filter((id) => id !== pane), pane], focus: false };
+    }
   }, []);
   const workbench: WorkbenchValue = useMemo(() => ({ space: location.space, setSpace, revealPane, selected: collapsed ? null : location.inspect, hovered, select, hover, goTo, flash }), [location.space, location.inspect, collapsed, setSpace, revealPane, hovered, select, goTo, flash]);
   return <div className="contents" onPointerDownCapture={() => { pending.current = null; }} onKeyDownCapture={() => { pending.current = null; }} style={{ "--sheet": `${location.reference || pinned ? right : 0}px`, "--rail": `${railWidth}px` } as React.CSSProperties}>

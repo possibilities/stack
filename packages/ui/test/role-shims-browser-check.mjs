@@ -90,8 +90,9 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   const shot = (name) => page.screenshot({ path: join(evidence, `${name}.png`), animations: "disabled" });
   const drop = (on) => page.evaluate((value) => { window.__wsDrop = value; }, on);
-  const tap = (locator) => locator.click({ timeout: 2_000 }).catch(async () => { await page.getByRole("button", { name: /Fit bench/ }).click(); await locator.click(); });
+  const tap = (locator) => locator.click();
   await page.goto(`${origin}/roles`);
+  await page.getByRole("tab", { name: "Shims", exact: true }).click();
   const shims = page.locator('[data-window="role-shims"]');
   const inspector = page.getByRole("region", { name: "Inspector" });
   const dialog = page.getByRole("alertdialog");
@@ -191,6 +192,11 @@ try {
   await inspector.getByText("Role shim", { exact: true }).waitFor();
   await inspector.getByRole("button", { name: "Edit in Shims" }).click();
   await shims.getByText("Edit codex-plain", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).waitFor();
+  await page.goBack();
+  await inspector.getByText("Role shim", { exact: true }).waitFor();
+  await page.goForward();
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).waitFor();
   await tap(row("codex-plain").getByRole("button", { name: "codex-plain actions" }));
   await page.getByRole("menuitem", { name: "Remove…" }).click();
   await dialog.getByText(doomed.path, { exact: true }).waitFor();
@@ -245,6 +251,7 @@ try {
   await seedRecovery(page, origin, "roles:launch_clear:ids", recoveryInput);
   await page.reload();
   await launches.getByRole("region", { name: "roles receipt unknown" }).waitFor();
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).waitFor();
   assert.equal(await launches.getByRole("button", { name: "Send identical request" }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 }); await shot("launch-unknown-narrow");
   await page.setViewportSize({ width: 2400, height: 1400 });

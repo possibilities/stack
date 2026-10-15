@@ -3,6 +3,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/content-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable. CONTENT_NEXT=dev uses `next dev` instead of a build.
 import assert from "node:assert/strict";
+import { verifyPaneDraft } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
@@ -65,12 +66,14 @@ try {
   await documents.getByText("No documents yet", { exact: true }).waitFor();
   await editor.getByText("Choose a document to edit", { exact: true }).waitFor();
   await preview.getByText("Choose something to preview", { exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Artifacts", exact: true }).click();
   await artifacts.getByText("No Artifacts · agents publish them", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Spaces · Content" }).waitFor();
   assert.equal(await artifacts.getByRole("button", { name: /publish/i }).count(), 0, "no publish control");
   await page.screenshot({ path: join(evidence, "content-empty.png"), animations: "disabled" });
 
   // Create a collection; the Library then shows it.
+  await page.getByRole("tab", { name: "Library", exact: true }).click();
   await library.getByRole("button", { name: "New collection", exact: true }).click();
   const collectionDialog = page.getByRole("dialog", { name: "New collection" });
   await collectionDialog.getByLabel("Title").fill("Research notes");
@@ -102,6 +105,8 @@ try {
   await page.screenshot({ path: join(evidence, "content-library.png"), animations: "disabled" });
 
   // Create a document with a body; it appears in Documents and opens in the editor.
+  await page.getByRole("tab", { name: "Documents", exact: true }).click();
+  await editor.locator("header").first().getByRole("button", { name: /^Close / }).click();
   await documents.getByRole("button", { name: "New document", exact: true }).click();
   const form = editor.getByRole("form", { name: "New document" });
   await form.getByLabel("Title").fill("Field notes");
@@ -116,6 +121,9 @@ try {
   const body = editor.getByLabel("Markdown");
   await body.fill("# Field notes\n\nSecond draft with a link to [[field-notes]].");
   await editor.getByText("Unsaved changes · ⌘S to save").waitFor();
+  const beforeLayout = await contentCall("get", { ref: "field-notes" });
+  await verifyPaneDraft(page, { title: "Content", id: "content-editor", field: body });
+  assert.deepEqual(await contentCall("get", { ref: "field-notes" }), beforeLayout, "arranging a draft never saves it");
   await body.press("Meta+s");
   await editor.getByText("All changes saved").waitFor();
   assert.match((await contentCall("get", { ref: "field-notes" })).content, /Second draft/);
@@ -153,6 +161,7 @@ try {
   await contentCall("blob_stage_chunk", { id: stage.id, offset: 0, base64: site.toString("base64") });
   await contentCall("blob_stage_finish", { id: stage.id });
   await contentCall("artifact_publish", { name: "hello-page", kind: "page", files: [{ name: "index.html", blob: digest }] });
+  await page.getByRole("tab", { name: "Artifacts", exact: true }).click();
   await artifacts.getByText("hello-page", { exact: true }).waitFor();
   await artifacts.getByRole("button", { name: "Show hello-page versions" }).click();
   await artifacts.getByRole("list", { name: "hello-page versions, newest first" }).waitFor();
@@ -170,6 +179,7 @@ try {
   await artifacts.getByText("hello-page", { exact: true }).waitFor();
 
   // Deleting an item warns that its shared link stops working.
+  await page.getByRole("tab", { name: "Library", exact: true }).click();
   await library.locator("tbody").getByRole("button", { name: "dot.png actions" }).click();
   await page.getByRole("menuitem", { name: "Delete permanently…" }).click();
   const deletion = page.getByRole("alertdialog");
@@ -188,9 +198,16 @@ try {
   await library.getByText("content · All items", { exact: true }).waitFor();
 
   // Inspector hand-off and palette.
+  await page.getByRole("tab", { name: "Documents", exact: true }).click();
+  for (const pane of [editor, preview]) await pane.locator("header").first().getByRole("button", { name: /^Close / }).click();
   await documents.getByRole("button", { name: "Field notes actions" }).click();
   await page.getByRole("menuitem", { name: "Inspect record" }).click();
   await page.getByRole("button", { name: "Edit in Content" }).waitFor();
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "HUD", exact: true }).click();
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
+  await page.getByRole("button", { name: "Edit in Content" }).click();
+  await editor.getByRole("form", { name: "Edit Field notes" }).waitFor();
+  await preview.getByText("Edited by an agent.", { exact: true }).waitFor();
   await page.keyboard.press("Meta+k");
   await page.getByPlaceholder(/Jump to/).fill("From the API");
   await page.getByRole("option", { name: /From the API/ }).first().waitFor();

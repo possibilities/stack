@@ -34,7 +34,7 @@ import {
 import type { Role, RoleCapabilityHarnesses, RoleCatalog, RoleInternalMcp, RoleReceipt, RoleSnapshot } from "@/lib/stack/types";
 import { errorMessage } from "./auth-actions";
 import type { ScopedStorage } from "@/lib/stack/destination";
-import { useDestination, useStack, useStore } from "./provider";
+import { useDestination, useStack, useStore, useWorkbench } from "./provider";
 import { DefaultDialog, DeleteRoleDialog } from "./role-dialogs";
 
 /** What the Role editor shows. New records are drafts until created. */
@@ -163,6 +163,7 @@ const storageKey = "uix.roles.v1";
 export function RoleActionsProvider({ children }: { children: React.ReactNode }) {
   const store = useStore();
   const { role, roleId, roleCatalog } = useStack();
+  const { revealPane } = useWorkbench();
   const catalog = roleCatalog.data;
   const [targets, setTargets] = useState<Record<string, RoleTarget | null>>({});
   const [creating, setCreating] = useState(false);
@@ -287,16 +288,18 @@ export function RoleActionsProvider({ children }: { children: React.ReactNode })
   const select = useCallback((id: string) => { setCreating(false); store.selectRole(id); }, [store]);
 
   const open = useCallback((target: RoleTarget | null) => {
+    if (target) revealPane("roles", "role-editor");
     if (target?.kind === "new-role") { setCreating(true); return; }
     setCreating(false);
     if (roleId) setTargets((current) => ({ ...current, [roleId]: target }));
-  }, [roleId]);
+  }, [roleId, revealPane]);
 
   const openIn = useCallback((id: string, target: RoleTarget) => {
     setCreating(false);
     setTargets((current) => ({ ...current, [id]: target }));
     store.selectRole(id);
-  }, [store]);
+    revealPane("roles", "role-editor");
+  }, [store, revealPane]);
 
   const setInternalMcp = useCallback((name: string, patch: { enabled?: boolean; harnesses?: RoleCapabilityHarnesses; expected?: RoleCapabilityHarnesses }): Promise<void> => {
     if (!roleId) return Promise.reject(new Error("No Role is selected"));

@@ -71,14 +71,14 @@ export function Palette({ open, onOpenChange, actions }: { open: boolean; onOpen
   /** Open a Role record or draft in the editor and bring the Roles space into view. */
   const edit = (target: RoleTarget, ref?: NodeRef) => {
     onOpenChange(false);
-    roleActions.open(target);
     if (ref) goTo(ref); else setSpace("roles");
+    roleActions.open(target);
   };
   /** Preview a content record and bring its window into view. */
   const show = (selection: ContentSelection, ref: NodeRef) => {
     onOpenChange(false);
-    contentActions.preview(selection);
     goTo(ref);
+    contentActions.preview(selection);
   };
   const contentAct = (run: () => void) => {
     onOpenChange(false);
@@ -183,7 +183,7 @@ export function Palette({ open, onOpenChange, actions }: { open: boolean; onOpen
           <CommandGroup heading="Roles">
             <CommandItem value="role new named role" onSelect={() => edit({ kind: "new-role" })}><UsersRoundIcon />New role</CommandItem>
             {roleCatalog.data?.roles.map((item) => (
-              <CommandItem key={item.id} value={`role ${item.name} ${item.description}`} onSelect={() => { onOpenChange(false); roleActions.openIn(item.id, { kind: "role", id: item.id }); goTo({ kind: "role", id: item.id }); }}>
+              <CommandItem key={item.id} value={`role ${item.name} ${item.description}`} onSelect={() => { onOpenChange(false); goTo({ kind: "role", id: item.id }); roleActions.openIn(item.id, { kind: "role", id: item.id }); }}>
                 <UsersRoundIcon />
                 <span className="truncate">{item.name}</span>
                 <CommandShortcut className="tracking-normal">{item.id === roleCatalog.data?.defaultRoleId ? "default" : ""}</CommandShortcut>

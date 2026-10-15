@@ -7,6 +7,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/domain-state-browser-check.mjs
 // DOMAIN_STATE_SLICE=content runs only the bounded Content publication/history rendered checks.
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -329,13 +330,14 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(`${error.message} (${page.url()})`));
   const shot = (name, locator) => (locator ?? page).screenshot({ path: join(evidence, `${name}.png`), animations: "disabled" });
-  const go = async (space) => { await page.goto(`${origin}/${space}`); await page.getByRole("button", { name: /Fit bench/ }).click().catch(() => undefined); };
+  const go = async (space) => { await page.goto(`${origin}/${space}`); const fit = page.getByRole("button", { name: /Fit bench/ }); if (await fit.count()) await fit.click(); };
   const completed = (scope) => scope.getByText("Completed for the declared scope only.");
 
   if (process.env.DOMAIN_STATE_SLICE === "content") {
     // This bounded slice exercises UI obligations the backend tests cannot reach: exact selection,
     // paged disclosure/error language, browser recovery authority, and responsive rendered controls.
     await go("content");
+    await revealPane(page, "Content", "content-storage");
     const storage = page.locator('[data-window="content-storage"]');
     const publications = storage.locator("details").filter({ has: page.locator("summary", { hasText: "Maintenance" }) });
     await publications.locator("summary").click();
@@ -410,6 +412,7 @@ try {
     await history.getByText("Vault history changed while paging; restarted from the first page.", { exact: true }).waitFor();
 
     // Editor uses the same read-only reader for its exact current slug.
+    await revealPane(page, "Content", "content-documents");
     const documents = page.locator('[data-window="content-documents"]');
     await documents.getByRole("button", { name: "Retained note actions", exact: true }).focus(); await page.keyboard.press("Enter");
     await page.getByRole("menuitem", { name: "Open in editor", exact: true }).click();
@@ -425,6 +428,7 @@ try {
     content.owner.journal.begin(input, plan);
     content.owner.journal.finish(input.requestId, "unknown", [{ resource: publicationIds.uncertain, outcome: "unknown", detail: "Interrupted filesystem collection; inspect retained evidence" }]);
     const beforeRecovery = content.publicationCalls.length;
+    await revealPane(page, "Content", "content-storage");
     await seedRecovery(page, origin, "content:publication_clear:claims", input);
     await page.reload();
     // Recovery waits for receipt discovery and connection, then observes automatically.
@@ -467,10 +471,8 @@ try {
     await shot("content-publications-unknown-light", storage);
     await page.emulateMedia({ colorScheme: "dark" }); await shot("content-publications-unknown-dark", storage);
     await page.emulateMedia({ colorScheme: "light" });
-    const grip = storage.locator('span[title^="Resize"]').first();
-    const edge = await grip.boundingBox();
-    await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2); await page.mouse.down();
-    await page.mouse.move(edge.x - 140, edge.y + edge.height / 2, { steps: 8 }); await page.mouse.up();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => document.querySelector('[data-window="content-storage"]').getBoundingClientRect().width < 400);
     assert.ok((await storage.boundingBox()).width < 400, "Storage is narrow");
     assert.ok(await storage.locator("[data-scroll]").evaluate((body) => body.scrollWidth <= body.clientWidth), "narrow Storage has no horizontal overflow");
     await shot("content-publications-unknown-narrow", storage);
