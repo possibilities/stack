@@ -209,7 +209,7 @@ try {
   await retained("catalog reopen");
   await page.setViewportSize({ width: 420, height: 900 });
   await retained("compact projection");
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth, undefined, { timeout: 2000 });
   await page.screenshot({ path: join(evidence, "hud-pane-draft-narrow.png"), animations: "disabled" });
   await page.setViewportSize({ width: 2400, height: 1300 });
   await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "Fleet", exact: true }).click();

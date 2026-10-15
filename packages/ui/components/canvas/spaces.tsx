@@ -300,6 +300,10 @@ export function paneDescription(def: WindowDef): string {
   return def.description ?? paneDescriptions[kind] ?? def.title;
 }
 
+export function paneRegistryReady(space: SpaceId, state: StackState): boolean {
+  return space !== "system" || Boolean(state.remote) || (state.status.serve === "open" && state.serveSettings.error === null && state.serveSettings.data !== null);
+}
+
 export type PaneDefinition = WindowDef & { kind: string; space: SpaceId; description: string; minimum: { width: number; height: number } };
 const readingPanes = new Set(["chat", "worker", "browse-viewer", "role-editor", "role-preview", "content-editor", "content-preview", "brain-reader", "proc-run", "source-delivery"]);
 export function paneDefinitions(space: SpaceId, state: StackState, arrangement: Parameters<(typeof spaceViews)[SpaceId]["windows"]>[1]): PaneDefinition[] {

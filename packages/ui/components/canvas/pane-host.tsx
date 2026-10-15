@@ -12,7 +12,7 @@ import { panePresets } from "@/lib/stack/pane-presets";
 import { PaneLayoutStore, type PaneLayout } from "@/lib/stack/pane-state";
 import { cn } from "@/lib/utils";
 import { useChatWindows, useDestination, useProcWindows, useStack, useViewerWindows, useWorkerWindows } from "./provider";
-import { paneDefinitions, type WindowDef } from "./spaces";
+import { paneDefinitions, paneRegistryReady, type WindowDef } from "./spaces";
 import { PlacementContext, type WindowPlacement } from "./window";
 import { PaneContext } from "./pane-context";
 import { PaneCatalog } from "./pane-catalog";
@@ -34,6 +34,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const { windows: viewers, viewers: viewerStore } = useViewerWindows();
   const { windows: procRuns, procWindows } = useProcWindows();
   const defs = paneDefinitions(space, state, { chats, workers, viewers, procRuns });
+  const registryReady = paneRegistryReady(space, state);
   const signature = JSON.stringify(defs.map((def) => def.id));
   const minimums = useMemo(() => Object.fromEntries(defs.map((def) => [def.id, def.minimum])), [signature]);
   const ids: string[] = useMemo(() => JSON.parse(signature), [signature]);
@@ -56,15 +57,15 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const frame = useRef<number | null>(null);
   const visited = useRef(new Set<string>());
 
-  useLayoutEffect(() => { store.configure(ids); }, [store, ids]);
+  useLayoutEffect(() => { if (registryReady) store.configure(ids); }, [store, ids, registryReady]);
   useEffect(() => {
-    if (!instancesRestored || !local) return;
+    if (!instancesRestored || !registryReady || !local) return;
     store.attach(local);
     const hidden = () => { if (document.visibilityState === "hidden") store.flush(); };
     window.addEventListener("pagehide", store.flush);
     document.addEventListener("visibilitychange", hidden);
     return () => { window.removeEventListener("pagehide", store.flush); document.removeEventListener("visibilitychange", hidden); store.attach(null); };
-  }, [store, instancesRestored, local]);
+  }, [store, instancesRestored, registryReady, local]);
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;

@@ -35,9 +35,17 @@ async function startPlatform(label, serverId) {
   const dir = await mkdtemp(join("/tmp", `di-${label}-`));
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("STACK_"))), STACK_STATE_DIR: dir,
     NEXT_TELEMETRY_DISABLED: "1", STACK_WEBSOCKET_ORIGIN: origin, STACK_UI_PORT: String(nextPort) };
+  let developerMode = false, settingsGate = null, settingsError = false;
   const handlers = {
+    serve_settings_read: async () => {
+      const gate = settingsGate;
+      gate?.entered.resolve();
+      await gate?.promise;
+      if (settingsError) throw new Error("Settings unavailable");
+      return { developerMode, revision: 1, updatedAt: null };
+    },
     serve_status: () => ({ serverId, pid: process.pid, startedAt: new Date().toISOString(), nodeVersion: process.version, children: [], mcpUrls: {}, indexUrl: null, uiUrl: null, inspectorUrl: null }),
-    bot_list: () => ({ bots: [] }),
+    bot_list: () => ({ bots: [{ id: "fixture-bot", state: "stopped", pid: null, cwd: "/fixture", url: null, account: null, runningAccount: null, mainThreadId: null, recoveryIssue: null, roleRevision: null, settings: null }] }),
     bot_defaults_get: () => ({ model: "fixture", reasoningEffort: "medium", sandboxMode: "danger-full-access", approvalPolicy: "never" }),
     voice_status: () => ({ call: null }),
   };
@@ -67,7 +75,14 @@ async function startPlatform(label, serverId) {
   }
   return {
     label, env, notification,
+    identify(id) { serverId = id; sockets[0].publish("pids_changed"); },
+    developer(value, error = false) { developerMode = value; settingsError = error; sockets[0].publish("serve_settings_changed"); },
+    holdSettings() {
+      settingsGate = { ...Promise.withResolvers(), entered: Promise.withResolvers() };
+      return settingsGate;
+    },
     async stop() {
+      settingsGate?.resolve();
       if (next.exitCode === null) { const exited = once(next, "exit"); next.kill(); await exited; }
       await websocket.close();
       for (const socket of sockets) await socket.close();
@@ -82,6 +97,14 @@ let platform = null;
 try {
   // One context, one page: the same browser storage serves every platform that answers at this origin.
   const context = await browser.newContext({ viewport: { width: 1400, height: 1000 }, reducedMotion: "reduce" });
+  await context.addInitScript(() => {
+    window.paneStorageReads = [];
+    const read = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key) {
+      if (key.includes("uix.panes.v1.")) window.paneStorageReads.push(key);
+      return read.call(this, key);
+    };
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
   const problems = [];
@@ -132,6 +155,16 @@ try {
     "stack.uix.inspector.v1": JSON.stringify({ pinned: true }), "stack.uix.docks.v1": JSON.stringify({ inspector: 900 }), "stack.worker-catalog-held.v1": JSON.stringify(["legacy"]),
   };
   const report = {};
+  const hud = page.getByRole("main", { name: "HUD panes", exact: true });
+  const presets = hud.getByRole("group", { name: "HUD layout preset", exact: true });
+  const paneKey = (id) => destinationKey(origin, "uix.panes.v1.hud", { serverId: id });
+  const readLayout = (id) => page.evaluate((key) => JSON.parse(localStorage.getItem(key)), paneKey(id));
+  const waitLayout = (id, preset, closed = []) => page.waitForFunction(([key, preset, closed]) => {
+    const saved = JSON.parse(localStorage.getItem(key) ?? "null");
+    return saved?.preset === preset && JSON.stringify(saved.closed) === JSON.stringify(closed);
+  }, [paneKey(id), preset, closed]);
+  const openHud = async () => { await page.goto(`${origin}/`); await hud.waitFor(); };
+  const hiddenPane = (id) => page.locator(`[data-pane-frame="${id}"]`).waitFor({ state: "hidden" });
 
   // ---- Platform A: arrange, pin, draft and leave an unconfirmed request; also seed unqualified legacy records ----
   platform = await startPlatform("a", idA);
@@ -165,7 +198,27 @@ try {
   for (const name of ["uix.bench.v2.inbox", "uix.inspector.v1", "state-flow.notify:history"]) assert.ok(aKeys.includes(`${prefixA}${name}`), `${name} is stored under A`);
   assert.ok(aKeys.some((name) => name.startsWith(`${prefixA}uix.notify-compose.v1.`)), "the Compose draft is stored under A");
   for (const [name, value] of Object.entries(legacy)) assert.equal(all[name], value, `${name} is untouched`);
+  await openHud();
+  await presets.getByRole("button", { name: "Focus", exact: true }).click();
+  await waitLayout(idA, "focus");
+  await page.evaluate((key) => {
+    document.querySelector('[aria-label="Close Work"]').click();
+    window.addEventListener("pagehide", () => {
+      sessionStorage.setItem("fixture-pane-exit", localStorage.getItem(key));
+    }, { once: true });
+    location.assign("about:blank");
+  }, paneKey(idA));
+  await page.waitForURL("about:blank");
+  await openHud();
+  await hiddenPane("hud-work");
+  const paneA = await readLayout(idA);
+  assert.equal(paneA.preset, "focus");
+  assert.deepEqual(paneA.closed, ["hud-work"], "leaving immediately after close flushes the committed edit");
+  assert.deepEqual(await page.evaluate(() => JSON.parse(sessionStorage.getItem("fixture-pane-exit"))), paneA, "the final layout was recorded before pagehide finished");
+  assert.equal(await presets.getByRole("button", { name: "Focus", exact: true }).getAttribute("aria-pressed"), "true");
+  all = await storage();
   report.afterA = Object.keys(all);
+  report.paneA = paneA;
   const snapshotA = owned(all, idA);
   assert.deepEqual(problems, [], "no hydration or page errors on platform A");
   await leave();
@@ -197,6 +250,12 @@ try {
   assert.deepEqual(maintenance, ["notification_history_plan"], "a named destination prepares its plan");
   await inboxWindow.getByRole("button", { name: "Discard plan" }).click();
   maintenance.length = 0;
+  await openHud();
+  await waitLayout(idB, "triage");
+  assert.equal(await page.locator('[data-pane-frame="hud-work"]').isVisible(), true, "B does not restore A's closed pane");
+  await presets.getByRole("button", { name: "Board", exact: true }).click();
+  await waitLayout(idB, "board");
+  const paneB = await readLayout(idB);
   all = await storage();
   assert.deepEqual(owned(all, idA), snapshotA, "B never read, wrote, merged or removed anything of A's");
   for (const [name, value] of Object.entries(legacy)) assert.equal(all[name], value, `${name} is still untouched`);
@@ -240,7 +299,28 @@ try {
   assert.deepEqual(maintenance, [], "no plan or apply is sent");
   assert.equal(await inboxWindow.getByRole("button", { name: "Clear this content" }).count(), 0);
   assert.deepEqual(await storage(), before, "and nothing is recorded");
-  assert.deepEqual(problems, [], "no hydration or page errors with no identity");
+  await openHud();
+  await presets.getByRole("button", { name: "Board", exact: true }).click();
+  await hud.getByRole("button", { name: "Close Work", exact: true }).click();
+  await hiddenPane("hud-work");
+  await settle(400);
+  assert.deepEqual(await page.evaluate(() => window.paneStorageReads), [], "unknown identity reads no saved pane layouts");
+  assert.deepEqual(await storage(), before, "unknown identity keeps pane edits in memory only");
+  const lateId = "ab8e0c19-7183-46bb-b9e5-97de92fa405a";
+  platform.identify(lateId);
+  await waitLayout(lateId, "board", ["hud-work"]);
+  assert.equal(await page.locator('[data-pane-frame="hud-work"]').isVisible(), false, "first identity without a saved layout retains page-local work");
+  platform.identify(idA);
+  await hiddenPane("hud-work");
+  await page.waitForFunction((key) => window.paneStorageReads.includes(key), paneKey(idA));
+  assert.deepEqual(await readLayout(idA), paneA, "live destination replacement restores A rather than copying the unnamed page's work");
+  platform.identify(idB);
+  await page.locator('[data-pane-frame="hud-work"]').waitFor();
+  await page.waitForFunction((key) => window.paneStorageReads.includes(key), paneKey(idB));
+  assert.equal(await presets.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await readLayout(idB), paneB);
+  assert.deepEqual(await readLayout(idA), paneA, "retired destination writes never overwrite A");
+  assert.deepEqual(problems, [], "no hydration or page errors with no identity or live replacement");
   await leave();
 
   // ---- A again: the same installation restores exactly what it saved, and reads its own request back ----
@@ -255,6 +335,102 @@ try {
   const restored = await point();
   assert.ok(Math.abs(restored.x - moved.x) < 2 && Math.abs(restored.y - moved.y) < 2, `A's arrangement is restored ${JSON.stringify(moved)} -> ${JSON.stringify(restored)}`);
   assert.deepEqual(problems, [], "no hydration or page errors on A again");
+  await openHud();
+  await hiddenPane("hud-work");
+  assert.deepEqual(await readLayout(idA), paneA);
+  for (const kind of ["unavailable", "quota"]) {
+    const blocked = await context.newPage();
+    blocked.on("pageerror", (error) => problems.push(error.message));
+    await blocked.addInitScript((kind) => {
+      if (kind === "unavailable") Object.defineProperty(window, "localStorage", { get() { throw new DOMException("Blocked", "SecurityError"); } });
+      else {
+        const write = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (key.includes("uix.panes.v1.")) throw new DOMException("Full", "QuotaExceededError");
+          return write.call(this, key, value);
+        };
+      }
+    }, kind);
+    await blocked.goto(`${origin}/`);
+    const host = blocked.getByRole("main", { name: "HUD panes", exact: true });
+    await host.getByRole("button", { name: "Triage", exact: true }).click();
+    await host.getByRole("button", { name: "Close Work", exact: true }).click();
+    await host.getByText(/could not save the layout/).waitFor();
+    await host.getByRole("button", { name: "Undo close", exact: true }).click();
+    await blocked.locator('[data-pane-frame="hud-work"]').waitFor();
+    await host.getByText(/could not save the layout/).waitFor();
+    await blocked.close();
+    assert.deepEqual(await readLayout(idA), paneA, `${kind} storage leaves the saved layout untouched while close/undo work in memory`);
+  }
+  assert.deepEqual(problems, [], "storage denial does not crash the page");
+  const revealPane = async (host, space, id) => {
+    await host.getByRole("button", { name: /^Panes/ }).click();
+    await page.getByRole("combobox", { name: `Find a pane in ${space}`, exact: true }).fill(id);
+    await page.keyboard.press("Enter");
+  };
+  await page.goto(`${origin}/fleet`);
+  await page.locator('[data-window="chat"]').waitFor();
+  const fleet = page.getByRole("main", { name: "Fleet panes", exact: true });
+  if (await fleet.count()) {
+    await page.locator('[data-window="chat"]').getByRole("button", { name: "New chat window", exact: true }).click();
+    const chat = page.locator('[data-window="chat-2"]');
+    await chat.getByRole("button", { name: "Switch bot", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^fixture-bot/ }).click();
+    await chat.getByText("fixture-bot is stopped", { exact: true }).waitFor();
+    await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "Fleet", exact: true }).click();
+    assert.equal(new URL(page.url()).searchParams.get("focus"), null, "cold layout restore must not request a deep-link reveal");
+    await chat.getByRole("button", { name: "Close fixture-bot", exact: true }).click();
+    const key = destinationKey(origin, "uix.panes.v1.fleet", { serverId: idA });
+    await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) ?? "{}").closed?.includes("chat-2"), key);
+    const saved = await page.evaluate((key) => localStorage.getItem(key), key);
+    await page.reload();
+    await fleet.waitFor();
+    await page.waitForFunction((key) => window.paneStorageReads.includes(key), key);
+    await settle(400);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), key), saved, `dynamic instance restoration precedes layout reconciliation (${page.url()})`);
+    await revealPane(fleet, "Fleet", "chat-2");
+    await chat.getByText("fixture-bot is stopped", { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-pane-frame="chat-2"]').count(), 1, "reopening reuses the restored binding without duplicating it");
+    report.dynamicRestore = "passed";
+  } else report.dynamicRestore = "skipped: Fleet still uses Bench";
+
+  platform.developer(true);
+  await page.goto(`${origin}/system`);
+  const server = page.locator('[data-window="server"]');
+  await server.waitFor();
+  const system = page.getByRole("main", { name: "System panes", exact: true });
+  if (await system.count()) {
+    await server.getByRole("switch", { name: "Developer mode" }).waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-window="server"] [role="switch"]')?.getAttribute("aria-checked") === "true");
+    await revealPane(system, "System", "developer");
+    await page.getByRole("button", { name: "Close Developer", exact: true }).click();
+    const key = destinationKey(origin, "uix.panes.v1.system", { serverId: idA });
+    await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) ?? "{}").closed?.includes("developer"), key);
+    const saved = await page.evaluate((key) => localStorage.getItem(key), key);
+    const gate = platform.holdSettings();
+    await page.reload();
+    await server.getByText("Reading the current setting…", { exact: true }).waitFor();
+    await gate.entered.promise;
+    await settle(400);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), key), saved, "unknown registration cannot erase the saved Developer pane");
+    gate.resolve();
+    await page.waitForFunction(() => document.querySelector('[data-window="server"] [role="switch"]')?.getAttribute("aria-checked") === "true");
+    await settle(400);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), key), saved, "a delayed known registration restores the saved closed state");
+    platform.developer(true, true);
+    await server.getByText("Unknown: Settings unavailable", { exact: true }).waitFor();
+    await settle(400);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), key), saved, "a failed settings read is not confirmed removal");
+    platform.developer(true);
+    await page.waitForFunction(() => document.querySelector('[data-window="server"] [role="switch"]')?.getAttribute("aria-checked") === "true");
+    await revealPane(system, "System", "developer");
+    await page.getByRole("button", { name: "Close Developer", exact: true }).waitFor();
+    platform.developer(false);
+    await page.locator('[data-pane-frame="developer"]').waitFor({ state: "detached" });
+    await page.waitForFunction((key) => !localStorage.getItem(key)?.includes('"developer"'), key);
+    report.conditionalRegistry = "passed";
+  } else report.conditionalRegistry = "skipped: System still uses Bench";
+  assert.deepEqual(problems, [], "restoring registrations has no page errors");
   report.final = Object.keys(await storage());
   await writeFile(join(evidence, "destination-keys.json"), JSON.stringify({ origin, idA, idB, legacy: Object.keys(legacy), ...report }, null, 2));
   console.log(`destination isolation check passed; evidence in ${evidence}`);

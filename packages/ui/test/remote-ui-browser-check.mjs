@@ -7,11 +7,11 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { serveApi, serveHttp, socketCall, socketPath } from "@stack/api";
+import { serveApi, serveHttp, serveSocket, socketCall, socketPath } from "@stack/api";
 import { AccessStore } from "../../access/dist/src/store.js";
 import { handler } from "../../access/dist/src/ingress.js";
 import { startRemoteUi } from "../../access/dist/src/remote-ui.js";
-import { freePort, gatewayRoot, root, ui } from "./browser-fixture.mjs";
+import { destinationKey, fixtureOperations, freePort, gatewayRoot, root, ui, serveFixture } from "./browser-fixture.mjs";
 
 if (!process.env.PLAYWRIGHT_MODULE) throw new Error("Set PLAYWRIGHT_MODULE to an installed Playwright module");
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE);
@@ -39,8 +39,11 @@ try {
   const verify = async () => {}; // Simulated Tailscale status/self/whois; production never injects this.
   servers.push(await serveHttp({ host: "127.0.0.1", port: documentPort, tls, handle: handler({ store, env, origin: "documents", verify }), forceCloseConnections: true }));
   servers.push(await serveHttp({ host: "127.0.0.1", port: artifactPort, tls, handle: handler({ store, env, origin: "artifacts", verify }), forceCloseConnections: true }));
+  const serve = await serveFixture({ serve_status: () => ({ serverId: store.serverId, pid: process.pid, children: [], mcpUrls: {}, indexUrl: null, uiUrl: null, inspectorUrl: null }) });
+  servers.push(await serveSocket({ info: { name: "serve", description: "Fixture", transportDescription: "Fixture", path: socketPath("serve", env) }, context: {},
+    operations: fixtureOperations(serve.names, serve.handlers, { serve_status: { readOnlyHint: true } }), events: { topics: serve.topics } }));
   servers.push(await startRemoteUi({ store, env, host: "127.0.0.1", port: remotePort,
-    root: await gatewayRoot(dir, ["content", "hud", "proc"]), verify }, tls));
+    root: await gatewayRoot(dir, ["content", "hud", "proc", "serve"]), verify }, tls));
   const document = await contentCall("new", { title: "Remote note" });
   const bytes = Buffer.from("remote item bytes");
   const item = await contentCall("item_put", { collection: null, name: "remote.txt", kind: "document", mediaType: "text/plain", content: bytes.toString("utf8") });
@@ -145,8 +148,27 @@ try {
   // gateway refuses the plan operations of the four maintenance controls this UI exposes locally.
   const workId = randomUUID();
   await socketCall(socketPath("hud", env), "tools/call", { name: "work_create", arguments: { requestId: randomUUID(), id: workId, title: "Remote work", objective: "Remote objective" } });
+  const paneKey = destinationKey(origin, "uix.panes.v1.hud", { serverId: store.serverId, authority: "remote" });
+  const foreignKeys = [destinationKey(origin, "uix.panes.v1.hud", { serverId: store.serverId }),
+    destinationKey(`http://127.0.0.1:${nextPort}`, "uix.panes.v1.hud", { serverId: store.serverId, authority: "remote" })];
+  await page.evaluate((keys) => { for (const key of keys) localStorage.setItem(key, '{"version":99}'); }, foreignKeys);
   await page.goto(`${origin}/`);
   await page.locator('[data-remote-scope="control"]').waitFor();
+  const paneHost = page.getByRole("main", { name: "HUD panes", exact: true });
+  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) ?? "null")?.version === 1, paneKey);
+  assert.equal(await paneHost.getByText(/Saved layout uses another version/).count(), 0, "foreign saved versions do not affect initial remote restore");
+  await paneHost.getByRole("button", { name: "Board", exact: true }).click();
+  await paneHost.getByRole("button", { name: "Close Timeline", exact: true }).click();
+  await page.waitForFunction((key) => {
+    const layout = JSON.parse(localStorage.getItem(key) ?? "null");
+    return layout?.preset === "board" && layout.closed.includes("hud-timeline");
+  }, paneKey);
+  await page.reload();
+  await paneHost.getByRole("button", { name: "Panes 1 closed", exact: true }).waitFor();
+  assert.equal(await paneHost.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator('[data-pane-frame="hud-timeline"]').isVisible(), false);
+  assert.equal(await paneHost.getByText(/Saved layout uses another version/).count(), 0, "remote panes never restore another authority or origin's layout");
+  assert.deepEqual(await page.evaluate((keys) => keys.map((key) => localStorage.getItem(key)), foreignKeys), foreignKeys.map(() => '{"version":99}'), "remote layout saves leave other authority/origin records untouched");
   await page.locator('[data-window="hud-work"]').getByRole("button", { name: /Remote work/ }).first().click();
   const remoteItem = page.locator('[data-window="hud-item"]');
   await remoteItem.getByRole("button", { name: "Edit title" }).waitFor();
