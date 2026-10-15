@@ -22,6 +22,10 @@ const evidence = process.env.HUD_EVIDENCE_DIR ?? join(dir, "evidence");
 await mkdir(evidence, { recursive: true });
 const env = { ...process.env, STACK_STATE_DIR: dir, NEXT_TELEMETRY_DISABLED: "1" };
 const now = Date.now();
+const lateModel = "late-hidden-resource-proof", lateFrame = Promise.withResolvers();
+let heldResources = null;
+const resourceGates = [];
+const bounded = (promise, timeout = 10_000) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Resource proof did not reach its transport barrier")), timeout).unref())]);
 
 const ids = { epic: randomUUID(), design: randomUUID(), implement: randomUUID(), spike: randomUUID(), pilot: randomUUID(), salvage: randomUUID() };
 const worker = "22222222-0000-4000-8000-000000000001";
@@ -52,10 +56,16 @@ const handlers = {
   bot_defaults_get: () => ({ model: "fixture", reasoningEffort: "medium", sandboxMode: "danger-full-access", approvalPolicy: "never" }),
   voice_status: () => ({ call: null }), chat_list: () => ({ chats: [] }), chat_thread_read: () => ({ messages: [] }), chat_records: () => ({ records: [] }),
   worker_list: () => ({ workers: [session] }), worker_runtime_list: () => ({ runtimes: [] }),
-  worker_work_list: ({ workItemId }) => {
+  worker_work_list: async ({ workItemId }) => {
     if (workItemId === ids.salvage) throw new Error("worker owner unavailable");
     const entries = workItemId === ids.implement ? [admission(turns.implement, ids.implement, 1, "completed", false)]
       : workItemId === ids.design ? [admission(turns.design, ids.design, 1, "running", true)] : [];
+    if (heldResources?.id === workItemId) {
+      const gate = heldResources; heldResources = null;
+      gate.admitted.resolve();
+      await gate.promise;
+      if (gate.model) entries[0].model = gate.model;
+    }
     return { entries, nextCursor: null };
   },
   usage_snapshot: () => ({ atMs: now, inventoryAtMs: now, inventoryError: null, accounts: [] }),
@@ -112,6 +122,7 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" });
   const context = await browser.newContext({ viewport: { width: 2400, height: 1300 }, reducedMotion: "reduce" });
   const page = await context.newPage();
+  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => { if (payload.toString().includes(lateModel)) lateFrame.resolve(); }));
   await authorizeBrowser(page, origin, env);
   page.setDefaultTimeout(60_000);
   const errors = [];
@@ -223,6 +234,27 @@ try {
   await item.getByText("Human draft objective").waitFor();
   assert.equal((await get(ids.implement)).objective, "Human draft objective");
 
+  const resourceGate = { ...Promise.withResolvers(), admitted: Promise.withResolvers(), id: ids.design, model: lateModel };
+  const resumedGate = { ...Promise.withResolvers(), admitted: Promise.withResolvers(), id: ids.design };
+  resourceGates.push(resourceGate, resumedGate);
+  heldResources = resourceGate;
+  await pick(ids.design, "Design the space").click();
+  await bounded(resourceGate.admitted.promise);
+  await resources.getByRole("button", { name: "Close Resources", exact: true }).click();
+  heldResources = resumedGate;
+  await page.getByRole("button", { name: "Panes 1 closed", exact: true }).click();
+  await page.getByRole("combobox", { name: "Find a pane in HUD" }).fill("hud-resources");
+  await page.keyboard.press("Enter");
+  await bounded(resumedGate.admitted.promise, 2_000);
+  resumedGate.resolve();
+  await resources.getByText("Dispatched for this item", { exact: false }).waitFor();
+  resourceGate.resolve();
+  await bounded(lateFrame.promise);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await resources.getByText(lateModel, { exact: false }).count(), 0, "reopen reads fresh evidence without waiting for or accepting the retired same-query read");
+  await pick(ids.implement, "Implement windows").click();
+  await resources.getByText("Captured from Chat focus", { exact: false }).waitFor();
+
   // A note from elsewhere arrives live, without a reload.
   const current = await get(ids.implement);
   await call("work_note_add", { requestId: randomUUID(), id: ids.implement, expectedRevision: current.revision, kind: "decision", body: "Keep metadata behind the disclosure" });
@@ -284,6 +316,7 @@ try {
   console.error(log.slice(-4000));
   throw error;
 } finally {
+  for (const gate of resourceGates) gate.resolve();
   await browser?.close();
   if (next && next.exitCode === null) { next.kill("SIGTERM"); await new Promise((resolve) => next.once("exit", resolve)); }
   await websocket?.close();

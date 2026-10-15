@@ -227,12 +227,12 @@ function OutputLog({ run, generation }: { run: ProcRunDetail; generation: number
   const atEnd = useRef(true);
 
   const key = run.id;
-  useEffect(() => () => { state.current.key = null; }, []);
-  if (state.current.key !== key) {
-    state.current = { key, lines: [], gaps: new Map(), tail: false, running: false, again: false };
-    atEnd.current = true;
-    setReadError(null);
-  }
+  useLayoutEffect(() => {
+    const live = { ...state.current, key, running: false, again: false };
+    state.current = live;
+    setEarlier((value) => value.loading ? { ...value, loading: false } : value);
+    return () => { if (state.current === live) state.current = { ...live, running: false, again: false }; };
+  }, [key]);
 
   const readForward = useCallback(async () => {
     const s = state.current;
@@ -245,7 +245,7 @@ function OutputLog({ run, generation }: { run: ProcRunDetail; generation: number
       for (let page = 0; page < 50; page++) {
         const result = await store.call<ProcOutputPage>("proc", "proc_run_read", { id: key, after, limit: pageSize });
         const live = state.current;
-        if (live.key !== key) return;
+        if (live !== s || live.key !== key) return;
         for (const gap of lineGaps(after, result.lines, result.gap)) live.gaps.set(gap.from, gap);
         live.lines = mergeLines(live.lines, result.lines);
         live.tail = true;
@@ -254,13 +254,12 @@ function OutputLog({ run, generation }: { run: ProcRunDetail; generation: number
       }
       setReadError(null);
     } catch (error) {
-      if (state.current.key === key) setReadError(error instanceof Error ? error.message : String(error));
+      if (state.current === s && s.key === key) setReadError(error instanceof Error ? error.message : String(error));
     } finally {
-      const live = state.current;
-      if (live.key === key) {
-        live.running = false;
+      if (state.current === s && s.key === key) {
+        s.running = false;
         bumpLines((value) => value + 1);
-        if (live.again || s.again) { live.again = false; s.again = false; void readForward(); }
+        if (s.again) { s.again = false; void readForward(); }
       }
     }
   }, [key, run.lineCount, store]);
@@ -276,17 +275,17 @@ function OutputLog({ run, generation }: { run: ProcRunDetail; generation: number
     try {
       const result = await store.call<ProcOutputPage>("proc", "proc_run_read", { id: key, after, limit: first.seq - 1 - after });
       const live = state.current;
-      if (live.key !== key) return;
+      if (live !== s || live.key !== key) return;
       for (const gap of lineGaps(after, result.lines, result.gap)) live.gaps.set(gap.from, gap);
       live.lines = mergeLines(result.lines, live.lines);
       // Keep the reader where they were after the prepend.
       const element = scroll.current;
       const before = element ? element.scrollHeight - element.scrollTop : 0;
       bumpLines((value) => value + 1);
-      requestAnimationFrame(() => { if (element) element.scrollTop = element.scrollHeight - before; });
+      requestAnimationFrame(() => { if (element && state.current === s) element.scrollTop = element.scrollHeight - before; });
       setEarlier({ loading: false, error: null });
     } catch (error) {
-      setEarlier({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      if (state.current === s) setEarlier({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
   };
 

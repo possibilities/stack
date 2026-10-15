@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarClockIcon } from "lucide-react";
 import { relativeTime, untilTime } from "@/lib/stack/derive";
 import { blockedCopy, executionView, ownerOf, runView, type ProcTone } from "@/lib/stack/proc";
@@ -8,6 +7,7 @@ import type { ProcActor, ProcAuthority, ProcExecutionSummary, ProcRun } from "@/
 import { cn } from "@/lib/utils";
 import { NodeLink } from "./primitives";
 import { useNow } from "./provider";
+import { useSnapshotRead } from "./owner-reads";
 
 /** Why Proc controls can't run here, or null when they can. Proc is server-local: output and schedule definitions never reach remote sessions. */
 export function procUnavailable(remote: unknown, endpoints: Record<string, string>): string | null {
@@ -114,30 +114,8 @@ export function toneDot(tone: ProcTone): string {
 
 /** A snapshot read that repeats on each generation; overlapping reads coalesce into one follow-up. */
 export function useProcSnapshot<T>(key: string | null, generation: number, read: () => Promise<T>): { data: T | null; error: string | null; at: number | null } {
-  const [value, setValue] = useState<{ key: string | null; data: T | null; error: string | null; at: number | null }>({ key, data: null, error: null, at: null });
-  const flight = useRef({ key, running: false, again: false });
-  const readRef = useRef(read);
-  readRef.current = read;
-  const run = useCallback(async () => {
-    const state = flight.current;
-    if (state.running) { state.again = true; return; }
-    state.running = true;
-    const runKey = state.key;
-    try {
-      const data = await readRef.current();
-      if (flight.current.key === runKey) setValue({ key: runKey, data, error: null, at: Date.now() });
-    } catch (error) {
-      if (flight.current.key === runKey) setValue((current) => ({ key: runKey, data: current.key === runKey ? current.data : null, error: error instanceof Error ? error.message : String(error), at: Date.now() }));
-    } finally {
-      state.running = false;
-      if (state.again && flight.current === state) { state.again = false; void run(); }
-    }
-  }, []);
-  useEffect(() => {
-    if (flight.current.key !== key) flight.current = { key, running: false, again: false };
-    if (key) void run();
-  }, [key, generation, run]);
-  return value.key === key ? value : { data: null, error: null, at: null };
+  const { data, error, at } = useSnapshotRead(read, key, generation);
+  return { data, error, at };
 }
 
 

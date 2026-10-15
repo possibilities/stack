@@ -249,6 +249,18 @@ try {
   await run.getByLabel("Stream").selectOption("stderr");
   await run.getByText("err 2", { exact: true }).waitFor();
   assert.equal(await run.getByRole("log").getByText("line 3", { exact: true }).count(), 0, "stderr filter drops stdout lines");
+  const find = run.getByRole("textbox", { name: "Find in output" }), heldFind = await find.elementHandle();
+  await find.fill("err 1");
+  await run.getByRole("log").evaluate((element) => { element.scrollTop = 0; });
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "HUD", exact: true }).click();
+  await page.getByRole("navigation", { name: "Canvas spaces" }).getByRole("link", { name: "Proc", exact: true }).click();
+  assert.equal(await run.getByLabel("Stream").inputValue(), "stderr");
+  assert.equal(await find.inputValue(), "err 1");
+  assert.equal(await find.evaluate((element, original) => element === original, heldFind), true);
+  await run.getByRole("log").getByText("err 2", { exact: true }).waitFor();
+  assert.equal(await run.getByRole("log").evaluate((element) => element.scrollTop), 0, "loaded backscroll and scroll position survive suspension");
+  await heldFind.dispose();
+  await find.fill("");
   await run.getByLabel("Stream").selectOption("");
   await page.screenshot({ path: join(evidence, "proc-run-output.png"), animations: "disabled" });
 

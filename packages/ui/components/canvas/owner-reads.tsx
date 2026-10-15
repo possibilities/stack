@@ -34,12 +34,16 @@ function useObservation<R, V>(observation: ReadObservation<Query<R>, V>, read: R
 }
 
 /** Single reads use precisely the same identity, acceptance and demand lifecycle as paged reads. */
-export function useKeyedRead<T>(read: () => Promise<T>, key: string | null, observe: unknown, owner: ReadOwner) {
+export function useSnapshotRead<T>(read: () => Promise<T>, key: string | null, observe: unknown, unavailable: string | null = null) {
   const [observation] = useState(() => new ReadObservation<Query<() => Promise<T>>, T>({ key: (query) => query.key, read: (query) => query.read() }));
-  const identity = key === null || owner.enabled === false ? null : JSON.stringify([owner.pkg, owner.operation, key]);
-  const result = useObservation(observation, read, identity, observe, useReadUnavailable(owner));
-  return { ...result, data: result.evidence?.value ?? null, hasRead: result.evidence !== null,
+  const result = useObservation(observation, read, key, observe, unavailable);
+  return { ...result, data: result.evidence?.value ?? null, at: result.evidence?.receivedAt ?? null, hasRead: result.evidence !== null,
     loading: result.pending !== null, reload: result.refresh };
+}
+
+export function useKeyedRead<T>(read: () => Promise<T>, key: string | null, observe: unknown, owner: ReadOwner) {
+  const identity = key === null || owner.enabled === false ? null : JSON.stringify([owner.pkg, owner.operation, key]);
+  return useSnapshotRead(read, identity, observe, useReadUnavailable(owner));
 }
 
 /** Sensitive details need a fresh explicit reveal for each intent identity. Ordinary invalidation
