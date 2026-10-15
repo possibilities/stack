@@ -331,9 +331,33 @@ a.goto:hover, .goto:hover { text-decoration-color: var(--accent); }
 .palette .it.on { background: var(--sel); }
 .palette .it svg.i { color: var(--muted-foreground); }
 .menu { position: fixed; z-index: 75; min-width: 210px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 4px; box-shadow: 0 16px 48px -16px oklch(0 0 0 / .35); }
-.menu button { width: 100%; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px; border-radius: 6px; font-size: 12.5px; text-align: left; }
-.menu button:hover { background: var(--hover); }
-.menu button .kbd { margin-left: auto; }
+.menu > button { width: 100%; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px; border-radius: 6px; font-size: 12.5px; text-align: left; }
+.menu > button:hover { background: var(--hover); }
+.menu > button .kbd { margin-left: auto; }
+/* Panes catalog: every pane a space offers, open or closed. */
+.catalog { width: 384px; max-height: min(72vh, 660px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.cat-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 8px; font-size: 13px; }
+.cat-head .muted { margin-left: auto; font-size: 12px; }
+.cat-q { margin: 0 10px 8px; width: auto; }
+.cat-place { display: flex; align-items: center; gap: 8px; padding: 0 12px 9px; font-size: 12px; border-bottom: 1px solid var(--line); }
+.cat-place .seg { height: 26px; } .cat-place .seg button { height: 22px; padding: 0 8px; font-size: 12px; }
+.cat-place > .trunc { margin-left: auto; max-width: 96px; }
+.cat-list { overflow: auto; padding: 4px; flex: 1; min-height: 0; }
+.cat-list .lbl { padding: 10px 9px 4px; }
+.cat-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-align: left; }
+.cat-row:hover { background: var(--hover); }
+.cat-row b { display: block; font-size: 12.5px; font-weight: 500; }
+.cat-row small { display: block; font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-ic { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; flex: none; color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); }
+.cat-ic svg.i { width: 15px; height: 15px; }
+.cat-row.closed .cat-ic { color: var(--muted-foreground); background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.cat-row.closed b { color: var(--muted-foreground); }
+.cat-st { font-size: 11px; color: var(--muted-foreground); white-space: nowrap; flex: none; }
+.cat-row.closed .cat-st { color: var(--foreground); font-weight: 500; }
+.cat-pins { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px 8px; font-size: 11.5px; }
+.cat-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.cat-foot .muted { margin-left: auto; }
+.tool-count { font-size: 11px; font-weight: 600; color: color-mix(in oklab, var(--warning) 45%, var(--foreground)); background: color-mix(in oklab, var(--warning) 16%, transparent); border-radius: 999px; padding: 1px 6px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 .menu .lbl { padding: 6px 9px 3px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
 .toast { position: fixed; z-index: 76; right: 16px; bottom: 16px; background: var(--foreground); color: var(--background); padding: 9px 12px; border-radius: 10px; font-size: 12.5px; display: flex; gap: 12px; align-items: center; box-shadow: 0 16px 40px -16px oklch(0 0 0 / .5); }

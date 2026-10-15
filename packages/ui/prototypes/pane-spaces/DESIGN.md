@@ -73,8 +73,9 @@ carries a server-health dot; the foot holds the call chip, Overview and keys. Sp
 keys are unchanged (`h 1–9 0 b n p s`).
 
 **Space header — identity and arrangement.** Title, key and description; the layout
-presets as a segmented control, each with a glyph of its arrangement; **+ Pane**
-(reopen or split in a closed pane); Search ⌘K; API reference; Inspector. Space-wide
+presets as a segmented control, each with a glyph of its arrangement; **Panes** (the
+space's pane catalog, with a "2 closed" count when any are closed); Search ⌘K; API
+reference; Inspector. Space-wide
 facts appear here once: *Reconnecting · last read 40s ago*, *Remote · view only*
 (replacing today's floating banner).
 
@@ -125,12 +126,29 @@ Overview as the space picker. ([narrow](shots/a-inbox-narrow.png))
   in the destination namespace (`uix.layout.v1.<space>`, ADR 0167) until *Reset to
   preset*.
 - **Pane verbs.** Focus ⌥ + arrows · swap ⌥⇧ + arrows · zoom `z` · close `x` (with
-  undo) · split `\` / `-` (opens the picker of closed panes) · dock by dragging a title
-  onto an edge (split) or the centre (tab) · resize by dragging a gap, double-click to
-  even out.
+  undo) · split `\` / `-` (opens the pane catalog set to beside / below) · dock by
+  dragging a title onto an edge (split) or the centre (tab) · resize by dragging a gap,
+  double-click to even out.
+- **The pane catalog** (header **Panes**, `\`, `-`, or ⌘K → *All panes in …*) lists
+  every pane the space offers, with a one-line description and where it is:
+  *Focused*, *Open*, *Tab behind Bots*, *Behind the zoom* or *Closed*. Choosing an open
+  pane brings it forward (its tab, out of a zoom, focused, flashed); choosing a closed
+  one reopens it **where it was** — beside the neighbour it had when it closed — or,
+  by choice, beside, below or as a tab of the focused pane. A filter narrows the list
+  and ⏎ opens the first match. Spaces with multi-record panes add *Pin another to …*
+  (a chat per Bot, a Worker, a profile viewer, a run). *Reset to <preset>* restores the
+  curated arrangement.
+- **Closing never loses anything.** A closed pane leaves the layout, not the space: in
+  the real app it stays mounted but hidden (React `Activity`, as hidden benches are
+  today), so its drafts, selection and scroll survive a close and reopen. The toast's
+  *Undo* restores the exact arrangement; the catalog's *Closed* entries and ⌘K
+  *Reopen …* bring panes back later. A space always keeps at least one pane. (The
+  prototype restores placement and selection; it has no drafts to keep.)
 - **Following and pinned panes.** A detail pane follows its list's selection. ⌘-click a
   row, or *Open a pinned pane beside*, creates a pane that keeps its record — today's
   "additional chat / Worker / viewer / run windows", now splits you can zoom or tile.
+![Pane catalog after closing Timeline](shots/a-catalog.png)
+
 - **Links.** A link goes to the record's home pane in its space (re-tiling there),
   activates its tab or reopens it, focuses it and flashes the row. A back chip in the
   header returns to where you came from; browser history keeps working.
@@ -155,7 +173,7 @@ Overview as the space picker. ([narrow](shots/a-inbox-narrow.png))
 | `o` | Overview |
 | ⌘K | Palette |
 | ⌥ + arrows · ⌥⇧ + arrows | Focus pane · swap with neighbour |
-| `z` · `x` · `\` `-` | Zoom · close · split right / down |
+| `z` · `x` · `\` `-` | Zoom · close · pane catalog to reopen or split right / down |
 | `[` `]` | Previous / next layout preset |
 | `i` · `Esc` | Inspector · close overlay, restore zoom, leave a text field |
 | ⌃B then a key | Leader (works inside text fields): arrows/hjkl, `q` pane numbers, `z`, `%` `"`, `[ ]`, digits, `o` |
@@ -185,6 +203,29 @@ Screenshots: `shots/a-<space>.png` (default) and `shots/p-<space>-<n>.png`.
 | Source | Webhook inspector | **Ledger**: Receivers/Catalog · Deliveries · Delivery. **Watches**: watch inbox beside the delivery. **Setup**: Receivers · Event catalog. |
 | System | Activity Monitor + settings | **Health**: Server/Packages · Resources/Processes · Activity stack over an admin stack. **Admin**: Access · State · Subscriptions. **Monitor**: six live panes (tmux tiled). |
 | Lab | Scratch bench | **Bench**: Call speech · Inference. **Inference**: Inference over Call speech. |
+
+### Pane inventory
+
+Every pane each space offers — exactly the windows `components/canvas/spaces.tsx`
+registers today (78 pane kinds), as the pane catalog lists them.
+
+| Space | Panes |
+| --- | --- |
+| HUD | **Needs attention** — Open work grouped by who it waits on<br>**Work** — The Work hierarchy in its real order<br>**Work item** — The selected item: objective, state, links<br>**Timeline** — The item’s journal, edits and notes<br>**Resources** — Declared links, Chat focus and captured Worker turns |
+| Inbox | **Inbox** — Notifications, newest first<br>**Notification** — One notification and its answers<br>**Compose** — Send an operator notification |
+| Signal | **Signal** — Processing switch, health and defaults<br>**Attention** — What conversations ask of you<br>**Messages** — Captured messages<br>**Runs** — Interpretation runs and traces<br>**Changes** — The durable change log |
+| Fleet | **Bots** — Every Bot with its state and controls<br>**Bot state** — One Bot’s stored state and maintenance<br>**Chat** — A Bot’s main thread, live<br>*Pinned chat panes: one per Bot* |
+| Workers | **Workers** — Every Worker, by what needs attention<br>**Runtimes** — ACP and Claude runtimes<br>**Worker** — One Worker’s conversation, changes and settings<br>*Pinned Worker panes: one per Worker* |
+| Roles | **Roles** — Named Roles and the default<br>**Instructions** — Categories and Fragments in render order<br>**Skills** — The Role’s skills<br>**MCP servers** — Stack and Role MCP servers<br>**Trusted projects** — Trusted projects<br>**Editor** — Edit the selected record<br>**Preview** — Exact instructions and the launch preview<br>**Shims** — Commands that launch native CLIs under a Role |
+| Accounts | **Accounts** — Bot and Worker accounts and sign-in<br>**Usage** — Quota meters and reset times<br>**Models** — Models and efforts each Worker account offers |
+| Browse | **Handoffs** — Handoffs waiting for you<br>**Profiles** — Browser profiles by Bot<br>**Controllers** — Controller observations<br>**Toolchain** — agent-browser and Hypeman<br>**Viewer** — A profile’s live browser<br>*Pinned viewer panes: one per profile* |
+| Content | **Documents** — Search and list Vault documents<br>**Library** — Collections, items and uploads<br>**Artifacts** — Published Artifacts and versions<br>**Storage** — Uploads, blobs and temporary publications<br>**Editor** — Edit a document or document item<br>**Preview** — The rendered selection and its links |
+| Brain | **Search** — Search collected research<br>**Reader** — Read one research document<br>**Jobs** — The ingestion ledger<br>**Ingest** — Submit a URL or text<br>**Sources** — Recurring sources and their runs |
+| Scrape | **Extract** — Extract one URL<br>**Feeds** — Discover and parse feeds<br>**Convert** — Convert HTML to Markdown<br>**Queue** — Scrape-to-file jobs<br>**Presets** — Presets and their health<br>**Checks** — Canaries and corpus replay<br>**Status** — Optional tools and egress |
+| Proc | **Runs** — Process runs<br>**Schedules** — Schedules, by what needs you<br>**Run** — One run’s command and output<br>**Schedule** — One schedule’s definition and executions<br>**Timeline** — Executions across schedules over time<br>*Pinned run panes: one per run* |
+| Source | **Receivers** — Receivers, intake and setup<br>**Event catalog** — GitHub’s event catalog<br>**Deliveries** — The delivery ledger<br>**Delivery** — One delivery and its original payload<br>**Watches** — Watches and their inboxes |
+| System | **Server** — Server status, children and Stack settings<br>**Packages** — Package channels and MCP endpoints<br>**Resources** — Stack CPU and memory by scope<br>**Processes** — The observed process tree<br>**Activity** — Recent change notices<br>**Sampling** — Sampling coverage and retention<br>**Host** — Machine identity, memory and load<br>**Access** — Access clients, grants, sessions and audit<br>**State** — Owner state inventories and cleanup<br>**Subscriptions** — Bot event and occurrence subscriptions<br>**Codex tools** — Codex tool bridge availability<br>**Xcom** — The Xcom archive and its cleanup<br>**Developer** — Upstream harness releases (developer mode) |
+| Lab | **Call speech** — Text for the open call to say<br>**Inference** — Inference requests and their ledger |
 
 Notes the screenshots surfaced:
 
@@ -270,7 +311,10 @@ and a separate Settings space (settings stay where their instances live, ADR 013
 5. Presets: **curated per space, plus one remembered modified layout per space**; or
    user-saved named layouts.
 6. Inspector: **floats unpinned and docks pinned**; or always docks.
-7. Any space whose default preset you would change after flipping through them.
+7. Guest panes: **each space offers only its own panes** (links land in a record's home
+   space); or allow pinning a pane from another space (Inbox inside HUD, say), which
+   makes "where does this link go" depend on the layout.
+8. Any space whose default preset you would change after flipping through them.
 
 ## Prototype notes
 

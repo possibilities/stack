@@ -178,7 +178,47 @@
     },
   };
 
-  /* Every space's full pane inventory, so closed panes can be reopened from the picker. */
+  /* One line per pane kind for the Panes catalog: what it shows, in the space's own words. */
+  window.PANE_DESC = {
+    "hud-attention": "Open work grouped by who it waits on", "hud-work": "The Work hierarchy in its real order", "hud-item": "The selected item: objective, state, links",
+    "hud-timeline": "The item’s journal, edits and notes", "hud-resources": "Declared links, Chat focus and captured Worker turns",
+    bots: "Every Bot with its state and controls", "bot-state": "One Bot’s stored state and maintenance", chat: "A Bot’s main thread, live",
+    accounts: "Bot and Worker accounts and sign-in", usage: "Quota meters and reset times", "model-catalogs": "Models and efforts each Worker account offers",
+    "call-speech": "Text for the open call to say", inference: "Inference requests and their ledger",
+    server: "Server status, children and Stack settings", packages: "Package channels and MCP endpoints", resources: "Stack CPU and memory by scope",
+    host: "Machine identity, memory and load", "codex-tools": "Codex tool bridge availability", processes: "The observed process tree",
+    sampling: "Sampling coverage and retention", activity: "Recent change notices", access: "Access clients, grants, sessions and audit",
+    state: "Owner state inventories and cleanup", subscriptions: "Bot event and occurrence subscriptions", "xcom-state": "The Xcom archive and its cleanup",
+    developer: "Upstream harness releases (developer mode)",
+    "role-catalog": "Named Roles and the default", "role-instructions": "Categories and Fragments in render order", "role-editor": "Edit the selected record",
+    "role-preview": "Exact instructions and the launch preview", "role-skills": "The Role’s skills", "role-mcp-servers": "Stack and Role MCP servers",
+    "role-projects": "Trusted projects", "role-shims": "Commands that launch native CLIs under a Role",
+    "notify-inbox": "Notifications, newest first", "notify-detail": "One notification and its answers", "notify-compose": "Send an operator notification",
+    signal: "Processing switch, health and defaults", attention: "What conversations ask of you", "attention-messages": "Captured messages",
+    "attention-runs": "Interpretation runs and traces", "attention-changes": "The durable change log",
+    "content-documents": "Search and list Vault documents", "content-library": "Collections, items and uploads", "content-editor": "Edit a document or document item",
+    "content-preview": "The rendered selection and its links", "content-artifacts": "Published Artifacts and versions", "content-storage": "Uploads, blobs and temporary publications",
+    workers: "Every Worker, by what needs attention", worker: "One Worker’s conversation, changes and settings", "worker-runtimes": "ACP and Claude runtimes",
+    "scrape-extract": "Extract one URL", "scrape-feeds": "Discover and parse feeds", "scrape-convert": "Convert HTML to Markdown", "scrape-presets": "Presets and their health",
+    "scrape-status": "Optional tools and egress", "scrape-checks": "Canaries and corpus replay", "scrape-queue": "Scrape-to-file jobs",
+    "browse-handoffs": "Handoffs waiting for you", viewer: "A profile’s live browser", "browse-profiles": "Browser profiles by Bot",
+    "browse-controllers": "Controller observations", "browse-toolchain": "agent-browser and Hypeman",
+    "brain-search": "Search collected research", "brain-reader": "Read one research document", "brain-ingest": "Submit a URL or text",
+    "brain-jobs": "The ingestion ledger", "brain-sources": "Recurring sources and their runs",
+    "proc-schedules": "Schedules, by what needs you", "proc-schedule": "One schedule’s definition and executions", "proc-runs": "Process runs",
+    "proc-run": "One run’s command and output", "proc-timeline": "Executions across schedules over time",
+    "source-receivers": "Receivers, intake and setup", "source-catalog": "GitHub’s event catalog", "source-deliveries": "The delivery ledger",
+    "source-delivery": "One delivery and its original payload", "source-watches": "Watches and their inboxes",
+  };
+  /* Panes a space can hold more than once: the following pane plus any number pinned to a record. */
+  window.MULTI = {
+    fleet: { kind: "chat", label: "chat", records: () => D.bots.map((b) => [b.id, b.id]) },
+    workers: { kind: "worker", label: "Worker", records: () => D.workers.map((w) => [w.id, w.label]) },
+    browse: { kind: "viewer", label: "viewer", records: () => D.browse.profiles.map((p) => [p.name, p.name]) },
+    proc: { kind: "proc-run", label: "run", records: () => D.proc.runs.map((r) => [r.id, `${r.label} · ${r.id}`]) },
+  };
+
+  /* Every space's full pane inventory, so closed panes can be reopened from the Panes catalog. */
   window.SPACE_PANES = {};
   for (const [id, sp] of Object.entries(SPACES)) {
     const seen = new Set();

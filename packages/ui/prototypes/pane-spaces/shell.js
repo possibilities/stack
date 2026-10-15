@@ -172,7 +172,7 @@
     const presets = shell() === "strip" ? minimapHTML() : `<div class="seg" role="group" aria-label="Layout">${s.presets.map((p, i) => `<button aria-pressed="${i === sp.preset}" data-preset="${i}" title="${p.name} layout${i === sp.preset ? "" : " · [ ]"}">${glyph(p.tree)}${p.name}</button>`).join("")}</div>`;
     return `${S.back ? `<button class="back" data-act="back">${I("back")}${SPACES[S.back.space].title}</button>` : ""}
       <div class="sp-title">${narrow() ? `<button data-act="overview" class="sp-switch" aria-label="Spaces">` : ""}<h1>${s.title}${narrow() ? I("down") : `<span class="k">${s.key}</span>`}</h1>${narrow() ? "</button>" : ""}<p>${s.description}</p></div>
-      <div class="head-tools">${S.space === "scrape" ? `<span class="sp-state" title="The scrape WebSocket closed; panes keep their last reads">${H.dot("bad")}Reconnecting · last read 40s ago</span>` : ""}${S.remote ? `<span class="sp-state remote" title="Editing controls require ui:control; sign-in, voice and browser handoff stay local">${I("lock")}Remote · view only</span>` : ""}${presets}<button class="tool" data-act="picker" title="Add or reopen a pane">${I("plus")}<span class="lbl">Pane</span></button>
+      <div class="head-tools">${S.space === "scrape" ? `<span class="sp-state" title="The scrape WebSocket closed; panes keep their last reads">${H.dot("bad")}Reconnecting · last read 40s ago</span>` : ""}${S.remote ? `<span class="sp-state remote" title="Editing controls require ui:control; sign-in, voice and browser handoff stay local">${I("lock")}Remote · view only</span>` : ""}${presets}<button class="tool" data-act="picker" title="Every pane in ${s.title}: jump to one or reopen a closed one">${I("plus")}<span class="lbl">Panes</span>${closedCount() ? `<span class="tool-count">${closedCount()} closed</span>` : ""}</button>
       <button class="tool" data-act="palette">${I("search")}<span class="lbl">Search</span><kbd>⌘K</kbd></button>
       <button class="tool" data-act="reference" aria-pressed="${S.drawer.open && S.drawer.mode === "reference"}">${I("book")}<span class="lbl">API</span></button>
       <button class="tool" data-act="inspector" aria-pressed="${S.drawer.open && S.drawer.mode === "inspect"}" title="Inspector (i)">${I("panel")}</button></div>`;
@@ -229,7 +229,8 @@
       { g: "Pane", label: "Split right…", icon: "split", key: "\\", run: () => openPicker("right") },
       { g: "Pane", label: "Split down…", icon: "splitd", key: "-", run: () => openPicker("bottom") },
       { g: "Pane", label: "Close focused pane", icon: "x", key: "x", run: () => closePane(sp.focus) },
-      ...SPACE_PANES[S.space].filter((p) => !inTree(sp.tree, p)).map((p) => ({ g: "Pane", label: `Reopen ${titleOf(p)}`, icon: def(p).icon, run: () => addPane(p, "right") })),
+      { g: "Pane", label: `All panes in ${s.title}…`, icon: "plus", run: () => openPicker("auto") },
+      ...basePanes().filter((p) => !paneState(p).open).map((p) => ({ g: "Pane", label: `Reopen ${titleOf(p)}`, icon: def(p).icon, run: () => addPane(p, "auto") })),
       { g: "Records", label: "bot-1", icon: "bot", run: () => navigate("fleet|bots|fleet.bot=bot-1") },
       { g: "Records", label: "stack · 7f3a (Worker)", icon: "hammer", run: () => navigate("workers|worker|workers.sel=7f3a") },
       { g: "Records", label: "Approve the pane migration plan?", icon: "bell", run: () => navigate("inbox|notify-detail|inbox.sel=n41") },
@@ -250,13 +251,29 @@
       const k = (a, b) => `<div class="k"><span>${a}</span><span>${b}</span></div>`;
       el.innerHTML = `<div class="scrim" data-act="close-overlay"></div><div class="help" role="dialog" aria-label="Keyboard shortcuts"><h2>Keys</h2><p>Single keys work whenever focus is not in a text field (Esc leaves one). ⌃B is a tmux-style leader that works everywhere.</p><div class="cols">
         <h3>Places</h3>${k("Spaces", '<span class="kbd">h</span> <span class="kbd">1</span>–<span class="kbd">0</span> <span class="kbd">b</span> <span class="kbd">n</span> <span class="kbd">p</span> <span class="kbd">s</span>')}${k("Overview", '<span class="kbd">o</span>')}${k("Command palette", '<span class="kbd">⌘K</span>')}${k("Back to where a link came from", '<span class="kbd">⌘[</span>')}
-        <h3>Panes</h3>${k("Focus pane", '<span class="kbd">⌥</span> + arrows')}${k("Swap with neighbour", '<span class="kbd">⌥⇧</span> + arrows')}${k("Zoom / restore", '<span class="kbd">z</span>')}${k("Close (undo in toast)", '<span class="kbd">x</span>')}${k("Split right / down", '<span class="kbd">\\</span> <span class="kbd">-</span>')}${k("Next / previous layout", '<span class="kbd">]</span> <span class="kbd">[</span>')}
+        <h3>Panes</h3>${k("Focus pane", '<span class="kbd">⌥</span> + arrows')}${k("Swap with neighbour", '<span class="kbd">⌥⇧</span> + arrows')}${k("Zoom / restore", '<span class="kbd">z</span>')}${k("Close (undo in toast)", '<span class="kbd">x</span>')}${k("All panes · reopen beside / below", '<span class="kbd">\\</span> <span class="kbd">-</span>')}${k("Next / previous layout", '<span class="kbd">]</span> <span class="kbd">[</span>')}
         <h3>Tools</h3>${k("Inspector", '<span class="kbd">i</span>')}${k("Close overlay, restore zoom", '<span class="kbd">Esc</span>')}${k("This sheet", '<span class="kbd">?</span>')}${k("Leader, then a key", '<span class="kbd">⌃B</span>')}
         <h3>Pointer</h3>${k("Move a pane", "drag its title onto an edge or centre")}${k("Resize", "drag a gap · double-click to even out")}</div></div>`;
     } else if (o === "picker") {
-      const missing = SPACE_PANES[S.space].filter((p) => !inTree(cur().tree, p));
-      const dyn = { fleet: ["chat", "Pinned chat pane"], workers: ["worker", "Pinned Worker pane"], browse: ["viewer", "Pinned viewer"], proc: ["proc-run", "Pinned run pane"] }[S.space];
-      el.innerHTML = `<div class="scrim" data-act="close-overlay" style="background:transparent;backdrop-filter:none"></div><div class="menu" style="top:${S.menuPos?.y || 60}px;left:${S.menuPos?.x || 400}px"><div class="lbl">${S.pickSide === "bottom" ? "Split down with" : "Open beside the focused pane"}</div>${missing.length ? missing.map((p) => `<button data-pick="${p}">${I(def(p).icon)}${titleOf(p)}${inst(p) ? ` <span class="muted">${inst(p)}</span>` : ""}</button>`).join("") : '<div class="lbl" style="text-transform:none;letter-spacing:0;font-weight:400">Every pane of this space is open.</div>'}${dyn ? `<hr><button data-pick="${dyn[0]}:new">${I("pin")}${dyn[1]}…</button>` : ""}</div>`;
+      /* The Panes catalog: every pane this space offers, open or closed, plus pinned copies of multi-record panes. */
+      const s = SPACES[S.space], sp = cur(), qv = (S.catQ || "").toLowerCase(), side = S.pickSide || "auto", multi = MULTI[S.space];
+      const match = (id) => !qv || `${titleOf(id)} ${inst(id) || ""} ${PANE_DESC[kind(id)] || ""}`.toLowerCase().includes(qv);
+      const base = basePanes(), openN = base.filter((p) => paneState(p).open).length;
+      const row = (id) => { const st = paneState(id);
+        return `<button class="cat-row ${st.open ? "" : "closed"}" data-cat="${id}"><span class="cat-ic">${I(def(id).icon)}</span><span class="grow"><b>${titleOf(id)}${inst(id) ? ` <span class="muted mono">${H.esc(inst(id))}</span>` : ""}</b><small>${PANE_DESC[kind(id)] || ""}</small></span><span class="cat-st">${st.open ? st.label : "Closed — open"}</span></button>`; };
+      const pinned = multi ? leaves(sp.tree).flatMap((l) => l.p).filter((p) => kind(p) === multi.kind && inst(p)) : [];
+      const choices = multi ? multi.records().filter(([rid]) => !pinned.includes(`${multi.kind}:${rid}`)) : [];
+      const x = Math.max(8, Math.min(S.menuPos?.x ?? innerWidth - 400, innerWidth - 400)), y = S.menuPos?.y ?? 52;
+      el.innerHTML = `<div class="scrim" data-act="close-overlay" style="background:transparent;backdrop-filter:none"></div>
+        <div class="menu catalog" role="dialog" aria-label="Panes in ${s.title}" style="top:${y}px;left:${x}px">
+          <div class="cat-head"><b>Panes in ${s.title}</b><span class="muted">${openN} of ${base.length} open</span></div>
+          <label class="input cat-q">${I("search")}<input id="catq" placeholder="Filter panes…" value="${H.esc(S.catQ || "")}" autocomplete="off" aria-label="Filter panes"></label>
+          <div class="cat-place"><span class="muted">Reopen</span><span class="seg">${[["auto", "Where it was"], ["right", "Beside"], ["bottom", "Below"], ["center", "As tab"]].map(([v, l]) => `<button aria-pressed="${side === v}" data-place="${v}" title="${v === "auto" ? "Back beside the neighbour it had when it closed" : `${l} ${titleOf(sp.focus)}, the focused pane`}">${l}</button>`).join("")}</span></div>
+          <div class="cat-list">${base.filter(match).map(row).join("") || '<div class="lbl">No pane matches.</div>'}
+            ${multi ? `<div class="lbl">Pinned ${multi.label} panes</div>${pinned.filter(match).map(row).join("")}${choices.length ? `<div class="cat-pins"><span class="muted">Pin another to</span>${choices.map(([rid, label]) => `<button class="chip link" data-pick="${multi.kind}:${rid}">${I("pin")}${H.esc(label)}</button>`).join("")}</div>` : ""}` : ""}</div>
+          <div class="cat-foot"><button class="btn sm" data-act="reset-layout">${I("undo")}Reset to ${s.presets[sp.preset].name}</button><span class="muted">⏎ first match · Esc closes</span></div>
+        </div>`;
+      const inp = $("#catq"); if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
     } else if (o === "menu") {
       const id = S.menu; const d = def(id);
       el.innerHTML = `<div class="scrim" data-act="close-overlay" style="background:transparent;backdrop-filter:none"></div><div class="menu" style="top:${S.menuPos.y}px;left:${S.menuPos.x - 220}px"><div class="lbl" style="text-transform:none;letter-spacing:0">${H.dot("ok")} Live · read 2s ago · ws://127.0.0.1:8743</div><hr>
@@ -310,15 +327,51 @@
     const sp = cur(); if (!id) return; const before = clone(sp.tree);
     if (shell() === "strip") { transition("pane", () => { sp.closed.push(id); renderAll(); }); toast(`Closed ${titleOf(id)}`, () => { sp.closed = sp.closed.filter((x) => x !== id); renderAll(); }); return; }
     if (leaves(sp.tree).length === 1 && findLeaf(sp.tree, id)?.leaf.p.length === 1) { toast("A space keeps at least one pane"); return; }
+    (sp.lastPlace ||= {})[id] = placeOf(sp.tree, id);
     transition("pane", () => { sp.tree = removePane(sp.tree, id); if (sp.zoom === id) sp.zoom = null; if (sp.focus === id) sp.focus = firstPane(sp.tree); renderAll(); });
-    toast(`Closed ${titleOf(id)} — reopen it from + Pane`, () => transition("pane", () => { sp.tree = before; sp.focus = id; renderAll(); }));
+    toast(`Closed ${titleOf(id)} · reopen it from Panes`, () => transition("pane", () => { sp.tree = before; sp.focus = id; renderAll(); }));
   }
   function addPane(id, side = "right") {
-    const sp = cur(); if (id.endsWith(":new")) { const k = id.split(":")[0]; const pick = { chat: "chat:bot-2", worker: "worker:19c2", viewer: "viewer:bot-1-default", "proc-run": "proc-run:r-9030" }[k]; id = inTree(sp.tree, pick) ? `${pick}` : pick; }
-    if (inTree(sp.tree, id)) { sp.focus = id; renderAll(); return; }
-    transition("pane", () => { sp.tree = insertPane(sp.tree, sp.focus, side, id); sp.focus = id; sp.zoom = null; S.overlay = null; renderAll(); });
+    const sp = cur(); S.overlay = null; renderOverlay();
+    if (id.endsWith(":new")) { const m = MULTI[S.space]; const open = leaves(sp.tree).flatMap((l) => l.p); const next = m?.records().map(([rid]) => `${m.kind}:${rid}`).find((p) => !open.includes(p)); if (!next) return toast("Every record already has a pinned pane"); id = next; }
+    if (shell() === "strip") {
+      if (sp.closed.includes(id)) transition("pane", () => { sp.closed = sp.closed.filter((x) => x !== id); sp.focus = id; renderAll(); });
+      else toast("Strip shows each space’s registered windows; pinning more panes needs Tiles or Mux");
+      return;
+    }
+    if (inTree(sp.tree, id)) return reveal(id);
+    /* "Where it was": beside the neighbour it had when it closed, else beside the focused pane. */
+    const back = side === "auto" && sp.lastPlace?.[id];
+    const [target, place] = back && inTree(sp.tree, back.near) ? [back.near, back.side] : [sp.focus, side === "auto" ? "right" : side];
+    transition("pane", () => { sp.tree = insertPane(sp.tree, target, place, id); sp.focus = id; sp.zoom = null; renderAll(); });
   }
-  function openPicker(side, anchor) { S.pickSide = side; const r = anchor?.getBoundingClientRect() || $(`[data-pane="${cur().focus}"]`)?.getBoundingClientRect(); S.menuPos = r ? { x: Math.min(r.left, innerWidth - 240), y: r.bottom + 6 } : { x: 300, y: 80 }; S.overlay = "picker"; renderOverlay(); }
+  /* Where a pane sits, as a neighbour and a side, so reopening can put it back. */
+  function placeOf(tree, id) {
+    const hit = findLeaf(tree, id); if (!hit) return null;
+    if (hit.leaf.p.length > 1) return { near: hit.leaf.p.find((p) => p !== id), side: "center" };
+    if (!hit.parent) return null;
+    const after = hit.i > 0, sib = hit.parent.c[after ? hit.i - 1 : hit.i + 1].n;
+    return { near: firstPane(sib), side: hit.parent.t === "row" ? (after ? "right" : "left") : (after ? "bottom" : "top") };
+  }
+  /* Bring an open pane forward: its tab, its zoom, its focus — then flash it so the eye finds it. */
+  function reveal(id) {
+    const sp = cur(); S.overlay = null; renderOverlay();
+    if (shell() === "strip") { setFocus(id); return; }
+    const hit = findLeaf(sp.tree, id); if (!hit) return;
+    transition("pane", () => { hit.leaf.a = hit.leaf.p.indexOf(id); sp.focus = id; if (sp.zoom && sp.zoom !== id) sp.zoom = null; renderAll(); });
+    setTimeout(() => $(`[data-pane="${id}"]`)?.classList.add("flash"), 320);
+  }
+  const basePanes = () => SPACE_PANES[S.space].filter((p) => !inst(p));
+  const closedCount = () => basePanes().filter((p) => !paneState(p).open).length;
+  function paneState(id) {
+    const sp = cur();
+    if (shell() === "strip") return sp.closed.includes(id) ? { open: false } : { open: true, label: "Open" };
+    const hit = findLeaf(sp.tree, id); if (!hit) return { open: false };
+    if (sp.zoom && sp.zoom !== id) return { open: true, label: "Behind the zoom" };
+    if (hit.leaf.p.length > 1 && hit.leaf.p[hit.leaf.a] !== id) return { open: true, label: `Tab behind ${titleOf(hit.leaf.p[hit.leaf.a])}` };
+    return { open: true, label: sp.focus === id ? "Focused" : "Open" };
+  }
+  function openPicker(side, anchor) { S.pickSide = side; S.catQ = ""; const r = anchor?.getBoundingClientRect() || $(`[data-pane="${cur().focus}"]`)?.getBoundingClientRect(); S.menuPos = r ? { x: Math.min(r.left, innerWidth - 240), y: r.bottom + 6 } : { x: 300, y: 80 }; S.overlay = "picker"; renderOverlay(); }
   function openDrawer(mode) { transition("pane", () => { S.drawer = { ...S.drawer, open: true, mode }; renderAll(); }); }
   function toggleOverlay(name) { S.overlay = S.overlay === name ? null : name; S.pal = { q: "", i: 0 }; S.ov = SPACE_ORDER.indexOf(S.space); if (name === "overview") transition("none", renderAll); else renderOverlay(); }
   function toast(text, undo) { S.toast = { text, undo }; renderOverlay(); clearTimeout(toast.t); toast.t = setTimeout(() => { S.toast = null; renderOverlay(); }, 4200); }
@@ -380,7 +433,10 @@
   document.addEventListener("click", (e) => {
     const t = e.target;
     const p = t.closest("[data-p]"); if (p) { const a = p.dataset.p; if (a === "prev" || a === "next") { cycleVariant(a === "next" ? 1 : -1); } if (a === "theme") { S.theme = S.theme === "dark" ? "light" : "dark"; renderAll(); } if (a === "call") { S.call = !S.call; renderAll(); } if (a === "notes") { S.notes = !S.notes; renderProto(); } return; }
-    const pk = t.closest("[data-pick]"); if (pk) { S.overlay = null; addPane(pk.dataset.pick, S.pickSide || "right"); return; }
+    const pk = t.closest("[data-pick]"); if (pk) { S.overlay = null; addPane(pk.dataset.pick, S.pickSide === "auto" || !S.pickSide ? "right" : S.pickSide); return; }
+    const cat = t.closest("[data-cat]"); if (cat) { const id = cat.dataset.cat; paneState(id).open ? reveal(id) : addPane(id, S.pickSide || "auto"); return; }
+    const place = t.closest("[data-place]"); if (place) { S.pickSide = place.dataset.place; renderOverlay(); return; }
+    if (t.closest('[data-act="reset-layout"]')) { S.overlay = null; renderOverlay(); setPreset(cur().preset); toast(`Reset to ${SPACES[S.space].presets[cur().preset].name}`); return; }
     const pal = t.closest("[data-pal]"); if (pal) { const c = $("#overlay")._items[+pal.dataset.pal]; S.overlay = null; renderOverlay(); c.run(); return; }
     const m = t.closest("[data-m]"); if (m) { const id = S.menu, a = m.dataset.m; S.overlay = null; renderOverlay(); if (a === "zoom") toggleZoom(id); if (a === "close") closePane(id); if (a === "right" || a === "bottom") { setFocus(id); openPicker(a); } if (a === "inspect") openDrawer("inspect"); if (a === "pin") toast(inst(id) ? "This pane now follows the selection" : "Pinned: this pane keeps its record"); return; }
     const sp = t.closest("[data-space]"); if (sp) { go(sp.dataset.space); return; }
@@ -397,7 +453,7 @@
     const act = t.closest("[data-act]"); if (!act) return; const a = act.dataset.act;
     if (a === "zoom") toggleZoom(act.dataset.paneId);
     if (a === "menu") { S.menu = act.dataset.paneId; const r = act.getBoundingClientRect(); S.menuPos = { x: r.right, y: r.bottom + 4 }; S.overlay = "menu"; renderOverlay(); }
-    if (a === "picker") openPicker("right", act);
+    if (a === "picker") openPicker("auto", act);
     if (a === "palette") toggleOverlay("palette");
     if (a === "overview") toggleOverlay("overview");
     if (a === "help") toggleOverlay("help");
@@ -465,7 +521,8 @@
   });
   /* Weave: hovering a link that leaves this space lights the destination in the rail before you go. */
   document.addEventListener("mouseover", (e) => { const g = e.target.closest?.("[data-goto]"); $$(".rail-item.dest").forEach((el) => el.classList.remove("dest")); if (!g) return; const sp = g.dataset.goto.split("|")[0]; if (sp !== S.space) $(`.rail-item[data-space="${sp}"]`)?.classList.add("dest"); });
-  document.addEventListener("input", (e) => { if (e.target.id === "palq") { S.pal.q = e.target.value; S.pal.i = 0; renderOverlay(); } });
+  document.addEventListener("input", (e) => { if (e.target.id === "palq") { S.pal.q = e.target.value; S.pal.i = 0; renderOverlay(); } if (e.target.id === "catq") { S.catQ = e.target.value; renderOverlay(); } });
+  document.addEventListener("keydown", (e) => { if (e.target.id === "catq" && e.key === "Enter") { e.preventDefault(); $(".catalog .cat-row")?.click(); } });
   addEventListener("resize", () => { clearTimeout(renderAll.t); renderAll.t = setTimeout(renderAll, 80); });
 
   window.PROTO = { S, renderAll, go, navigate, setPreset, toggleZoom, insertPane, removePane };
