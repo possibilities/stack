@@ -12,7 +12,7 @@ import type { BrainSubmission } from "@/lib/stack/store";
 import { cn } from "@/lib/utils";
 import { NodeLink, StatusDot, Time } from "./primitives";
 import { useStack, useStore, useWorkbench } from "./provider";
-import { brainUnavailable } from "./brain-shared";
+import { brainUnavailable, useOpenBrainDocument } from "./brain-shared";
 import { CallErrorNote, fieldLabel } from "./scrape-shared";
 import { Section, Window } from "./window";
 
@@ -116,7 +116,7 @@ export function IngestWindow() {
 }
 
 function SubmissionRow({ item, onDismiss }: { item: BrainSubmission; onDismiss(): void }) {
-  const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const admission = item.admission;
   const share = item.share;
   const state = share?.state ?? (admission && admission.status !== "already_indexed" ? admission.state : null);
@@ -138,7 +138,7 @@ function SubmissionRow({ item, onDismiss }: { item: BrainSubmission; onDismiss()
             {admission.status === "already_indexed" ? <span>{admissionText(admission)}</span>
               : <NodeLink node={{ kind: "ingestion-job", id: String(admission.job_id) }} label={`job ${admission.job_id}`}>{admissionText(admission)}</NodeLink>}
             {state && admission.status !== "already_indexed" ? <span>· {jobStateView[state].label.toLowerCase()}{share?.failure_class ? ` (${share.failure_class})` : ""}</span> : null}
-            {documentId !== null ? <button type="button" className="text-foreground hover:underline" onClick={() => store.openBrainDocument(documentId)}>Read</button> : null}
+            {documentId !== null ? <button type="button" className="text-foreground hover:underline" onClick={() => openDocument(documentId)}>Read</button> : null}
           </>
         ) : null}
       </p>

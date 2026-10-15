@@ -1,8 +1,19 @@
 "use client";
 
+import { useCallback } from "react";
 import type { BrainSensitivity } from "@/lib/stack/types";
 import { snippetParts } from "@/lib/stack/brain";
 import { cn } from "@/lib/utils";
+import { useStore, useWorkbench } from "./provider";
+
+export function useOpenBrainDocument() {
+  const store = useStore();
+  const { revealPane } = useWorkbench();
+  return useCallback((...args: Parameters<typeof store.openBrainDocument>) => {
+    store.openBrainDocument(...args);
+    revealPane("brain", "brain-reader");
+  }, [store, revealPane]);
+}
 
 export const badge = "rounded-md bg-muted px-1.5 py-px text-[0.64rem] text-muted-foreground";
 

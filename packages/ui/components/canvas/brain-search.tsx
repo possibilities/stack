@@ -13,7 +13,7 @@ import type { BrainChunk, BrainContentKind, BrainContext, BrainDocument, BrainFi
 import { cn } from "@/lib/utils";
 import { CopyButton, Empty, NodeCard, NodeTitle, Row, Time } from "./primitives";
 import { useStack, useStore } from "./provider";
-import { badge, brainUnavailable, SensitivityBadge, Snippet, TagList } from "./brain-shared";
+import { badge, brainUnavailable, SensitivityBadge, Snippet, TagList, useOpenBrainDocument } from "./brain-shared";
 import { CallErrorNote, fieldLabel } from "./scrape-shared";
 import { Section, Window } from "./window";
 
@@ -208,7 +208,7 @@ function NoMatch({ mode, filters }: { mode: Mode; filters: BrainFilters }) {
 }
 
 function HitRow({ hit, onTag }: { hit: BrainHit; onTag(tag: string): void }) {
-  const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const node = { kind: "research-document" as const, id: String(hit.document_id) };
   const title = hit.title || sourceHost(hit.source_uri);
   return (
@@ -216,7 +216,7 @@ function HitRow({ hit, onTag }: { hit: BrainHit; onTag(tag: string): void }) {
       <NodeCard node={node} label={title} variant="row">
         <div className="flex min-w-0 items-baseline gap-2">
           <button type="button" className="min-w-0 truncate text-left text-[0.8rem] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-            title="Open in Reader" onClick={() => store.openBrainDocument(hit.document_id, hit)}>{title}</button>
+            title="Open in Reader" onClick={() => openDocument(hit.document_id, hit)}>{title}</button>
           <SensitivityBadge value={hit.sensitivity} />
           <NodeTitle node={node} label={title} className="ml-auto shrink-0 font-mono text-[0.64rem] text-muted-foreground">#{hit.document_id}</NodeTitle>
         </div>
@@ -233,7 +233,7 @@ function HitRow({ hit, onTag }: { hit: BrainHit; onTag(tag: string): void }) {
 }
 
 function ContextView({ context }: { context: BrainContext }) {
-  const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const text = useMemo(() => contextText(context.hits), [context]);
   if (!context.hits.length) return <Empty icon={BookOpenTextIcon} title="No context for this query" />;
   return (
@@ -247,7 +247,7 @@ function ContextView({ context }: { context: BrainContext }) {
           <li key={hit.chunk_id} className="flex flex-col gap-1">
             <div className="flex min-w-0 items-baseline gap-2">
               <button type="button" className="min-w-0 truncate text-left text-[0.78rem] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-                onClick={() => store.openBrainDocument(hit.document_id, hit)}>{hit.title || sourceHost(hit.source_uri)}</button>
+                onClick={() => openDocument(hit.document_id, hit)}>{hit.title || sourceHost(hit.source_uri)}</button>
               <SensitivityBadge value={hit.sensitivity} />
               <CopyButton value={`${hit.citation}\n\n${hit.content.trim()}`} label="this hit" className="ml-auto opacity-100" />
             </div>
@@ -262,7 +262,7 @@ function ContextView({ context }: { context: BrainContext }) {
 
 /** What the index holds, shown before any query: the inventory to consult when discovery is poor. */
 function IndexOverview({ onTag, onType }: { onTag(tag: string): void; onType(type: string): void }) {
-  const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const { brainStats } = useStack();
   const stats = brainStats.data;
   if (!stats) return <Empty icon={LibraryBigIcon} title={brainStats.error ? "Index unavailable" : "Reading the index…"} />;
@@ -289,7 +289,7 @@ function IndexOverview({ onTag, onType }: { onTag(tag: string): void; onType(typ
         <ul className="flex flex-col gap-0.5">
           {stats.recent.map((doc) => (
             <li key={doc.document_id}>
-              <button type="button" onClick={() => store.openBrainDocument(doc.document_id)}
+              <button type="button" onClick={() => openDocument(doc.document_id)}
                 className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-[0.76rem] hover:bg-muted/70 focus-visible:outline-2 focus-visible:outline-ring">
                 <span className="min-w-0 truncate">{doc.title || sourceHost(doc.source_uri)}</span>
                 <span className="ml-auto shrink-0 text-[0.64rem] text-muted-foreground"><Time at={Date.parse(doc.updated_at)} /></span>
@@ -387,7 +387,7 @@ export function ReaderWindow() {
 function DocumentView({ document, chunk, hit, full, loading, error, onFull }: {
   document: BrainDocument; chunk: BrainChunk | null; hit: { start_char: number; end_char: number } | null; full: boolean; loading: boolean; error: CallError | null; onFull(): void;
 }) {
-  const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const href = externalHref(document.source_uri);
   const truncated = document.truncation.omitted_chars > 0;
   const range = hit ? chunkRange(document.content, truncated, { ...hit, content: chunk?.content }) : null;
@@ -442,7 +442,7 @@ function DocumentView({ document, chunk, hit, full, loading, error, onFull }: {
       {links.length ? (
         <Section title="Links" aside={<span className="text-[0.65rem] text-muted-foreground">{document.outbound_links.length} out · {document.inbound_links.length} in</span>}>
           <ul className="flex flex-col gap-0.5">
-            {links.map(({ link, direction }) => <LinkRow key={`${direction}:${link.id}`} link={link} direction={direction} onOpen={(id) => store.openBrainDocument(id)} self={document.document_id} />)}
+            {links.map(({ link, direction }) => <LinkRow key={`${direction}:${link.id}`} link={link} direction={direction} onOpen={(id) => openDocument(id)} self={document.document_id} />)}
           </ul>
         </Section>
       ) : null}

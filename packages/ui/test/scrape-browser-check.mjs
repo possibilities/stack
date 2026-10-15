@@ -4,6 +4,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/scrape-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable. SCRAPE_NEXT=start uses a prior `next build`.
 import assert from "node:assert/strict";
+import { revealPane, verifyPaneDraft } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -40,6 +41,9 @@ const claimWait = new Promise((resolve) => { releaseClaim = resolve; });
 const call = (name, args = {}) => socketCall(socketPath("scrape", env), "tools/call", { name, arguments: args });
 const activate = async (locator) => { await locator.focus(); await locator.press("Enter"); };
 const captures = async (locator, name) => {
+  const closeInspector = page.getByRole("button", { name: "Close inspector", exact: true });
+  if (await closeInspector.isVisible()) await closeInspector.click();
+  await revealPane(page, "Scrape", await locator.evaluate((element) => element.closest("[data-window]").dataset.window));
   await page.emulateMedia({ colorScheme: "light" });
   await locator.screenshot({ path: join(evidence, `${name}-light.png`), animations: "disabled" });
   await page.emulateMedia({ colorScheme: "dark" });
@@ -105,6 +109,7 @@ try {
   const convert = page.locator('[data-window="scrape-convert"]');
   await page.getByRole("button", { name: "Spaces · Scrape" }).waitFor();
   await presets.getByRole("button", { name: "Inspect x-tweet" }).waitFor();
+  await revealPane(page, "Scrape", "scrape-status");
   await status.getByText(join(dir, "scrape")).waitFor();
   await queue.getByText("Queue empty", { exact: true }).waitFor();
   await page.screenshot({ path: join(evidence, "scrape-empty.png"), animations: "disabled" });
@@ -122,6 +127,7 @@ try {
   await extract.getByText(/Presets claim x\.com, but none matches this URL/).waitFor();
   await url.fill("https://x.com/someone/status/123");
   await extract.getByRole("link", { name: "x-tweet" }).waitFor();
+  await verifyPaneDraft(page, { title: "Scrape", id: "scrape-extract", field: url });
 
   // Without consent a private destination is refused and classified; with it, the page renders as
   // untrusted Markdown (raw HTML stays text), and consent clears after the run.
@@ -245,6 +251,7 @@ try {
   assert.equal(await readFile(retainedDestination, "utf8"), "independent external destination");
 
   // Replay proves recorded shapes offline.
+  await revealPane(page, "Scrape", "scrape-checks");
   await checks.getByRole("button", { name: "Replay", exact: true }).click();
   await checks.getByText(/\d+ passed · 0 failed/).waitFor();
   // Canaries need explicit consent before they can run.
@@ -290,24 +297,40 @@ try {
   await corpusFlow.screenshot({ path: join(evidence, "scrape-corpus-unknown-light.png"), animations: "disabled" });
 
   // Parse recorded feed content offline; Convert pasted HTML.
+  await revealPane(page, "Scrape", "scrape-feeds");
   await feeds.getByRole("radio", { name: "Parse recorded" }).or(feeds.getByRole("button", { name: "Parse recorded" })).first().click();
   await feeds.getByLabel("URL the content came from").fill("https://example.com/feed.xml");
   await feeds.getByLabel("Recorded RSS, Atom or HTML").fill(rss);
   await feeds.getByRole("button", { name: "Parse", exact: true }).click();
   await feeds.getByText("First entry", { exact: true }).waitFor();
   await feeds.getByText(/rss · 2 items/).waitFor();
+  await revealPane(page, "Scrape", "scrape-convert");
   await convert.getByLabel("HTML", { exact: true }).fill("<h1>Converted</h1><p>Hello <b>there</b></p>");
   await convert.getByRole("button", { name: "Convert", exact: true }).click();
   await convert.getByText(/# Converted/).waitFor();
   await page.screenshot({ path: join(evidence, "scrape-feeds-convert.png"), animations: "disabled" });
 
   // A preset opens in the inspector from its name and in Extract through Use.
+  await revealPane(page, "Scrape", "scrape-extract");
+  await extract.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await revealPane(page, "Scrape", "scrape-presets");
   await presets.getByRole("button", { name: "Inspect deepwiki-wiki-page" }).click();
   await page.getByText(/Scrape preset · official · canary configured/).waitFor();
+  await page.getByRole("button", { name: "Close inspector", exact: true }).click();
   const row = presets.locator('[data-node="preset:x-timeline"]');
   await row.getByRole("button", { name: "Use", exact: true }).click();
+  await extract.waitFor({ state: "visible", timeout: 5_000 });
   await page.waitForFunction(() => [...document.querySelectorAll('[data-window="scrape-extract"] select')].some((select) => select.value === "x-timeline"));
   assert.equal(await extract.getByLabel("Preset", { exact: true }).inputValue(), "x-timeline");
+  await extract.getByRole("button", { name: "Page", exact: true }).click();
+  await extract.getByLabel("Preset", { exact: true }).selectOption("");
+  await extract.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await revealPane(page, "Scrape", "scrape-extract");
+  assert.equal(await extract.getByLabel("Preset", { exact: true }).inputValue(), "", "reopening never replays an already consumed preset choice over later edits");
+  assert.equal(await extract.getByRole("button", { name: "Page", exact: true }).getAttribute("aria-pressed"), "true");
+  await revealPane(page, "Scrape", "scrape-presets");
+  await row.getByRole("button", { name: "Use", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-window="scrape-extract"] select')].some((select) => select.value === "x-timeline"));
 
   assert.deepEqual(errors, []);
   assert.equal(existsSync(join(dir, "scrape", "queue")), true);

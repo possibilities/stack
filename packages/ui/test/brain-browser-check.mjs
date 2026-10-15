@@ -4,6 +4,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/brain-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable. BRAIN_NEXT=start uses a prior `next build`.
 import assert from "node:assert/strict";
+import { revealPane, verifyPaneDraft } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -130,20 +131,28 @@ try {
   await search.getByText("Nothing indexed yet").waitFor();
   await jobs.getByText("Ingestion worker running").waitFor();
   await jobs.getByText("Nothing needs a decision").waitFor();
+  await revealPane(page, "Brain", "brain-sources");
   await sources.getByText("No sources", { exact: true }).waitFor();
   await page.screenshot({ path: join(evidence, "brain-empty.png"), animations: "disabled" });
 
   // Text admission: the row says admitted, then follows the job to completion and offers the document.
+  await revealPane(page, "Brain", "brain-ingest");
   await ingest.getByRole("radio", { name: "Text" }).or(ingest.getByRole("button", { name: "Text", exact: true })).first().click();
   await ingest.getByLabel("Text", { exact: true }).fill("# Quasar field notes\n\nQuasar evidence from the rendered check.\n\n<script>alert(1)</script>");
   await ingest.getByLabel("Title (optional)").fill("Quasar notes");
   await ingest.getByLabel("Tags").fill("astro, check");
+  const jobsBeforeLayout = db.prepare("SELECT COUNT(*) AS n FROM jobs").get().n;
+  await verifyPaneDraft(page, { title: "Brain", id: "brain-ingest", field: ingest.getByRole("textbox", { name: "Text", exact: true }) });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM jobs").get().n, jobsBeforeLayout, "layout changes never admit an ingestion draft");
   await ingest.getByRole("button", { name: "Submit", exact: true }).click();
   await ingest.getByRole("link", { name: "Admitted as job 1" }).waitFor();
   await ingest.getByText("· completed").waitFor();
   // The index notice reaches the Search overview without a reload.
   await search.getByText("Recent", { exact: true }).waitFor();
+  await reader.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await reader.waitFor({ state: "hidden" });
   await ingest.getByRole("button", { name: "Read", exact: true }).click();
+  await reader.waitFor({ state: "visible", timeout: 5_000 });
   await reader.getByRole("heading", { name: "Quasar notes" }).waitFor();
   await reader.getByText("<script>alert(1)</script>", { exact: false }).waitFor();
   await reader.getByText("#astro").waitFor();
@@ -163,6 +172,7 @@ try {
   await ingest.getByLabel("URL", { exact: true }).fill(`${base}/private.md`);
   await ingest.getByRole("button", { name: "Submit", exact: true }).click();
   await ingest.getByRole("link", { name: "Admitted as job 2" }).waitFor();
+  await revealPane(page, "Brain", "brain-jobs");
   const row = jobs.locator('li[data-node="ingestion-job:2"]');
   await row.waitFor();
   await row.getByRole("button", { name: "Show job 2 details" }).click();
@@ -254,6 +264,7 @@ try {
   await writeFile(manifest, JSON.stringify({ schema_version: 1, sources: [{ id: "fixture-feed", version: 1, kind: "blog_feed", display_name: "Fixture feed", enabled: true,
     payload: { feed_url: `${base}/feed.xml` }, schedule: { cadence_seconds: 3600 }, limits: { max_items_per_run: 10, max_pages_per_run: 1 }, collections: [], sensitivity: "public", credential_refs: [] }] }));
   await socketCall(socketPath("brain", env), "tools/call", { name: "sources_apply", arguments: { manifest } });
+  await revealPane(page, "Brain", "brain-sources");
   const source = sources.locator('li[data-node="research-source:fixture-feed"]');
   await source.getByText("Fixture feed").waitFor();
   await source.getByRole("button", { name: "Preview", exact: true }).click();
@@ -287,6 +298,7 @@ try {
   await source.getByRole("button", { name: "Inspect Fixture feed" }).click();
   await page.getByText("Research source · blog_feed").waitFor();
   await page.screenshot({ path: join(evidence, "brain-sources.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Close inspector", exact: true }).click();
 
   // Bot watches (M6b): retained receipts read per operation; each expands to its correlation UUID, linked
   // record and the exact admission binding's observation in the real ledger. Nothing retries or rearms.
@@ -318,6 +330,7 @@ try {
 
   const revealCalls = () => sentCalls.filter((params) => params.package === "brain" && params.name === "jobs_reveal").length;
   const revealsBefore = revealCalls();
+  await revealPane(page, "Brain", "brain-jobs");
   await activate(jobs.getByRole("button", { name: "Bot watches · submissions" }));
   const jobsWatch = jobs.locator('section[aria-label="Bot watches"]');
   await jobsWatch.getByText("Showing 5 of 5 receipts").waitFor();
@@ -355,6 +368,8 @@ try {
   await page.screenshot({ path: join(evidence, "brain-bot-watches.png"), animations: "disabled" });
 
   // The sources disclosure pages the fixed Run set through the real completion read.
+  await jobs.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await revealPane(page, "Brain", "brain-sources");
   await activate(sources.getByRole("button", { name: "Bot watches · source syncs" }));
   const sourcesWatch = sources.locator('section[aria-label="Bot watches"]');
   const sync = sourcesWatch.locator("li").filter({ has: page.locator(`[data-receipt="${watchReceiptId(6)}"]`) });
@@ -391,6 +406,8 @@ try {
   assert.equal(audits(), auditCount, "no watch surface wrote a reveal audit");
 
   // Deleting from the Reader is confirmed, and the index empties again. Clear a Run filter if one is still active.
+  await runButtons().last().click();
+  await jobs.waitFor({ state: "visible", timeout: 5_000 });
   const everyRun = jobs.getByRole("button", { name: "Show jobs from every Run" });
   if (await everyRun.count()) await activate(everyRun);
   await done.waitFor();

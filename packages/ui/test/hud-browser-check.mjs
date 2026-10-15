@@ -134,6 +134,7 @@ try {
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   await page.goto(`${origin}/`);
   const tree = page.locator('[data-window="hud-work"]');
+  const paneHost = page.locator('[data-canvas="workbench"][data-space="hud"]');
   const item = page.locator('[data-window="hud-item"]');
   const timeline = page.locator('[data-window="hud-timeline"]');
   const resources = page.locator('[data-window="hud-resources"]');
@@ -209,7 +210,14 @@ try {
   await page.getByRole("combobox", { name: "Find a pane in HUD" }).fill("hud-item");
   await page.keyboard.press("Enter");
   await retained("catalog reopen");
+  await item.getByRole("button", { name: "Inspect Implement windows", exact: true }).click();
+  await page.getByRole("complementary", { name: "Inspector", exact: true }).waitFor();
+  await paneHost.locator('[data-pane-frame="hud-item"]').focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).waitFor();
   await page.setViewportSize({ width: 420, height: 900 });
+  await paneHost.waitFor({ state: "visible", timeout: 5_000 });
+  assert.equal(await page.getByRole("complementary", { name: "Inspector", exact: true }).isVisible(), false, "a contracted Inspector stays closed when the workspace becomes compact");
   await retained("compact projection");
   await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth, undefined, { timeout: 2000 });
   await page.screenshot({ path: join(evidence, "hud-pane-draft-narrow.png"), animations: "disabled" });
@@ -221,7 +229,6 @@ try {
   await page.getByRole("button", { name: "Reset pane layout", exact: true }).click();
   await timeline.waitFor({ state: "visible" });
   await retained("reset after rearrangement");
-  const paneHost = page.locator('[data-canvas="workbench"][data-space="hud"]');
   const frames = paneHost.locator('[data-pane-frame]:visible');
   assert.deepEqual(await frames.evaluateAll((elements) => elements.map((element) => element.dataset.paneFrame)), ["hud-attention", "hud-work", "hud-item", "hud-timeline", "hud-resources"], "reading order follows the composed columns");
   await objective.focus();

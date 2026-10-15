@@ -119,7 +119,7 @@ export function InferenceWindow() {
   // here (see discoversOnSelect). The discover control repeats or starts it explicitly.
   const selectAccount = (id: string) => {
     setAccountId(id);
-    if (discoversOnSelect({ accountId: id, observed: Boolean(inferModels.data?.some((item) => item.accountId === id)), cleared: catalogCleared, viewOnly: remote?.scope === "view" })) discover(id);
+    if (inferModels.data !== null && discoversOnSelect({ accountId: id, observed: inferModels.data.some((item) => item.accountId === id), cleared: catalogCleared, viewOnly: remote?.scope === "view" })) discover(id);
     else setDiscoverError(null);
   };
 

@@ -27,7 +27,7 @@ import { SpaceBar, SpaceOverview, SpaceRail } from "./space-chrome";
 import { panePresets } from "@/lib/stack/pane-presets";
 import { CallLauncher, VoiceProvider } from "./voice";
 
-const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox", "roles", "content"]);
+const paneSpaces = new Set<SpaceId>(["hud", "fleet", "workers", "browse", "proc", "accounts", "lab", "inbox", "roles", "content", "signal", "brain", "scrape"]);
 
 export function Workbench({ snapshot, initialSpace, initialFocus, initialLocation }: { snapshot: Snapshot; initialSpace: SpaceId; initialFocus: NodeRef | null; initialLocation?: BenchLocation }) {
   const start = initialLocation ?? (initialFocus ? navigateTo(emptyLocation(initialSpace), initialFocus) : emptyLocation(initialSpace));
@@ -236,13 +236,18 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
       Boolean(target.closest('[data-canvas="workbench"],[data-chrome]') || target === document.body || target === document.documentElement);
     // Click, not pointerdown: the capture listener and a card's own onClick → select() → write() → setContracted(false)
     // batch within one discrete event, so inspecting another card swaps content without the dock flashing closed.
-    const contract = (event: Event) => { if (isOutside(event.target)) setContracted(true); };
+    const contract = (event: Event) => {
+      if (!isOutside(event.target)) return;
+      setContracted(true);
+      surfaceRef.current = "bench";
+      setSurface("bench");
+    };
     const key = (event: KeyboardEvent) => {
       if (!isOutside(event.target)) return;
       if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn"].includes(event.key)) return;
       // Activation keys defer to the click they produce, which keeps the batching above.
       if ((event.key === "Enter" || event.key === " ") && (event.target as Element).closest('button,a[href],[role="button"],[role="menuitem"]')) return;
-      setContracted(true);
+      contract(event);
     };
     window.addEventListener("click", contract, { capture: true });
     window.addEventListener("wheel", contract, { capture: true, passive: true });

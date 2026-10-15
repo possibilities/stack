@@ -50,7 +50,7 @@ function journalOwner(name) {
 }
 
 // Signal: processing on, a source read still draining.
-const signal = { owner: journalOwner("signal"), draining: true, status: { contentGeneration: 1, enabled: true, activatedAt: Date.now() - 60_000, baselined: true,
+const signal = { owner: journalOwner("signal"), controls: [], draining: true, status: { contentGeneration: 1, enabled: true, activatedAt: Date.now() - 60_000, baselined: true,
   checkpointGeneration: 0, checkpointResets: [],
   settings: { model: "gpt-fixture", reasoningEffort: "low", accountId: null, revision: 1 }, lastScan: Date.now(), lastInference: null, sourceErrors: [], jobs: [], messages: 42, runs: 7, changeSeq: 1 } };
 // Infer: two terminal requests and one still running.
@@ -117,9 +117,26 @@ const inferAccounts = [uuid(), uuid()];
 const inferModelsFixture = [{ id: "gpt-fixture", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"] }];
 const inferCatalog = { observed: new Map(inferAccounts.map((accountId) => [accountId, { accountId, models: inferModelsFixture, observedAt: at(), discovering: false, error: null }])), discoveries: [], clears: [] };
 
+const signalMessages = [false, true].map((current, index) => ({ contentClearedAt: null, cursor: index + 1, seq: index + 1,
+  id: uuid(), logicalId: "captured-message", revision: `revision-${index}`, current, source: "workers", conversation: "worker:fixture", key: "native-message",
+  role: "assistant", authorKind: "agent", botId: null, text: current ? "Current captured message" : "Superseded captured message", textChars: current ? 41 : 44,
+  complete: true, occurredAt: null, observedAt: Date.now() }));
+const emptySignalPage = () => ({ entries: [], nextCursor: 0, hasMore: false });
+
 const publishers = {};
 const handlers = {
   attention_status: () => signal.status,
+  attention_list: emptySignalPage,
+  attention_run_list: emptySignalPage,
+  attention_changes: emptySignalPage,
+  attention_feedback_list: emptySignalPage,
+  attention_message_list: () => ({ entries: signal.status.messages ? signalMessages : [], nextCursor: 2, hasMore: false }),
+  attention_message_read: ({ id, offset = 0, limit = 65536 }) => {
+    const message = signalMessages.find((entry) => entry.id === id);
+    if (!message) throw new Error("Message not found");
+    const body = JSON.stringify({ ...message, text: `${message.text} · immutable body` }), nextOffset = Math.min(offset + limit, body.length);
+    return { text: body.slice(offset, nextOffset), nextOffset, totalChars: body.length, revision: message.revision };
+  },
   attention_checkpoint_plan: (selection) => {
     assert.deepEqual(selection, { sources: "all", mode: "rebaseline" });
     return signal.owner.plan("checkpoint_rebaseline", selection, { revision: `checkpoint-${signal.status.checkpointGeneration}`,
@@ -135,7 +152,7 @@ const handlers = {
     });
     publishers.signal?.("signal_changed"); return receipt;
   },
-  attention_control: ({ enabled }) => { signal.status = { ...signal.status, enabled, changeSeq: signal.status.changeSeq + 1 }; publishers.signal?.("signal_changed"); return signal.status; },
+  attention_control: ({ enabled }) => { signal.controls.push(enabled); signal.status = { ...signal.status, enabled, changeSeq: signal.status.changeSeq + 1 }; publishers.signal?.("signal_changed"); return signal.status; },
   attention_history_plan: () => {
     if (signal.status.enabled) throw new Error("Pause Signal processing before planning content cleanup");
     return signal.owner.plan("history_clear", { scope: "all-captured-content" }, { revision: `g${signal.status.contentGeneration}`, resources: ["42 captured messages", "cross-conversation context copies", "source-read blobs"],
@@ -150,7 +167,7 @@ const handlers = {
   signal_state_receipt_get: (input) => signal.owner.receipt(input),
   attention_infer_requests: () => ({ requestIds: [correlated], nextOffset: null }),
   infer_request_list: () => ({ requests: infer.requests }),
-  infer_model_list: () => ({ accounts: [...inferCatalog.observed.values()] }),
+  infer_model_list: () => inferCatalog.read ? inferCatalog.read() : { accounts: [...inferCatalog.observed.values()] },
   infer_discover: ({ accountId }) => {
     inferCatalog.discoveries.push(accountId);
     inferCatalog.observed.set(accountId, { accountId, models: inferModelsFixture, observedAt: at(), discovering: false, error: null });
@@ -274,7 +291,7 @@ const loseResponse = () => {
 };
 
 const sockets = [];
-let websocket, next, browser, notify, hud, proc;
+let websocket, next, browser, notify, hud, proc, releaseModelRead;
 let log = "";
 let failed = false;
 try {
@@ -303,7 +320,7 @@ try {
   };
   await socketFor("serve", serve.names);
   await socketFor("api", ["docs_snapshot"]);
-  await socketFor("signal", ["attention_status", "attention_control", "attention_history_plan", "attention_history_clear", "signal_state_receipt_get", "attention_infer_requests", "attention_checkpoint_plan", "attention_checkpoint_reset"]);
+  await socketFor("signal", ["attention_list", "attention_run_list", "attention_changes", "attention_feedback_list", "attention_message_list", "attention_message_read", "attention_status", "attention_control", "attention_history_plan", "attention_history_clear", "signal_state_receipt_get", "attention_infer_requests", "attention_checkpoint_plan", "attention_checkpoint_reset"]);
   await socketFor("infer", ["infer_request_list", "infer_model_list", "infer_discover", "infer_catalog_clear", "infer_history_plan", "infer_history_clear", "infer_state_receipt_get"]);
   await socketFor("auth", ["account_list", "worker_account_list", "account_login_current", "worker_account_login_current"]);
   await socketFor("content", ["blob_stage_list", "blob_stage_abort", "content_blob_list", "content_storage_plan", "content_storage_collect", "content_state_receipt_get",
@@ -533,6 +550,31 @@ try {
   // Signal: processing must be paused; a draining read blocks the plan; a new plan then clears the whole scope.
   await go("signal");
   const sw = page.locator('[data-window="signal"]');
+  await revealPane(page, "Signal", "attention-messages");
+  const messages = page.locator('[data-window="attention-messages"]');
+  await messages.getByText("Current captured message", { exact: true }).waitFor();
+  assert.equal(await messages.getByText("Superseded captured message", { exact: true }).count(), 0);
+  await messages.getByRole("switch", { name: "Superseded revisions", exact: true }).click();
+  await messages.getByText("Superseded captured message", { exact: true }).waitFor();
+  const currentMessage = messages.locator(`[data-node="attention-message:${signalMessages[1].id}"]`);
+  const retainedMessage = await currentMessage.elementHandle();
+  await messages.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await messages.waitFor({ state: "hidden" });
+  await revealPane(page, "Signal", "attention-messages");
+  const signalPresets = page.getByRole("group", { name: "Signal layout preset", exact: true });
+  for (const name of await signalPresets.getByRole("button").allTextContents()) {
+    await signalPresets.getByRole("button", { name, exact: true }).click();
+    await revealPane(page, "Signal", "attention-messages");
+    assert.equal(await messages.getByRole("switch", { name: "Superseded revisions", exact: true }).getAttribute("aria-checked"), "true");
+    assert.equal(await currentMessage.evaluate((element, held) => element === held, retainedMessage), true, "captured messages retain identity through layout changes");
+  }
+  assert.deepEqual(signal.controls, [], "pane operations never change Signal processing");
+  await currentMessage.getByRole("button", { name: "Inspect Assistant message", exact: true }).click();
+  const messageInspector = page.getByRole("complementary", { name: "Inspector", exact: true });
+  await messageInspector.getByText("Current captured message · immutable body", { exact: true }).waitFor();
+  await messageInspector.getByRole("button", { name: "Close inspector", exact: true }).click();
+  await retainedMessage.dispose();
+  await revealPane(page, "Signal", "signal");
   const captured = sw.getByText("Captured content", { exact: true });
   await captured.waitFor();
   await sw.getByText("Pause interpretation first.", { exact: false }).waitFor();
@@ -628,6 +670,7 @@ try {
   // Content storage: a stage changed after it was chosen is refused; a referenced blob cannot be selected; a partial result stays uncertain.
   await go("content");
   const cw = page.locator('[data-window="content-storage"]');
+  await revealPane(page, "Content", "content-storage");
   await cw.getByRole("list", { name: "Upload stages" }).getByText("finalized").waitFor();
   await cw.getByRole("button", { name: `Retire stage ${content.stages[0].id}` }).click();
   content.stages[0] = { ...content.stages[0], revision: "stage-r2" };
@@ -733,6 +776,7 @@ try {
 
   // Proc: only a removed schedule offers redaction; the owner's plan refuses a Brain-protected one.
   await go("proc");
+  await revealPane(page, "Proc", "proc-schedules");
   const schedules = page.locator('[data-window="proc-schedules"]');
   const detail = page.locator('[data-window="proc-schedule"]');
   await schedules.getByRole("button", { name: /^Removed/ }).click();
@@ -767,6 +811,7 @@ try {
   // An unknown receipt left by an earlier session returns after a reload, inside a disclosure that opens itself.
   await seedRecovery(page, origin, `proc:schedule_definition:${procIds.unknown}`, unknownInput);
   await go("proc");
+  await revealPane(page, "Proc", "proc-schedules");
   await schedules.getByRole("button", { name: /^Removed/ }).click();
   await scheduleRow(procIds.unknown).click();
   await detail.getByText("Unknown. The owner cannot say what happened.", { exact: false }).waitFor();
@@ -780,9 +825,16 @@ try {
   assert.equal(await maintenance(detail).count(), 0);
 
   // Lab Infer catalog: a direct, memory-only eviction with an inline two-step confirm; nothing rediscovers by itself.
+  let modelsReadStarted;
+  const modelsReading = new Promise((resolve) => { modelsReadStarted = resolve; });
+  const delayedModels = new Promise((resolve) => { releaseModelRead = resolve; });
+  inferCatalog.read = () => { modelsReadStarted(); return delayedModels; };
   await go("lab");
   const inference = page.locator('[data-window="inference"]');
+  await modelsReading;
   await inference.getByLabel("Account", { exact: true }).selectOption({ index: 1 });
+  inferCatalog.read = null;
+  releaseModelRead({ accounts: [...inferCatalog.observed.values()] });
   await inference.getByText("1 model", { exact: false }).waitFor();
   assert.deepEqual(inferCatalog.discoveries, [], "a cached catalog is not discovered again");
   await openMaintenance(inference);
@@ -824,6 +876,18 @@ try {
   await page.emulateMedia({ colorScheme: "light" });
   // Narrow: resize the window by its grip; the maintenance copy and radios reflow without horizontal overflow.
   const narrow = async (scope, name) => {
+    const frame = scope.locator('xpath=ancestor::*[@data-pane-frame]');
+    if (await frame.count()) {
+      await frame.focus();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await scope.waitFor({ state: "visible" });
+      await page.waitForFunction((element) => { const width = element.getBoundingClientRect().width; return width > 0 && width < 400; }, await scope.elementHandle(), { timeout: 2000 });
+      assert.ok((await scope.boundingBox()).width < 400, `${name} resized narrow`);
+      assert.ok(await scope.locator("[data-scroll]").evaluate((body) => body.scrollWidth <= body.clientWidth), `${name} has no horizontal overflow`);
+      await shot(`${name}-narrow`, scope);
+      await page.setViewportSize({ width: 2400, height: 1500 });
+      return;
+    }
     const grip = scope.locator('span[title^="Resize"]').first();
     const edge = await grip.boundingBox();
     await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
@@ -837,6 +901,7 @@ try {
   await narrow(item, "hud-maintenance");
   await page.evaluate(() => { for (const name of Object.keys(localStorage)) if (!name.includes(".state-flow.")) localStorage.removeItem(name); });
   await go("proc");
+  await revealPane(page, "Proc", "proc-schedules");
   await schedules.getByRole("button", { name: /^Removed/ }).click();
   await scheduleRow(procIds.unknown).click();
   await narrow(detail, "proc-maintenance");
@@ -851,6 +916,7 @@ try {
   if (log) console.error(log.slice(-3000));
   throw error;
 } finally {
+  releaseModelRead?.({ accounts: [...inferCatalog.observed.values()] });
   await browser?.close();
   if (next && next.exitCode === null) { next.kill("SIGTERM"); await new Promise((resolve) => next.once("exit", resolve)); }
   await websocket?.close();

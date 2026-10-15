@@ -13,7 +13,7 @@ import { canaryView, jobLabel, parseFrontmatter, scrapeCallError, scrapeCapabili
 import type { ScrapePreset, ScrapeQueueJob, ScrapeQueueResult } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { CopyButton, Empty, Flash, NodeCard, NodeTitle, Row, StatusDot, Time, type Tone } from "./primitives";
-import { useNow, useStack, useStore } from "./provider";
+import { useNow, useStack, useStore, useWorkbench } from "./provider";
 import { CallErrorNote, EgressConsent, Elapsed, fieldLabel } from "./scrape-shared";
 import { ScrapeCorpusMaintenance, ScrapeQueueMaintenance } from "./scrape-maintenance";
 import { footerButton, Section, Window } from "./window";
@@ -30,6 +30,7 @@ function unavailable(endpoints: Record<string, string>, status: Record<string, s
  */
 export function PresetsWindow() {
   const store = useStore();
+  const { revealPane } = useWorkbench();
   const { status, endpoints, scrapePresets, scrapeCanaries } = useStack();
   const presets = scrapePresets.data ?? [];
   const canaries = new Set(scrapeCanaries.data ?? []);
@@ -63,7 +64,7 @@ export function PresetsWindow() {
                     <span className="ml-auto flex shrink-0 items-center gap-1 text-[0.64rem] text-muted-foreground" title={canaries.has(preset.name) ? "A live canary is configured; that is not a passing check" : "No live canary configured"}>
                       <StatusDot tone={canaries.has(preset.name) ? "info" : "muted"} />{canaries.has(preset.name) ? "canary" : "no canary"}
                     </span>
-                    <Button type="button" size="xs" variant="ghost" onClick={() => store.composeScrape(preset.name, preset.mode === "content" ? "page" : "links")} title="Choose this preset in Extract">Use</Button>
+                    <Button type="button" size="xs" variant="ghost" onClick={() => { store.composeScrape(preset.name, preset.mode === "content" ? "page" : "links"); revealPane("scrape", "scrape-extract"); }} title="Choose this preset in Extract">Use</Button>
                   </div>
                   {preset.summary ? <p className="line-clamp-2 text-[0.7rem] text-pretty text-muted-foreground">{preset.summary}</p> : null}
                 </NodeCard>

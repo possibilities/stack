@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CircleCheckIcon, CircleXIcon, GlobeIcon, LinkIcon, PlayIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,12 +95,14 @@ export function ExtractWindow() {
   const [invalid, setInvalid] = useState<string | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [shown, setShown] = useState<string | null>(null);
+  const composed = useRef(0);
   const presets = useMemo(() => scrapePresets.data ?? [], [scrapePresets.data]);
   const set = (patch: Partial<Inputs>) => { setInputs((current) => ({ ...current, ...patch })); setInvalid(null); };
 
   // Another window (Presets) asked to try a preset here.
   useEffect(() => {
-    if (!scrapeCompose) return;
+    if (!scrapeCompose || composed.current === scrapeCompose.seq) return;
+    composed.current = scrapeCompose.seq;
     setMode(scrapeCompose.mode);
     setInputs((current) => ({ ...current, preset: scrapeCompose.preset }));
   }, [scrapeCompose]);

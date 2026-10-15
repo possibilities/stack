@@ -19,7 +19,7 @@ import { CopyButton, Empty, Flash, NodeCard, NodeLink, NodeTitle, Row, StatusDot
 import { ReceiptSummary, useObservedRead } from "./watch-receipts";
 import { ObservationStatus, usePagedRead } from "./owner-reads";
 import { useNow, useStack, useStore, useWorkbench } from "./provider";
-import { badge, brainUnavailable, SensitivityBadge } from "./brain-shared";
+import { badge, brainUnavailable, SensitivityBadge, useOpenBrainDocument } from "./brain-shared";
 import { BrainJobMaintenance, BrainRunMaintenance, BrainSourceMaintenance } from "./brain-maintenance";
 import { CallErrorNote, fieldLabel, Raw } from "./scrape-shared";
 import { footerButton, Section, Window } from "./window";
@@ -151,6 +151,7 @@ function RunAt({ at }: { at: string }) {
 /** Sanitized diagnostics, the job's document once indexed, and operator dispositions. */
 function JobDetail({ job, blocked }: { job: BrainJob; blocked: string | null }) {
   const store = useStore();
+  const openDocument = useOpenBrainDocument();
   const { brainJobRecords } = useStack();
   const record = brainJobRecords[job.id];
   const [share, setShare] = useState<BrainShareState | null>(null);
@@ -184,7 +185,7 @@ function JobDetail({ job, blocked }: { job: BrainJob; blocked: string | null }) 
   return (
     <div className="flex flex-col gap-2 border-t pt-2 pl-5">
       {share?.document_id ? (
-        <button type="button" className="self-start text-[0.72rem] font-medium hover:underline" onClick={() => store.openBrainDocument(share.document_id!)}>Read document {share.document_id}</button>
+        <button type="button" className="self-start text-[0.72rem] font-medium hover:underline" onClick={() => openDocument(share.document_id!)}>Read document {share.document_id}</button>
       ) : null}
       {clearedAt ? <p className="text-xs text-muted-foreground">Payload cleared <Time at={Date.parse(clearedAt)} /> · Retry and Reveal are unavailable.</p> : null}
       {!data ? (record?.error ? <CallErrorNote error={{ text: record.error, uncertain: false }} /> : <p className="text-[0.7rem] text-muted-foreground">Reading diagnostics…</p>) : (
@@ -583,6 +584,7 @@ type SourcesRuns = NonNullable<BrainSourcesObservation["result"]>["runs"];
 function SourcesObservation({ receipt }: { receipt: ServeCompletionReceipt }) {
   const state = useStack();
   const store = useStore();
+  const { revealPane } = useWorkbench();
   const access = localOperation(state, "brain", "sources_sync_completion");
   const usable = Boolean(receipt.botId && receipt.threadId && receipt.recordId);
   const observeAt = state.brainSources.at;
@@ -625,7 +627,7 @@ function SourcesObservation({ receipt }: { receipt: ServeCompletionReceipt }) {
           {runs.map((run) => (
             <li key={run.run_id} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pl-1 text-[0.68rem] text-muted-foreground">
               <button type="button" className="font-mono hover:text-foreground hover:underline" title="Filter Jobs to this Run"
-                onClick={() => store.setBrainJobView("all", run.run_id)}>run {run.run_id}</button>
+                onClick={() => { store.setBrainJobView("all", run.run_id); revealPane("brain", "brain-jobs"); }}>run {run.run_id}</button>
               {run.job_id !== null ? <NodeLink node={{ kind: "ingestion-job", id: String(run.job_id) }} label={`Job ${run.job_id}`} className="font-mono">job {run.job_id}</NodeLink> : null}
               <span className={run.outcome === "failed" ? "text-destructive" : run.outcome === "partial" ? "text-warning" : undefined}>{run.outcome ?? "no outcome"}</span>
               <span className="tabular-nums">{run.discovered} found · {run.admitted} admitted · {run.suppressed} suppressed</span>
