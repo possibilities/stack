@@ -133,7 +133,7 @@ test("the root UI renders the canvas without losing local links, processes, or B
       return dock;
     };
     const canvas = await readCanvas("/fleet");
-    assert.match(canvas, /Stack open bench/);
+    assert.match(canvas, /aria-label="Fleet panes"/);
     assert.match(canvas, /Needs inspection|needs inspection/);
     assert.match(canvas, /Recorded process ownership could not be verified/);
     assert.match(canvas, /bot-1/);

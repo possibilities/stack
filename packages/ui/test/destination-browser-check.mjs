@@ -129,12 +129,14 @@ try {
   const title = compose.getByLabel("Title", { exact: true });
   const pin = page.getByRole("button", { name: "Pin inspector", exact: true });
   const inboxWindow = page.locator('[data-window="notify-inbox"]');
-  const point = () => inboxWindow.evaluate((element) => ({ x: element.getBoundingClientRect().x, y: element.getBoundingClientRect().y }));
+  const point = () => inboxWindow.evaluate((element) => ({ x: element.getBoundingClientRect().x, y: element.getBoundingClientRect().y, height: element.getBoundingClientRect().height }));
   const open = async (current) => {
     await authorizeBrowser(page, origin, current.env);
     await page.goto(`${origin}/inbox?inspect=notification:${current.notification.id}`);
     await inboxWindow.waitFor();
     await inboxWindow.locator("[data-notification]").first().waitFor();
+    await inboxWindow.getByRole("button", { name: "New notification", exact: true }).click();
+    if (!await pin.isVisible()) await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   };
   // The Inbox's payload-clearing flow keeps its request under `notify:history`; showing it shows whether a saved request was recovered.
   const showClearFlow = async () => {
@@ -173,17 +175,14 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-window="notify-compose"] input')?.disabled);
   const home = await point();
   await title.fill("Draft for A");
+  if (!await pin.isVisible()) await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await pin.click();
   assert.equal(await pin.getAttribute("aria-pressed"), "true");
-  const header = await inboxWindow.locator("header").boundingBox();
-  await page.mouse.move(header.x + 40, header.y + 20);
-  await page.keyboard.down("Alt");
-  await page.mouse.down(); await page.mouse.move(header.x + 130, header.y + 70, { steps: 4 }); await page.mouse.up();
-  await page.keyboard.up("Alt");
+  await page.getByRole("group", { name: "Inbox layout preset" }).getByRole("button", { name: "Reading pane below", exact: true }).click();
   const moved = await point();
-  assert.ok(Math.abs(moved.x - home.x) > 20, `the window moved ${JSON.stringify(home)} -> ${JSON.stringify(moved)}`);
+  assert.ok(Math.abs(moved.height - home.height) > 20, `the pane resized ${JSON.stringify(home)} -> ${JSON.stringify(moved)}`);
   const prefixA = destinationKey(origin, "", { serverId: idA });
-  await page.waitForFunction(([name, window]) => JSON.parse(localStorage.getItem(name) ?? "{}").layout?.manual?.[window] === true, [`${prefixA}uix.bench.v2.inbox`, "notify-inbox"]);
+  await page.waitForFunction((name) => JSON.parse(localStorage.getItem(name) ?? "{}").preset === "below", `${prefixA}uix.panes.v1.inbox`);
   await page.waitForFunction((name) => localStorage.getItem(name) !== null, `${prefixA}uix.inspector.v1`);
   await page.waitForFunction((prefix) => Object.keys(localStorage).some((name) => name.startsWith(`${prefix}uix.notify-compose.v1.`)), prefixA);
   await seedRecovery(page, origin, "notify:history", requestA, { serverId: idA });
@@ -195,7 +194,7 @@ try {
   let all = await storage();
   assert.ok(Object.keys(all).every((name) => name.startsWith("stack.destination.") || name in legacy), `only namespaced keys (and the seeded legacy ones) exist: ${Object.keys(all)}`);
   const aKeys = Object.keys(owned(all, idA));
-  for (const name of ["uix.bench.v2.inbox", "uix.inspector.v1", "state-flow.notify:history"]) assert.ok(aKeys.includes(`${prefixA}${name}`), `${name} is stored under A`);
+  for (const name of ["uix.panes.v1.inbox", "uix.inspector.v1", "state-flow.notify:history"]) assert.ok(aKeys.includes(`${prefixA}${name}`), `${name} is stored under A`);
   assert.ok(aKeys.some((name) => name.startsWith(`${prefixA}uix.notify-compose.v1.`)), "the Compose draft is stored under A");
   for (const [name, value] of Object.entries(legacy)) assert.equal(all[name], value, `${name} is untouched`);
   await openHud();
@@ -232,8 +231,9 @@ try {
   await settle(1200);
   assert.equal(await title.inputValue(), "", "A's draft is not B's");
   assert.equal(await pin.getAttribute("aria-pressed"), "false", "A's inspector pin is not B's");
-  assert.ok(Math.abs((await point()).x - home.x) < 2 && Math.abs((await point()).y - home.y) < 2, "A's bench arrangement is not B's");
+  assert.ok(Math.abs((await point()).height - home.height) < 2, "A's pane arrangement is not B's");
   // Pin first: an unpinned inspector contracts on any other interaction with the bench.
+  if (!await pin.isVisible()) await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await pin.click();
   const prefixB = destinationKey(origin, "", { serverId: idB });
   await page.waitForFunction((name) => JSON.parse(localStorage.getItem(name) ?? "{}").pinned === true, `${prefixB}uix.inspector.v1`);
@@ -276,12 +276,9 @@ try {
   const before = await storage();
   assert.deepEqual(before, kept, "loading under an unnamed destination wrote nothing");
   assert.equal(await title.isDisabled(), true, "Compose cannot be used, so nothing is sent without a place to record it");
+  if (!await pin.isVisible()) await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await pin.click();
-  const unnamedHeader = await inboxWindow.locator("header").boundingBox();
-  await page.mouse.move(unnamedHeader.x + 40, unnamedHeader.y + 20);
-  await page.keyboard.down("Alt");
-  await page.mouse.down(); await page.mouse.move(unnamedHeader.x + 90, unnamedHeader.y + 50, { steps: 3 }); await page.mouse.up();
-  await page.keyboard.up("Alt");
+  await page.getByRole("group", { name: "Inbox layout preset" }).getByRole("button", { name: "Three-up", exact: true }).click();
   await settle(1500);
   assert.deepEqual(await storage(), before, "an unnamed destination writes nothing");
   await showClearFlow();
@@ -344,7 +341,7 @@ try {
   await showClearFlow();
   await readSaved();
   const restored = await point();
-  assert.ok(Math.abs(restored.x - moved.x) < 2 && Math.abs(restored.y - moved.y) < 2, `A's arrangement is restored ${JSON.stringify(moved)} -> ${JSON.stringify(restored)}`);
+  assert.ok(Math.abs(restored.height - moved.height) < 2, `A's arrangement is restored ${JSON.stringify(moved)} -> ${JSON.stringify(restored)}`);
   assert.deepEqual(problems, [], "no hydration or page errors on A again");
   await openHud();
   await hiddenPane("hud-work");
@@ -383,8 +380,14 @@ try {
   await page.locator('[data-window="chat"]').waitFor();
   const fleet = page.getByRole("main", { name: "Fleet panes", exact: true });
   if (await fleet.count()) {
-    await page.locator('[data-window="chat"]').getByRole("button", { name: "New chat window", exact: true }).click();
+    await page.locator('[data-pane-frame="chat"]').focus();
+    await fleet.getByRole("button", { name: /^Panes/ }).click();
+    await page.getByRole("dialog", { name: "Panes in Fleet" }).getByRole("button", { name: "Below", exact: true }).click();
+    await page.getByRole("option", { name: "Pin another chat", exact: true }).click();
     const chat = page.locator('[data-window="chat-2"]');
+    await chat.waitFor();
+    const firstChat = await page.locator('[data-window="chat"]').boundingBox(), extraChat = await chat.boundingBox();
+    assert.ok(extraChat.y >= firstChat.y + firstChat.height, "catalog placement applies to a newly allocated dynamic instance");
     await chat.getByRole("button", { name: "Switch bot", exact: true }).click();
     await page.getByRole("menuitemradio", { name: /^fixture-bot/ }).click();
     await chat.getByText("fixture-bot is stopped", { exact: true }).waitFor();

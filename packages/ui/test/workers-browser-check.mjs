@@ -362,7 +362,7 @@ try {
   // The captured Role is compared with that same Role: this Worker selected Researcher, which has been edited since.
   const roleChip = worker.getByTitle(/^Started with Researcher r/);
   await roleChip.getByText(`Researcher r${researcher.revision} · now r${edited.revision}`, { exact: true }).waitFor();
-  assert.equal(await roleChip.getAttribute("title"), `Started with Researcher r${researcher.revision}; Researcher is now r${edited.revision}. This Worker keeps its r${researcher.revision} snapshot, including through recovery. New Workers without a selected Role use “${workerDefault.name}”. Editing a Role never changes a running Worker.`);
+  assert.equal(await roleChip.getAttribute("title"), `Started with Researcher r${researcher.revision}; Researcher is now r${edited.revision}. This Worker keeps its r${researcher.revision} snapshot, including through recovery. New Workers use the fixed Worker Role “${workerDefault.name}”. Editing a Role never changes a running Worker.`);
   await page.screenshot({ path: join(evidence, "worker-conversation.png"), animations: "disabled" });
 
   // A progress notice scoped to this Worker continues the transcript from its last sequence.
@@ -537,8 +537,16 @@ try {
   await row("brain · bbbbbb").dispatchEvent("click");
   await worker.getByRole("heading", { name: /brain · bbbbbb/ }).waitFor();
   await second.getByRole("heading", { name: /stack · cccccc/ }).waitFor();
-  await second.getByRole("button", { name: "Close Worker window" }).click();
-  await second.waitFor({ state: "detached" });
+  const retainedSecond = await second.elementHandle();
+  await second.locator("header").first().getByRole("button", { name: /^Close / }).click();
+  await second.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: /^Panes/ }).click();
+  await page.getByRole("combobox", { name: "Find a pane in Workers" }).fill("worker-2");
+  await page.keyboard.press("Enter");
+  await second.getByRole("heading", { name: /stack · cccccc/ }).waitFor();
+  assert.equal(await second.evaluate((element, previous) => element === previous, retainedSecond), true, "closing hides the bound Worker without deleting its retained view");
+  await retainedSecond.dispose();
+  await second.locator("header").first().getByRole("button", { name: /^Close / }).click();
 
   // The title inspects the record, which lists only read operations and hands back to the Worker window.
   await worker.getByRole("button", { name: "Inspect brain · bbbbbb" }).click();
@@ -624,13 +632,13 @@ try {
   await native.getByRole("region", { name: "Exact native purge IDs" }).scrollIntoViewIfNeeded();
   await page.emulateMedia({ colorScheme: "light" }); await shot("worker-native-plan-light");
   await page.emulateMedia({ colorScheme: "dark" }); await shot("worker-native-plan-dark");
-  const previewGrip = worker.locator('span[title^="Resize"]').first(), previewEdge = await previewGrip.boundingBox();
-  await page.mouse.move(previewEdge.x + previewEdge.width / 2, previewEdge.y + previewEdge.height / 2); await page.mouse.down();
-  await page.mouse.move(previewEdge.x - 250, previewEdge.y + previewEdge.height / 2, { steps: 8 }); await page.mouse.up();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => document.querySelector('[data-window="worker"]').getBoundingClientRect().width < 400);
   assert.ok((await worker.boundingBox()).width < 400, "native preview is actually narrow");
   assert.ok(await worker.locator("[data-scroll]").last().evaluate((body) => body.scrollWidth <= body.clientWidth), "full native IDs reflow without horizontal overflow");
   await native.getByRole("region", { name: "Exact native purge IDs" }).scrollIntoViewIfNeeded();
   await page.emulateMedia({ colorScheme: "light" }); await shot("worker-native-plan-narrow");
+  await page.setViewportSize({ width: 1440, height: 1100 });
   loseApply = true;
   await press(native.getByRole("button", { name: "Purge native session", exact: true }));
   await native.getByText("Running. Read this receipt again to observe it.").waitFor();
@@ -654,13 +662,13 @@ try {
   for (const name of ["Prepare a new plan", "Close receipt", "Send identical request"]) assert.equal(await recovered.getByRole("button", { name }).count(), 0);
 
   // Resize the real card; full IDs and preconditions must not create horizontal overflow.
-  const grip = worker.locator('span[title^="Resize"]').first(), edge = await grip.boundingBox();
-  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2); await page.mouse.down();
-  await page.mouse.move(edge.x - 250, edge.y + edge.height / 2, { steps: 8 }); await page.mouse.up();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => document.querySelector('[data-window="worker"]').getBoundingClientRect().width < 400);
   assert.ok((await worker.boundingBox()).width < 400);
   assert.ok(await worker.locator("[data-scroll]").last().evaluate((body) => body.scrollWidth <= body.clientWidth), "no narrow horizontal overflow");
   await recovered.getByRole("region", { name: "worker receipt unknown" }).scrollIntoViewIfNeeded();
   await shot("worker-native-unknown-narrow");
+  await page.setViewportSize({ width: 1440, height: 1100 });
 
   // Recorded claims survive Worker removal; collected claims cannot be selected or adopted.
   const retained = await open(list, "Maintenance");
@@ -701,7 +709,7 @@ try {
   await press(worker.getByRole("button", { name: "Load full record" }));
   await worker.getByText("all tests passed", { exact: true }).waitFor();
   await press(worker.getByRole("button", { name: "New Worker window" }));
-  const cleanup = page.locator('[data-window="worker-2"]');
+  const cleanup = page.locator('[data-window="worker-3"]');
   await cleanup.getByRole("heading", { name: /stack · aaaaaa/ }).waitFor();
   await press(cleanup.getByRole("tab", { name: "Session" }));
   const clear = await open(cleanup, "Clear transcript");
@@ -720,7 +728,7 @@ try {
   await press(clear.getByRole("button", { name: "Close receipt" }));
   assert.equal(await clear.getByRole("button", { name: "Prepare clear transcript" }).isDisabled(), true);
   await shot("worker-transcript-cleared-light", cleanup);
-  await press(cleanup.getByRole("button", { name: "Close Worker window" }));
+  await press(cleanup.locator("header").first().getByRole("button", { name: /^Close / }));
 
   // Catalog invalidation must not implicitly regenerate a cache or launch native discovery, including after reload.
   const reenabledCatalog = new Promise((resolve) => { catalogReady = resolve; });
@@ -766,8 +774,12 @@ try {
   await row("brain · bbbbbb").click();
   await press(worker.getByRole("tab", { name: "Session" }));
   await worker.getByText(/Coverage partial/).waitFor();
-  assert.equal(await worker.locator("details").count(), 0, "missing apply exposure hides Session maintenance");
-  assert.equal(await list.getByRole("heading", { name: "Retained branches", exact: true }).count(), 0);
+  const readOnlyCatalog = await open(worker, "Clear model catalog");
+  const disabledPlan = readOnlyCatalog.getByRole("button", { name: "Prepare clear model catalog", exact: true });
+  assert.equal(await disabledPlan.isDisabled(), true, "missing apply blocks preparation without removing receipt recovery");
+  assert.equal(await disabledPlan.getAttribute("title"), "worker does not expose worker_state_clear on its WebSocket.");
+  await list.getByRole("heading", { name: "Retained branches", exact: true }).waitFor();
+  await list.getByRole("region", { name: "worker receipt partial" }).waitFor();
   assert.equal(maintenanceCalls.filter(([name]) => name === "plan").length, plansBeforeHidden);
 
   assert.deepEqual(writes, []);

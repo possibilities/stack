@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { Notification, NotificationOutcome } from "@/lib/stack/types";
 import { errorMessage } from "./auth-actions";
-import { useStack, useStore } from "./provider";
+import { useStack, useStore, useWorkbench } from "./provider";
 
 type Dismissal = Exclude<NotificationOutcome, "replaced">;
 
@@ -43,6 +43,7 @@ export function useNotifyActions(): NotifyActions {
 export function NotifyActionsProvider({ children }: { children: React.ReactNode }) {
   const store = useStore();
   const { notifyCounts } = useStack();
+  const { revealPane } = useWorkbench();
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
@@ -75,7 +76,8 @@ export function NotifyActionsProvider({ children }: { children: React.ReactNode 
     }
   }, [store]);
 
-  const value = useMemo<NotifyActions>(() => ({ selected, open: setSelected, pending, dismiss, confirmDismissAll: () => setConfirming(true) }), [selected, pending, dismiss]);
+  const show = useCallback((id: string | null) => { setSelected(id); if (id) revealPane("inbox", "notify-detail"); }, [revealPane]);
+  const value = useMemo<NotifyActions>(() => ({ selected, open: show, pending, dismiss, confirmDismissAll: () => setConfirming(true) }), [selected, show, pending, dismiss]);
   const open = notifyCounts.data?.open ?? 0;
   return (
     <NotifyActionsContext value={value}>

@@ -141,7 +141,7 @@ export function ProcSchedulesLink({ botId, className }: { botId: string; classNa
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         procWindows.setScheduleFilter({ owner: botId });
-        setSpace("proc");
+        setSpace("proc", "proc-schedules");
       }}
       className={cn("inline-flex h-6 items-center gap-1 rounded-md bg-muted/70 px-1.5 text-[0.7rem] text-muted-foreground decoration-muted-foreground/50 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring", className)}>
       <CalendarClockIcon aria-hidden className="size-3 shrink-0" />

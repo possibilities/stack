@@ -206,7 +206,8 @@ export function useNow(interval = 1_000): number {
 
 export type WorkbenchValue = {
   space: SpaceId;
-  setSpace(space: SpaceId): void;
+  setSpace(space: SpaceId, pane?: string): void;
+  revealPane(space: SpaceId, pane: string): void;
   selected: NodeRef | null;
   hovered: string | null;
   select(ref: NodeRef | null): void;

@@ -45,7 +45,7 @@ export function AttentionWindow() {
       {!endpoints.hud ? <HudPlaceholder title="HUD isn't served by this server" icon={HandIcon} />
         : !hudTree.data ? <HudPlaceholder title={hudTree.error ? "Work unavailable" : "Reading work…"} icon={HandIcon} />
         : (
-          <>
+          <div className="@container/attention"><div className="grid gap-3 @3xl/attention:auto-cols-fr @3xl/attention:grid-flow-col">
             {groups.length ? groups.map((group) => (
               <Section key={group.id} title={`${group.title} · ${group.rows.length}`}>
                 <ul className="flex flex-col gap-0.5">
@@ -63,7 +63,7 @@ export function AttentionWindow() {
                 </ul>
               ) : recent.data ? <p className="px-0.5 text-[0.72rem] text-muted-foreground">None recorded recently.</p> : null}
             </Section>
-          </>
+          </div></div>
         )}
     </Window>
   );

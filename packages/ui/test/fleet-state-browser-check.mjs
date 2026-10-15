@@ -369,6 +369,7 @@ try {
   await call("bot_remove", { id: "alpha" });
   await call("bot_start", { id: "alpha", account });
   await call("bot_stop", { id: "alpha" });
+  await page.getByRole("tab", { name: "Bots", exact: true }).click();
   await page.locator('[data-node="bot:alpha"]').getByRole("button", { name: "State" }).click();
   await panel.getByText("Incarnation").waitFor();
   await page.waitForFunction((old) => !document.querySelector('[data-window="bot-state"]')?.textContent?.includes(old), before);

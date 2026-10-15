@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { publishedJsonSchema, serveApi, serveSocket, serveWebSocket, socketCall, socketPath } from "@stack/api";
 import { api as botsApi } from "../../bots/dist/api.js";
 import { api as hudApi } from "../../hud/dist/api.js";
+import { verifyPaneSpaces } from "./pane-spaces-browser.mjs";
 import { authorizeBrowser, fixtureDoc, fixtureOperations, freePort as port, gatewayRoot, root, ui, serveFixture, fixtureServerId } from "./browser-fixture.mjs";
 
 if (!process.env.PLAYWRIGHT_MODULE) throw new Error("Set PLAYWRIGHT_MODULE to an installed Playwright module");
@@ -392,6 +393,7 @@ try {
   await page.screenshot({ path: join(evidence, "hud-dark.png"), animations: "disabled" });
   await page.emulateMedia({ colorScheme: "light" });
 
+  if (process.env.PANE_SPACES) await verifyPaneSpaces(page, { evidence, spaces: process.env.PANE_SPACES });
   assert.equal(consoleErrors.filter((text) => /cannot be a descendant|hydration/i.test(text)).length, 0,
     `no invalid-nesting or hydration console errors: ${consoleErrors.join(" | ")}`);
   assert.deepEqual(errors, []);

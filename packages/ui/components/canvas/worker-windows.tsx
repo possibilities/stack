@@ -236,7 +236,7 @@ export function WorkersLink({ filter, className }: { filter: WorkerFilter; class
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         workerWindows.setFilter(filter);
-        setSpace("workers");
+        setSpace("workers", "workers");
       }}
       className={cn("inline-flex h-6 items-center gap-1 rounded-md bg-muted/70 px-1.5 text-[0.7rem] text-muted-foreground decoration-muted-foreground/50 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring", className)}>
       <HammerIcon aria-hidden className="size-3 shrink-0" />

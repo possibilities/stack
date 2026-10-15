@@ -148,7 +148,7 @@ function ShowDeliveries({ id }: { id: string }) {
   const { setSpace } = useWorkbench();
   const { status } = useStack();
   return (
-    <Button size="xs" variant="outline" disabled={status.source !== "open"} onClick={() => { store.applySourceFilter({ endpointIds: [id] }); setSpace("source"); }}>
+    <Button size="xs" variant="outline" disabled={status.source !== "open"} onClick={() => { store.applySourceFilter({ endpointIds: [id] }); setSpace("source", "source-deliveries"); }}>
       <ListIcon data-icon="inline-start" />Show deliveries
     </Button>
   );

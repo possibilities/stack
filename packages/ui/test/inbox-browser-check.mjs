@@ -195,7 +195,7 @@ try {
     await compose.getByText("Sent — stored", { exact: true }).waitFor();
   };
   const kind = name => compose.getByRole("radio", { name, exact: true }).or(compose.getByRole("button", { name, exact: true }));
-  const send = async () => { await compose.getByRole("button", { name: "Send notification", exact: true }).focus(); await page.keyboard.press("Enter"); await compose.getByText("Sent — stored", { exact: true }).waitFor(); };
+  const send = async () => { await compose.getByRole("button", { name: "Send notification", exact: true }).focus(); await page.keyboard.press("Enter"); await compose.getByText("Sent — stored", { exact: true }).waitFor({ state: "attached" }); };
   await inbox.getByRole("button", { name: "New notification", exact: true }).click();
   await compose.getByLabel("Title", { exact: true }).fill("Operator notice");
   const firstDraft = await savedDraft();
@@ -297,7 +297,7 @@ try {
   assert.equal((await savedDraft()).id, unknownId);
   assert.deepEqual((await savedDraft()).input, originalInput);
   await compose.getByRole("button", { name: "Retry identical send", exact: true }).focus(); await page.keyboard.press("Enter");
-  await compose.getByText("Sent — stored", { exact: true }).waitFor();
+  await compose.getByText("Sent — stored", { exact: true }).waitFor({ state: "attached" });
   assert.deepEqual(sends.at(-1), originalInput);
   assert.equal((await call("notification_list", { limit: 25 })).entries.filter(item => item.id === unknownId).length, 1);
   assert.equal((await call("notification_get", { id: unknownId })).outcome, "replaced");
@@ -386,7 +386,7 @@ try {
   assert.equal(await remotePage.getByRole("button", { name: "New notification", exact: true }).count(), 0);
   // A remote viewer learns the server's identity over its scoped gateway, then keeps state under the remote namespace only.
   const remotePrefix = destinationKey(remoteOrigin, "", { authority: "remote" });
-  await remotePage.waitForFunction((prefix) => Object.keys(localStorage).some((name) => name === `${prefix}uix.bench.v2.inbox`), remotePrefix);
+  await remotePage.waitForFunction((prefix) => Object.keys(localStorage).some((name) => name === `${prefix}uix.panes.v1.inbox`), remotePrefix);
   assert.deepEqual(await remotePage.evaluate((prefix) => Object.keys(localStorage).filter((name) => !name.startsWith(prefix)), remotePrefix), [], "every remote key is namespaced to the remote destination");
   const grant = accessStore.inventory().grants.find(item => item.client_id === credential.clientId);
   accessStore.updateGrant(grant.id, 1, ["ui:view", "ui:control"], []);

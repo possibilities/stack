@@ -239,7 +239,7 @@ export function Palette({ open, onOpenChange, actions }: { open: boolean; onOpen
             <CommandGroup heading="Brain">
               {search.trim().length >= 2 ? (
                 // The value repeats the query, so the matcher keeps this item listed.
-                <CommandItem value={`brain search ${search}`} onSelect={() => { onOpenChange(false); store.searchBrain(search.trim()); setSpace("brain"); }}>
+                <CommandItem value={`brain search ${search}`} onSelect={() => { onOpenChange(false); store.searchBrain(search.trim()); setSpace("brain", "brain-search"); }}>
                   <SearchIcon /><span className="truncate">Search Brain for “{search.trim()}”</span>
                 </CommandItem>
               ) : null}
@@ -248,7 +248,7 @@ export function Palette({ open, onOpenChange, actions }: { open: boolean; onOpen
                   <ListChecksIcon /><span>Ingestion job {search.trim().replace("#", "")}</span>
                 </CommandItem>
               ) : null}
-              <CommandItem value="brain submit ingest url text research" onSelect={() => { onOpenChange(false); setSpace("brain"); }}><ImportIcon />Submit to Brain</CommandItem>
+              <CommandItem value="brain submit ingest url text research" onSelect={() => { onOpenChange(false); setSpace("brain", "brain-ingest"); }}><ImportIcon />Submit to Brain</CommandItem>
               {(brainSources.data ?? []).map((source) => (
                 <CommandItem key={source.id} value={`brain research source ${source.display_name} ${source.kind} ${source.id}`} onSelect={() => go({ kind: "research-source", id: source.id })}>
                   <SatelliteDishIcon />

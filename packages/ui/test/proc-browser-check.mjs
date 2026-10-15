@@ -169,6 +169,7 @@ try {
 
   // The list groups by what needs a person: the legacy and Bot-gone schedules, then upcoming.
   await page.getByRole("button", { name: "Spaces · Proc" }).waitFor();
+  await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await schedules.getByText("Legacy reminder").waitFor();
   await schedules.getByText("Bot-gone wakeup").waitFor();
   await schedules.getByRole("button", { name: /Needs you/ }).waitFor();
@@ -234,6 +235,7 @@ try {
   await page.screenshot({ path: join(evidence, "proc-schedule-detail.png"), animations: "disabled" });
 
   // Runs group by state: the sleeper runs, the noisy run needs a look, the rest finish.
+  await page.getByRole("tab", { name: "Runs", exact: true }).click();
   await runs.locator('section[aria-label="Running"]').getByText("Long sleep").waitFor();
   await runs.locator('section[aria-label="Needs a look"]').getByText("Noisy lines").waitFor();
   await runs.getByRole("button", { name: /Finished/ }).waitFor();

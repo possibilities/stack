@@ -20,7 +20,7 @@ import { PaneCatalog } from "./pane-catalog";
 
 export type PaneControls = {
   space: SpaceId; layout: PaneLayout; panes: { id: string; title: string }[];
-  goToNode(ref: NodeRef): void; catalog(): void; preset(id: string): void; zoom(): void; reveal(id: string): void; undo(): void;
+  goToNode(ref: NodeRef): void; catalog(): void; preset(id: string): void; zoom(): void; reveal(id: string, focus?: boolean): void; undo(): void;
 };
 type Drop = { target: string; side: Placement; rect: StackRect };
 const noop = () => {};
@@ -99,7 +99,13 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
       frame.current = null;
     });
   }, []);
-  const reveal = useCallback((id: string) => { store.focus(id); focusFrame(id); }, [store, focusFrame]);
+  const reveal = useCallback((id: string, focus = true) => {
+    const focused = document.activeElement?.closest<HTMLElement>("[data-pane-frame]")?.dataset.paneFrame;
+    const { projection } = current.current;
+    const replacesFocus = focused !== id && (projection.compact || projection.stacks.some((stack) => stack.tabs.includes(id) && stack.tabs.includes(focused ?? "")));
+    pending.current = null; store.focus(id);
+    if (focus || replacesFocus) focusFrame(id);
+  }, [store, focusFrame]);
   const showCatalog = useCallback((side?: Placement) => setCatalog({ side }), []);
   const goToNode = useCallback((ref: NodeRef, side?: Placement) => {
     const home = homeOf(ref);

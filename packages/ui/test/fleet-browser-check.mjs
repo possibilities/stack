@@ -175,13 +175,14 @@ try {
     await page.getByRole("option", { name, exact: typeof name === "string" }).first().click();
     await page.getByRole("dialog", { name: "Jump to", exact: true }).waitFor({ state: "hidden" });
   };
-  // The Models window's bench is hidden until Accounts is visited; mounted still proves the catalog read arrived.
-  await page.getByText("Native model one", { exact: true }).first().waitFor({ state: "attached" });
+  await page.locator('[data-node="bot:bot-1"]').waitFor();
   await page.screenshot({ path: join(evidence, "fleet-light.png"), fullPage: true, animations: "disabled" });
   // Bot and account cards link across the Fleet and Accounts spaces; the Spaces menu follows.
   await page.locator('[data-node="bot:bot-1"]').getByRole("link", { name: /codex-bot-account-1/ }).click();
   await page.waitForURL((url) => url.pathname === "/accounts" && url.searchParams.get("focus") === `account:${id(1)}`);
   await page.getByRole("button", { name: "Spaces · Accounts" }).waitFor();
+  // The Models window's bench is hidden until Accounts is visited; mounted still proves the catalog read arrived.
+  await page.getByText("Native model one", { exact: true }).first().waitFor({ state: "attached" });
   await page.locator(`[data-node="account:${id(1)}"]`).getByRole("link", { name: /bot-1$/ }).click();
   await page.waitForURL((url) => url.pathname === "/fleet" && url.searchParams.get("focus") === "bot:bot-1");
   await page.getByRole("button", { name: "Spaces · Fleet" }).waitFor();
@@ -401,91 +402,93 @@ try {
   await models.getByRole("button", { name: "Refresh catalog" }).waitFor();
   assert.ok(calls.some((call) => call.name === "worker_catalog" && call.input.refresh === true && call.input.accountId === id(5)));
   await models.getByText("1 native ID", { exact: true }).waitFor();
-  const onGrid = (value) => Math.abs(Math.round(value / 22) * 22 - value) < 0.5;
-  const frame = () => models.evaluate((el) => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top), width: parseFloat(el.style.width) }));
-  const initial = await frame();
-  assert.ok(onGrid(initial.left) && onGrid(initial.top), "a default window lands on the grid");
-  const before = await models.boundingBox();
-  const grip = models.locator('[title="Resize Models"]').first();
-  const edge = await grip.boundingBox();
-  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(edge.x + 80, edge.y + edge.height / 2, { steps: 4 });
-  await page.mouse.up();
-  assert.ok((await models.boundingBox()).width > before.width + 40, "dragging a window edge widens it");
-  const resized = await frame();
-  assert.ok(onGrid(resized.left + resized.width), "a resized right edge snaps to the grid");
-  assert.ok(onGrid(resized.width), "a snapped resize is a whole number of cells");
-  const header = await models.locator("header").boundingBox();
-  await page.mouse.move(header.x + 40, header.y + header.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(header.x + 77, header.y + header.height / 2 + 29, { steps: 4 });
-  // Mid-drag the window follows the pointer freely while an outline marks its grid landing spot.
-  const midDrag = await frame();
-  const landing = await page.locator('[data-drop-target="model-catalogs"]').evaluate((el) => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }));
-  assert.ok(!(onGrid(midDrag.left) && onGrid(midDrag.top)), "a dragged window follows the pointer between grid dots");
-  assert.ok(onGrid(landing.left) && onGrid(landing.top), "the landing outline sits on the grid");
-  await page.screenshot({ path: join(evidence, "drag-landing.png"), animations: "disabled" });
-  await page.mouse.up();
-  assert.equal(await page.locator("[data-drop-target]").count(), 0, "the landing outline leaves on release");
-  const moved = await frame();
-  assert.ok(onGrid(moved.left) && onGrid(moved.top), "a dragged window snaps to the grid");
-  await page.keyboard.down("Alt");
-  await page.mouse.move(header.x + 77, header.y + header.height / 2 + 29);
-  await page.mouse.down();
-  await page.mouse.move(header.x + 88, header.y + header.height / 2 + 29, { steps: 4 });
-  await page.mouse.up();
-  await page.keyboard.up("Alt");
-  assert.ok(!onGrid((await frame()).left), "Alt places a window freely");
-  await grip.dblclick();
-  assert.ok(Math.abs((await models.boundingBox()).width - before.width) < 2, "double-click restores the default width");
-  // Content grows a window past its footprint, and a window placed below it is pushed clear.
-  const accountsWindow = page.locator('[data-window="accounts"]');
-  const grownAccounts = await accountsWindow.evaluate((el) => { const body = el.querySelector("[data-scroll]"); return { height: el.offsetHeight, overflow: body.scrollHeight - body.clientHeight }; });
-  assert.ok(grownAccounts.height > 760 && grownAccounts.overflow <= 1, `Accounts grows to fit its content (${JSON.stringify(grownAccounts)})`);
-  await page.getByRole("button", { name: "Spaces · Accounts" }).click();
-  await page.getByRole("menuitem", { name: /Accounts/ }).click();
-  await page.waitForTimeout(400);
-  const scale = (await accountsWindow.boundingBox()).height / grownAccounts.height;
-  const accountsBox = await accountsWindow.boundingBox();
-  const modelsHeader = await models.locator("header").boundingBox();
-  await page.mouse.move(modelsHeader.x + 20, modelsHeader.y + modelsHeader.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(accountsBox.x + 20, accountsBox.y + (760 + 60) * scale + modelsHeader.height / 2, { steps: 6 });
-  await page.mouse.up();
-  const below = await models.boundingBox();
-  const accountsBottom = (await accountsWindow.boundingBox()).y + (await accountsWindow.boundingBox()).height;
-  assert.ok(below.y >= accountsBottom + 20 * scale, `a window dropped inside a grown window's reach is pushed below it (${below.y} vs ${accountsBottom})`);
-  await page.screenshot({ path: join(evidence, "pushed.png"), animations: "disabled" });
-  await page.keyboard.press("t");
-  // A window sized taller than its content gives the extra height to its body; the footer keeps its natural height at the bottom.
-  const bottomGrip = accountsWindow.locator('[title="Resize Accounts"]').nth(1);
-  const gripBox = await bottomGrip.boundingBox();
-  await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + 300, { steps: 4 });
-  await page.mouse.up();
-  const tall = await accountsWindow.evaluate((el) => {
-    const footer = el.querySelector("footer").getBoundingClientRect(), frame = el.getBoundingClientRect(), button = el.querySelector("footer button").getBoundingClientRect();
-    return { footer: footer.height, button: button.height, gap: frame.bottom - footer.bottom, frame: frame.height };
-  });
-  assert.ok(tall.footer < 60 && tall.button < 40 && tall.gap < 4, `footer keeps its natural height at the bottom (${JSON.stringify(tall)})`);
-  await page.screenshot({ path: join(evidence, "tall-window.png"), animations: "disabled" });
-  await bottomGrip.dblclick();
-  // Resizing toward the content's height falls into a groove; released there, the window stores no height and keeps fitting its content.
-  const natural = await accountsWindow.evaluate((el) => el.offsetHeight);
-  const fitGrip = await bottomGrip.boundingBox();
-  const gripX = fitGrip.x + fitGrip.width / 2, gripY = fitGrip.y + fitGrip.height / 2;
-  await page.mouse.move(gripX, gripY);
-  await page.mouse.down();
-  await page.mouse.move(gripX, gripY + 200 * scale, { steps: 4 });
-  await page.mouse.move(gripX, gripY + 8 * scale, { steps: 4 });
-  await page.waitForFunction((height) => document.querySelector('[data-window="accounts"]')?.offsetHeight === height, natural);
-  await page.screenshot({ path: join(evidence, "fit-groove.png"), animations: "disabled" });
-  assert.equal(await page.getByText("Fits content", { exact: true }).count(), 0, "the groove is felt, not drawn");
-  await page.mouse.up();
-  const fitted = await accountsWindow.evaluate((el) => ({ height: el.offsetHeight, style: el.style.height }));
-  assert.deepEqual(fitted, { height: natural, style: "" }, "released in the groove, the window keeps fitting its content");
+  if (!await page.getByRole("main", { name: "Accounts panes", exact: true }).count()) {
+    const onGrid = (value) => Math.abs(Math.round(value / 22) * 22 - value) < 0.5;
+    const frame = () => models.evaluate((el) => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top), width: parseFloat(el.style.width) }));
+    const initial = await frame();
+    assert.ok(onGrid(initial.left) && onGrid(initial.top), "a default window lands on the grid");
+    const before = await models.boundingBox();
+    const grip = models.locator('[title="Resize Models"]').first();
+    const edge = await grip.boundingBox();
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(edge.x + 80, edge.y + edge.height / 2, { steps: 4 });
+    await page.mouse.up();
+    assert.ok((await models.boundingBox()).width > before.width + 40, "dragging a window edge widens it");
+    const resized = await frame();
+    assert.ok(onGrid(resized.left + resized.width), "a resized right edge snaps to the grid");
+    assert.ok(onGrid(resized.width), "a snapped resize is a whole number of cells");
+    const header = await models.locator("header").boundingBox();
+    await page.mouse.move(header.x + 40, header.y + header.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(header.x + 77, header.y + header.height / 2 + 29, { steps: 4 });
+    // Mid-drag the window follows the pointer freely while an outline marks its grid landing spot.
+    const midDrag = await frame();
+    const landing = await page.locator('[data-drop-target="model-catalogs"]').evaluate((el) => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }));
+    assert.ok(!(onGrid(midDrag.left) && onGrid(midDrag.top)), "a dragged window follows the pointer between grid dots");
+    assert.ok(onGrid(landing.left) && onGrid(landing.top), "the landing outline sits on the grid");
+    await page.screenshot({ path: join(evidence, "drag-landing.png"), animations: "disabled" });
+    await page.mouse.up();
+    assert.equal(await page.locator("[data-drop-target]").count(), 0, "the landing outline leaves on release");
+    const moved = await frame();
+    assert.ok(onGrid(moved.left) && onGrid(moved.top), "a dragged window snaps to the grid");
+    await page.keyboard.down("Alt");
+    await page.mouse.move(header.x + 77, header.y + header.height / 2 + 29);
+    await page.mouse.down();
+    await page.mouse.move(header.x + 88, header.y + header.height / 2 + 29, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+    assert.ok(!onGrid((await frame()).left), "Alt places a window freely");
+    await grip.dblclick();
+    assert.ok(Math.abs((await models.boundingBox()).width - before.width) < 2, "double-click restores the default width");
+    // Content grows a window past its footprint, and a window placed below it is pushed clear.
+    const accountsWindow = page.locator('[data-window="accounts"]');
+    const grownAccounts = await accountsWindow.evaluate((el) => { const body = el.querySelector("[data-scroll]"); return { height: el.offsetHeight, overflow: body.scrollHeight - body.clientHeight }; });
+    assert.ok(grownAccounts.height > 760 && grownAccounts.overflow <= 1, `Accounts grows to fit its content (${JSON.stringify(grownAccounts)})`);
+    await page.getByRole("button", { name: "Spaces · Accounts" }).click();
+    await page.getByRole("menuitem", { name: /Accounts/ }).click();
+    await page.waitForTimeout(400);
+    const scale = (await accountsWindow.boundingBox()).height / grownAccounts.height;
+    const accountsBox = await accountsWindow.boundingBox();
+    const modelsHeader = await models.locator("header").boundingBox();
+    await page.mouse.move(modelsHeader.x + 20, modelsHeader.y + modelsHeader.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(accountsBox.x + 20, accountsBox.y + (760 + 60) * scale + modelsHeader.height / 2, { steps: 6 });
+    await page.mouse.up();
+    const below = await models.boundingBox();
+    const accountsBottom = (await accountsWindow.boundingBox()).y + (await accountsWindow.boundingBox()).height;
+    assert.ok(below.y >= accountsBottom + 20 * scale, `a window dropped inside a grown window's reach is pushed below it (${below.y} vs ${accountsBottom})`);
+    await page.screenshot({ path: join(evidence, "pushed.png"), animations: "disabled" });
+    await page.keyboard.press("t");
+    // A window sized taller than its content gives the extra height to its body; the footer keeps its natural height at the bottom.
+    const bottomGrip = accountsWindow.locator('[title="Resize Accounts"]').nth(1);
+    const gripBox = await bottomGrip.boundingBox();
+    await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + 300, { steps: 4 });
+    await page.mouse.up();
+    const tall = await accountsWindow.evaluate((el) => {
+      const footer = el.querySelector("footer").getBoundingClientRect(), frame = el.getBoundingClientRect(), button = el.querySelector("footer button").getBoundingClientRect();
+      return { footer: footer.height, button: button.height, gap: frame.bottom - footer.bottom, frame: frame.height };
+    });
+    assert.ok(tall.footer < 60 && tall.button < 40 && tall.gap < 4, `footer keeps its natural height at the bottom (${JSON.stringify(tall)})`);
+    await page.screenshot({ path: join(evidence, "tall-window.png"), animations: "disabled" });
+    await bottomGrip.dblclick();
+    // Resizing toward the content's height falls into a groove; released there, the window stores no height and keeps fitting its content.
+    const natural = await accountsWindow.evaluate((el) => el.offsetHeight);
+    const fitGrip = await bottomGrip.boundingBox();
+    const gripX = fitGrip.x + fitGrip.width / 2, gripY = fitGrip.y + fitGrip.height / 2;
+    await page.mouse.move(gripX, gripY);
+    await page.mouse.down();
+    await page.mouse.move(gripX, gripY + 200 * scale, { steps: 4 });
+    await page.mouse.move(gripX, gripY + 8 * scale, { steps: 4 });
+    await page.waitForFunction((height) => document.querySelector('[data-window="accounts"]')?.offsetHeight === height, natural);
+    await page.screenshot({ path: join(evidence, "fit-groove.png"), animations: "disabled" });
+    assert.equal(await page.getByText("Fits content", { exact: true }).count(), 0, "the groove is felt, not drawn");
+    await page.mouse.up();
+    const fitted = await accountsWindow.evaluate((el) => ({ height: el.offsetHeight, style: el.style.height }));
+    assert.deepEqual(fitted, { height: natural, style: "" }, "released in the groove, the window keeps fitting its content");
+  }
   // One-time introductions. A running process, an admitted introduction and a known outcome are different facts; Bots are
   // added only here so the checks above and below are untouched.
   const settled = bots;
@@ -505,7 +508,14 @@ try {
   // Settled Bots stay quiet: a legacy Bot is not enrolled, an introduction that finished needs no flag, and a reset is not an outcome.
   for (const name of ["orient-retired", "orient-legacy", "orient-done"]) assert.equal(await cardOf(name).getByText(/introduc|preparing|orientation/i).count(), 0, `${name} shows no introduction chip`);
   // The Bots window is taller than the page; a tall viewport shows every card in the capture.
-  const cards = async (name) => { await page.setViewportSize({ width: 1440, height: 2400 }); await page.locator('[data-window="bots"]').screenshot({ path: join(evidence, name), animations: "disabled" }); await page.setViewportSize({ width: 1440, height: 1100 }); };
+  const cards = async (name) => {
+    const stateVisible = await page.locator('[data-window="bot-state"]').isVisible();
+    if (!await page.locator('[data-window="bots"]').isVisible()) await page.getByRole("tab", { name: "Bots", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 2400 });
+    await page.locator('[data-window="bots"]').screenshot({ path: join(evidence, name), animations: "disabled" });
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    if (stateVisible) await page.getByRole("tab", { name: "Bot state", exact: true }).click();
+  };
   await cards("orientation-fleet-cards.png");
 
   // The workbench offers no first chat while initialization is unfinished, and refuses competing input only during admission.
