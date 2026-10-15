@@ -320,6 +320,17 @@ try {
   assert.equal(await presets.getByRole("button", { name: "Board", exact: true }).getAttribute("aria-pressed"), "true");
   assert.deepEqual(await readLayout(idB), paneB);
   assert.deepEqual(await readLayout(idA), paneA, "retired destination writes never overwrite A");
+  platform.identify(null);
+  await openHud();
+  await presets.getByRole("button", { name: "Triage", exact: true }).click();
+  await hud.getByRole("button", { name: "Close Timeline", exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.paneStorageReads), [], "a fresh unnamed page does not read an existing save");
+  platform.identify(idA);
+  await page.waitForFunction((key) => window.paneStorageReads.includes(key), paneKey(idA));
+  await hiddenPane("hud-work");
+  await settle(400);
+  assert.equal(await presets.getByRole("button", { name: "Focus", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await readLayout(idA), paneA, "first late identity restores an existing save before an unnamed edit can overwrite it");
   assert.deepEqual(problems, [], "no hydration or page errors with no identity or live replacement");
   await leave();
 
