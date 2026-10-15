@@ -122,6 +122,35 @@ test("close, reopen, undo and presets retain membership without replaying stale 
   assert.equal(store.getSnapshot().focus, null);
 });
 
+test("layout saves coalesce committed changes and flush on detach without leaving delayed writes", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const area = memory(), writes = [];
+  const storage = { getItem: area.getItem, setItem: (key, value) => { writes.push(JSON.parse(value)); area.setItem(key, value); } };
+  const store = new PaneLayoutStore("test", presets, ids);
+  store.attach(storage);
+  store.close("history");
+  for (const fraction of [0.35, 0.4, 0.5]) store.resize(store.getSnapshot().tree.id, 0, fraction);
+  store.focus("preview");
+  assert.equal(writes.length, 0, "interaction does not write storage synchronously");
+  context.mock.timers.runAll();
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].tree.weights, [0.5, 0.5]);
+  assert.deepEqual(writes[0].closed, ["history"]);
+  assert.equal(writes[0].focus, "preview");
+  store.focus("editor");
+  store.attach(null);
+  assert.equal(writes.length, 2, "leaving the space flushes the final focus");
+  assert.equal(writes[1].focus, "editor");
+  store.close("preview");
+  context.mock.timers.runAll();
+  assert.equal(writes.length, 2, "a retired timer cannot save detached edits");
+  store.attach(storage);
+  context.mock.timers.runAll();
+  assert.equal(writes.length, 3);
+  assert.deepEqual(writes[2].closed, ["history", "preview"]);
+  store.attach(null);
+});
+
 test("layout restore is scoped, waits for attached storage, and never imports bench records", () => {
   const area = memory();
   const first = new ScopedStorage({ serverId: "a", authority: "local", origin: "http://localhost" }, () => area);
@@ -133,6 +162,7 @@ test("layout restore is scoped, waits for attached storage, and never imports be
   assert.equal(area.length, 1);
   store.attach(first);
   assert.deepEqual(store.getSnapshot().closed, ["history"]);
+  store.flush();
   const restored = new PaneLayoutStore("test", presets, ids);
   restored.attach(first);
   assert.deepEqual(restored.getSnapshot().closed, ["history"]);
@@ -156,11 +186,24 @@ test("unrecognized saved versions and failed storage leave layout usable without
   assert.equal(JSON.parse(storage.getItem("uix.panes.v1.test")).version, 99);
   assert.match(store.getSnapshot().warning, /version/i);
   store.preset("writing");
+  store.flush();
   assert.equal(JSON.parse(storage.getItem("uix.panes.v1.test")).version, 1);
   store.attach({ getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } });
   store.open("history");
   assert.ok(paneIds(store.getSnapshot().tree).includes("history"));
   assert.match(store.getSnapshot().warning, /browser/i);
+  store.attach({ getItem: () => null, setItem() { throw new Error("quota"); } });
+  let warning = null;
+  const unsubscribe = store.subscribe(() => { warning = store.getSnapshot().warning; });
+  store.close("history");
+  store.flush();
+  assert.match(warning, /could not save/);
+  assert.equal(store.getSnapshot().canUndo, true, "storage failure does not consume close undo");
+  store.undo();
+  assert.match(store.getSnapshot().warning, /could not save/, "undo cannot claim that a failed save succeeded");
+  assert.ok(paneIds(store.getSnapshot().tree).includes("history"));
+  unsubscribe();
+  store.attach(null);
 });
 
 test("registration reconciliation adds instances once, removes unavailable panes and does not reset user edits", () => {

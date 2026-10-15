@@ -15,6 +15,8 @@ export class PaneLayoutStore {
   private storage: Storage | null = null;
   private attached = new WeakSet<Storage>();
   private writable = true;
+  private dirty = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private previous: PaneLayout | null = null;
   private listeners = new Set<() => void>();
   private readonly key: string;
@@ -32,8 +34,11 @@ export class PaneLayoutStore {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
 
   attach(storage: Storage | null): void {
+    if (this.storage === storage) return;
+    this.flush();
     this.storage = storage;
-    if (!storage || this.attached.has(storage)) return;
+    if (!storage) return;
+    if (this.attached.has(storage)) { this.schedule(); return; }
     this.attached.add(storage);
     this.writable = true;
     try {
@@ -140,16 +145,29 @@ export class PaneLayoutStore {
     if (!id || !paneIds(this.state.tree).includes(id)) return;
     this.update({ ...this.state, tree: activatePane(this.state.tree, id), focus: id, zoom: this.state.zoom === id ? null : id });
   }
+  flush = (): void => {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.dirty || !this.storage || !this.writable) return;
+    this.dirty = false;
+    let warning: string | null = null;
+    try {
+      const { preset, tree, closed, anchors, focus, modified } = this.state;
+      this.storage.setItem(this.key, JSON.stringify({ version: 1, preset, tree, closed, anchors, focus, modified }));
+    } catch { warning = "This browser could not save the layout. Changes are kept in this page only."; }
+    if (warning !== this.state.warning) {
+      this.state = { ...this.state, warning };
+      for (const listener of this.listeners) listener();
+    }
+  };
+  private schedule(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = this.dirty && this.storage && this.writable ? setTimeout(this.flush, 250) : null;
+  }
   private update(next: PaneLayout, persist = true, undo: PaneLayout | null = null): void {
     this.previous = undo;
-    this.state = { ...next, canUndo: undo !== null };
-    if (persist && this.storage && this.writable) {
-      try {
-        const { preset, tree, closed, anchors, focus, modified } = this.state;
-        this.storage.setItem(this.key, JSON.stringify({ version: 1, preset, tree, closed, anchors, focus, modified }));
-        this.state = { ...this.state, warning: null };
-      } catch { this.state = { ...this.state, warning: "This browser could not save the layout. Changes are kept in this page only." }; }
-    }
+    this.state = { ...next, warning: persist ? this.state.warning : next.warning, canUndo: undo !== null };
+    if (persist) { this.dirty = true; this.schedule(); }
     for (const listener of this.listeners) listener();
   }
 }

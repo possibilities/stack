@@ -57,7 +57,14 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const visited = useRef(new Set<string>());
 
   useLayoutEffect(() => { store.configure(ids); }, [store, ids]);
-  useEffect(() => { if (instancesRestored) store.attach(local); return () => store.attach(null); }, [store, instancesRestored, local]);
+  useEffect(() => {
+    if (!instancesRestored || !local) return;
+    store.attach(local);
+    const hidden = () => { if (document.visibilityState === "hidden") store.flush(); };
+    window.addEventListener("pagehide", store.flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", store.flush); document.removeEventListener("visibilitychange", hidden); store.attach(null); };
+  }, [store, instancesRestored, local]);
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;
