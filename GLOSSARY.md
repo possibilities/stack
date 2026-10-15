@@ -348,7 +348,7 @@ A named, optional group of Content items. Items exist independently of collectio
 
 ## Canvas space
 
-A named collection of related windows on its own UI open bench, addressed as `/<space>` (HUD lives at `/` and is the default space). Fleet holds Bots and their chat, Accounts holds accounts, usage limits and model catalogs, Lab holds experimental windows, and System holds the server, its processes, package channels, host resources and sampling; a relationship between cards in different spaces is a link, not a wire. Spaces retain independent window arrangements and cameras. Navigating switches the visible bench; panning and zooming cannot reveal another space. API reference is a global dock rather than a space.
+A named collection of related panes with its own arrangement and selection, such as HUD for shared Work or Fleet for Bots and their chats. Links connect records across spaces; inspection and API reference are global tools rather than spaces.
 
 _Avoid_: page, tab, workspace (a Bot's working directory)
 
@@ -360,11 +360,41 @@ The platform one Canvas page is talking to: the server's stable installation ide
 
 _Avoid_: platform key, session, profile
 
-## Open bench
+## Pane
 
-UI's continuous canvas for one Canvas space, with its own camera and window arrangement. Only the selected space's bench is visible and interactive. API reference and record inspection are global tools attached to the viewport; their destinations need not name a canvas card.
+An independently arranged view within a Canvas space, with its own identity and retained work. Closing a pane hides that view; it does not delete its record or stop the activity it represents.
 
-_Avoid_: shared world, space tabs
+_Avoid_: open bench, floating window
+
+## Tab stack
+
+A group of panes sharing one place in a space's arrangement, with one pane visible at a time.
+
+_Avoid_: Stack (the product)
+
+## Layout preset
+
+A curated arrangement of panes for a particular task within a Canvas space. Applying a preset changes the arrangement, not the records or work held by its panes.
+
+## Following pane
+
+A pane whose record follows an explicit selection in its space, such as the primary Fleet chat.
+
+## Pinned pane
+
+An additional pane bound to a chosen record independently of the following pane. This is distinct from pinning the global inspector open.
+
+## Pane catalog
+
+A space's list of available panes and retained instances, including closed panes and those hidden behind tabs or zoom.
+
+## Space rail
+
+The shared navigation that groups Canvas spaces by their purpose and shows where attention is needed.
+
+## Space overview
+
+A summary of every Canvas space and its attention state, used to choose a destination rather than operate duplicate views of its records.
 
 ## Brain
 
