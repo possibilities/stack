@@ -273,6 +273,67 @@ try {
   const stored = await page.evaluate(() => JSON.stringify({ ...sessionStorage }) + JSON.stringify({ ...localStorage }));
   assert.ok(!stored.includes("/control/"), "the control grant is never stored");
 
+  if (await page.locator('[data-pane-frame="browse-viewer"]').count()) {
+    const note = viewer.getByLabel("Note for the Bot"), heldNote = await note.elementHandle();
+    await note.fill("Unsaved handoff note");
+    const pause = async (action) => {
+      const element = await frame.elementHandle(), document = await element.contentFrame();
+      await action();
+      await document.waitForURL("about:blank", { timeout: 5_000, waitUntil: "commit" }).catch((error) => { if (!document.isDetached()) throw error; });
+      await element.dispose();
+    };
+    const retained = async () => {
+      await page.frameLocator('[data-window="browse-viewer"] iframe').getByText("Control fixture").waitFor();
+      assert.equal(await note.inputValue(), "Unsaved handoff note");
+      assert.equal(await note.evaluate((element, original) => element === original, heldNote), true);
+      assert.equal(calls.filter((call) => call.name === "browser_handoff_take").length, 1);
+      assert.equal(calls.filter((call) => call.name === "browser_handoff_finish").length, 0);
+    };
+    const reveal = async (id) => {
+      await page.getByRole("button", { name: /^Panes(?: \d+ closed)?$/ }).click();
+      await page.getByRole("combobox", { name: "Find a pane in Browse" }).fill(id);
+      await page.keyboard.press("Enter");
+    };
+    const arrange = async (pane, side, target) => {
+      await pane.getByRole("button", { name: /^Arrange / }).click();
+      await page.getByRole("menuitem", { name: side, exact: true }).hover();
+      await page.getByRole("menu", { name: side, exact: true }).getByRole("menuitem", { name: target, exact: true }).click();
+    };
+    await pause(() => viewer.getByRole("button", { name: "Close default", exact: true }).click());
+    await reveal("browse-viewer");
+    await retained();
+    await pause(() => handoffs.getByRole("button", { name: "Zoom Handoffs", exact: true }).click());
+    await page.getByRole("button", { name: "Restore panes", exact: true }).click();
+    await retained();
+    const layouts = page.getByRole("group", { name: "Browse layout preset" });
+    await pause(() => layouts.getByRole("button", { name: "Manage", exact: true }).click());
+    await layouts.getByRole("button", { name: "Handoff", exact: true }).click();
+    await retained();
+    await arrange(viewer, "Stack with", "Handoffs");
+    await pause(() => page.getByRole("tab", { name: "Handoffs", exact: true }).click());
+    await page.getByRole("tab", { name: "Viewer", exact: true }).click();
+    await retained();
+    const rail = page.getByRole("navigation", { name: "Canvas spaces" });
+    await pause(() => rail.getByRole("link", { name: "HUD", exact: true }).click());
+    await rail.getByRole("link", { name: "Browse", exact: true }).click();
+    await retained();
+    await viewer.getByRole("button", { name: "Inspect default", exact: true }).click();
+    await inspector.waitFor({ state: "visible" });
+    await pause(() => page.setViewportSize({ width: 430, height: 900 }));
+    await page.setViewportSize({ width: 2400, height: 1300 });
+    await inspector.getByRole("button", { name: "Close inspector", exact: true }).click();
+    await retained();
+    await page.getByRole("button", { name: "Reset pane layout", exact: true }).click();
+    await reveal("browse-controllers");
+    await arrange(controllers, "Move right of", "Viewer");
+    await reveal("browse-toolchain");
+    await arrange(toolchain, "Move right of", "Controllers");
+    await retained();
+    await page.screenshot({ path: join(evidence, "browse-pane-draft.png"), animations: "disabled" });
+    await heldNote.dispose();
+    console.log("browse pane lifetime check passed");
+  } else console.log("browse pane lifetime check skipped (legacy Bench rollout)");
+
   // Typing inside the guest never reaches the bench's space shortcuts.
   const guest = page.frameLocator('[data-window="browse-viewer"] iframe').getByLabel("guest input");
   await guest.click();
@@ -552,8 +613,15 @@ try {
   const browseTransport = catalog.find((doc) => doc.name === "browse").transports[0];
   browseTransport.operations = browseTransport.operations.filter((name) => name !== "browser_profile_reset_clear");
   await page.reload();
+  const plansBefore = calls.filter((call) => call.name === "browser_profile_reset_plan").length;
   await profiles.getByRole("button", { name: "More for default" }).click();
-  assert.equal(await page.getByRole("menuitem", { name: "Reset profile…" }).count(), 0);
+  await page.getByRole("menuitem", { name: "Reset profile…" }).click();
+  maintenance = page.getByRole("dialog");
+  await maintenance.getByText(/does not expose browser_profile_reset_clear/).waitFor();
+  assert.equal(await maintenance.getByRole("button", { name: "Prepare reset profile", exact: true }).isDisabled(), true);
+  assert.equal(calls.filter((call) => call.name === "browser_profile_reset_plan").length, plansBefore, "receipt access does not admit new preparation");
+  await maintenance.getByRole("button", { name: "Close dialog" }).click();
+  await profiles.getByRole("button", { name: "More for default" }).click();
   await page.getByRole("menuitem", { name: "Clear site data…" }).waitFor();
   await page.keyboard.press("Escape");
   browseTransport.operations = browseTransport.operations.filter((name) => name !== "browse_state_receipt_get");

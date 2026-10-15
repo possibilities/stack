@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useId, useState } from "react";
+import { use, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronsUpDownIcon, CopyPlusIcon, EyeIcon, HandIcon, LifeBuoyIcon, MonitorIcon, RotateCcwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -23,6 +23,7 @@ import { useDestination, useStack, useStore, useViewerWindows, useWorkbench } fr
 import { BotWatch, useObservedRead } from "./watch-receipts";
 import { ObservationStatus } from "./owner-reads";
 import { PlacementContext, Section, Window } from "./window";
+import { usePane } from "./pane-context";
 
 function mint(): string {
   return crypto.randomUUID();
@@ -431,6 +432,16 @@ export function ViewerWindow({ id }: { id: string }) {
   const grant = handoff?.state === "human_controlling" ? grants[handoff.id] ?? null : null;
   const src = grant ?? profile?.observation?.url ?? null;
   const primary = id === primaryViewer;
+  const pane = usePane();
+  const frame = useRef<HTMLIFrameElement>(null);
+  const visible = space === "browse" && !placement?.collapsed && pane?.visible !== false;
+  const active = visible && !remote && profile?.state === "ready";
+  useLayoutEffect(() => {
+    const element = frame.current;
+    if (!active || !src || !element) return;
+    if (element.getAttribute("src") !== src) element.setAttribute("src", src);
+    return () => { element.setAttribute("src", "about:blank"); };
+  }, [active, src]);
   const actions = (
     <>
       <ProfileSwitcher windowId={id} profileId={profileId} />
@@ -472,9 +483,9 @@ export function ViewerWindow({ id }: { id: string }) {
             )}
             {profile.state !== "ready" || !src ? (
               <Placeholder title={profile.state === "ready" ? "No viewer connection" : `Browser ${profile.state}`} hint={profile.error ?? (profile.observedAt ? `Observed ${new Date(Date.parse(profile.observedAt)).toLocaleTimeString()}` : undefined)} />
-            ) : space !== "browse" ? <Placeholder title="Paused while Browse is hidden" />
+            ) : !visible ? <Placeholder title="Paused while this viewer is hidden" />
             : (
-              <iframe key={src} src={src} title={`${profileName(profile)} browser${grant ? " (control)" : ""}`}
+              <iframe ref={frame} key={src} src={src} title={`${profileName(profile)} browser${grant ? " (control)" : ""}`}
                 allow="autoplay; clipboard-read; clipboard-write; fullscreen" referrerPolicy="no-referrer"
                 sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms"
                 className={cn("min-h-0 w-full flex-1 border-0 bg-black", placement?.dragging && "pointer-events-none", grant && "outline-2 -outline-offset-2 outline-pkg-browse")} />
