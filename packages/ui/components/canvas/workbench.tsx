@@ -35,7 +35,6 @@ export function Workbench({ snapshot, initialSpace, initialFocus, initialLocatio
 }
 
 function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
-  const { remote } = useStack();
   const [location, setLocation] = useState(initialLocation);
   const locationRef = useRef(location);
   const referenceReturn = useRef<HTMLElement | null>(null);
@@ -285,6 +284,7 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
   const workbench: WorkbenchValue = useMemo(() => ({ space: location.space, setSpace, revealPane, selected: collapsed ? null : location.inspect, hovered, select, hover, goTo, flash }), [location.space, location.inspect, collapsed, setSpace, revealPane, hovered, select, goTo, flash]);
   return <div className="contents" onPointerDownCapture={() => { pending.current = null; }} onKeyDownCapture={() => { pending.current = null; }} style={{ "--sheet": `${location.reference || pinned ? right : 0}px`, "--rail": `${railWidth}px` } as React.CSSProperties}>
     <WorkbenchContext value={workbench}><AuthActionsProvider><VoiceProvider><BotActionsProvider><RoleActionsProvider><ShimActionsProvider><NotifyActionsProvider><ContentActionsProvider>
+      <a href={`#workspace-${location.space}`} onClick={(event) => { event.preventDefault(); write(locationRef.current, "bench"); focusBench(); }} className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:outline-2 focus-visible:outline-ring">Skip to workspace</a>
       {spaces.map(({ id }) => <div key={id} hidden={id !== location.space || (overlay && rightVisible)} inert={id !== location.space || (overlay && rightVisible)}>
         <Activity mode={id === location.space && !(overlay && rightVisible) ? "visible" : "hidden"}>
           <div className={id === location.space ? "bench-enter" : undefined}>
@@ -295,9 +295,6 @@ function Shell({ initialLocation }: { initialLocation: BenchLocation }) {
       <SpaceRail compact={railWidth < 100} openOverview={() => setOverviewOpen(true)} />
       <SpaceBar space={location.space} setSpace={setSpace} back={backLink && typeof window !== "undefined" && `${window.location.pathname}${window.location.search}` === backLink.href ? { title: spaceTitle(backLink.space), run: () => window.history.back() } : undefined} reference={Boolean(location.reference) && rightVisible} inspectorAvailable={Boolean(location.inspect) && !rightVisible} openInspector={openInspector} toggleReference={Boolean(location.reference) && rightVisible ? closeRight : openReference} openPalette={() => setPaletteOpen(true)} openOverview={() => setOverviewOpen(true)} />
       {overviewOpen ? <SpaceOverview layouts={layouts} onClose={() => setOverviewOpen(false)} /> : null}
-      {remote ? <p role="status" data-remote-scope={remote.scope} className="pointer-events-none fixed top-16 left-4 z-30 rounded-md border bg-card/95 px-2 py-1 text-xs shadow-sm">
-        Remote Access · {remote.scope === "view" ? "View only. Editing controls require ui:control; sign-in, voice and browser handoff stay local." : "Control granted. Sign-in, voice and browser handoff stay local."}
-      </p> : null}
       <div data-chrome hidden={paneSpaces.has(location.space)} className="fixed bottom-4 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-card/95 p-1 shadow-sm" style={{ left: "calc((100% - var(--sheet))/2)" }}>
         <Tool label="Zoom out" onClick={() => controls?.zoom(1 / 1.2)}><MinusIcon /></Tool>
         <Button variant="ghost" size="sm" aria-label="Actual size" className="w-14 tabular-nums" onClick={() => controls?.zoom(1 / scale)}>{Math.round(scale * 100)}%</Button>

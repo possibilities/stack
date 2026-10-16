@@ -70,7 +70,7 @@ export function ChatWindow({ id }: { id: string }) {
   return (
     <Window id={id} title={botId ?? "Chat"} subtitle={botId ? threadId ? `main thread ${shortId(threadId)}` : "no main thread" : "main thread"}
       icon={SquareTerminalIcon} accent="bots" reveal={{ kind: "chat", id }} bleed actions={actions}>
-      {botId ? <Transcript key={botId} botId={botId} view={view} loadOlder={loadOlder} /> : <Placeholder title="No bot selected" hint="Choose one with the switcher, or press Chat on a bot card." />}
+      {botId ? <Transcript key={`${botId}:${threadId}`} botId={botId} view={view} loadOlder={loadOlder} /> : <Placeholder title="No bot selected" hint="Choose one with the switcher, or press Chat on a bot card." />}
       <StatusLine botId={botId} view={view} />
     </Window>
   );
@@ -134,8 +134,11 @@ function noMainThread(botId: string, orientation: Orientation | null | undefined
 
 function Transcript({ botId, view, loadOlder }: { botId: string; view: MainChatView | null; loadOlder(): void }) {
   const { bots } = useStack();
+  // Reading position belongs to this thread, including while its shared feed is reloading.
+  const following = useRef(true);
+  const measure = useRef({ top: 0, height: 0, fromEnd: 0 });
   if (!view || (view.status === "loading" && !view.entries.length)) return <Placeholder title="Reading main thread…" />;
-  if (view.entries.length) return <Scrollback botId={botId} view={view} loadOlder={loadOlder} />;
+  if (view.entries.length) return <Scrollback botId={botId} view={view} loadOlder={loadOlder} following={following} measure={measure} />;
   switch (view.status) {
     case "missing": return <Placeholder title={`${botId} no longer exists`} />;
     case "stopped": return <Placeholder title={`${botId} is stopped`} hint="Start it to read its main thread." />;
@@ -145,27 +148,29 @@ function Transcript({ botId, view, loadOlder }: { botId: string; view: MainChatV
   }
 }
 
-function Scrollback({ botId, view, loadOlder }: { botId: string; view: MainChatView; loadOlder(): void }) {
+function Scrollback({ botId, view, loadOlder, following, measure }: {
+  botId: string; view: MainChatView; loadOlder(): void;
+  following: React.RefObject<boolean>; measure: React.RefObject<{ top: number; height: number; fromEnd: number }>;
+}) {
   const { bots } = useStack();
   const orientation = bots.data?.find((bot) => bot.id === botId)?.orientation;
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
-  // Follow the end until the reader scrolls up; scrolling back to the end resumes.
-  const following = useRef(true);
-  const measure = useRef({ top: 0, height: 0, fromEnd: 0 });
   const { entries, hasOlder, loadingOlder, prepends } = view;
 
   const pin = useCallback(() => {
     const el = scroller.current;
-    if (!el) return;
+    if (!el?.clientHeight) return;
     if (following.current) el.scrollTop = el.scrollHeight;
     measure.current = { top: el.scrollTop, height: el.scrollHeight, fromEnd: el.scrollHeight - el.scrollTop };
-  }, []);
+  }, [following, measure]);
 
   useLayoutEffect(() => {
     const el = scroller.current, inner = content.current;
     if (!el || !inner) return;
+    // Activity retains the reader but reconnects this effect after hidden geometry was zero.
+    if (!following.current) el.scrollTop = measure.current.top;
     pin();
     const observer = new ResizeObserver(pin);
     observer.observe(el);
@@ -175,7 +180,7 @@ function Scrollback({ botId, view, loadOlder }: { botId: string; view: MainChatV
 
   const onScroll = () => {
     const el = scroller.current;
-    if (!el) return;
+    if (!el?.clientHeight) return;
     const previous = measure.current;
     if (el.scrollHeight - el.clientHeight - el.scrollTop <= endSlack) following.current = true;
     // Content only grows or is replaced by the feed, so an upward move with no shrink is the reader's.

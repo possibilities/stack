@@ -279,7 +279,7 @@ export const spaceViews: Record<SpaceId, {
 
 const paneDescriptions: Record<string, string> = {
   "hud-attention": "Work that needs someone next", "hud-work": "Shared Work hierarchy and selection", "hud-item": "Selected Work item, details and edits", "hud-timeline": "Collaboration history for selected Work", "hud-resources": "Resources deployed on selected Work",
-  bots: "Bots and their existing controls", "bot-state": "Stored state and recovery for a selected Bot", chat: "A Bot's main thread and composer",
+  bots: "Bots and their existing controls", "bot-state": "Stored state and recovery for a selected Bot", chat: "A Bot's live main-thread transcript",
   workers: "Worker sessions, filters and attention", worker: "A Worker's conversation, changes, turns and tools", "worker-runtimes": "Worker runtimes and availability",
   accounts: "Accounts, sign-in and linked Workers", usage: "Observed quota and reset times", "model-catalogs": "Available models and effort choices",
   "call-speech": "Speech controls for the current call", inference: "Inference requests and their durable ledger",

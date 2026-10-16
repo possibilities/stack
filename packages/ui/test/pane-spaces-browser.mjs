@@ -63,7 +63,9 @@ export async function verifyPaneSpaces(page, { evidence, spaces }) {
       const host = document.querySelector(`[data-canvas][data-space="${space}"]`), bounds = host.getBoundingClientRect();
       return document.documentElement.scrollWidth <= innerWidth && [...host.querySelectorAll('[data-pane-frame]:not([hidden])')].every((pane) => {
         const r = pane.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 && r.left >= bounds.left - 1 && r.top >= bounds.top - 1 && r.right <= bounds.right + 1 && r.bottom <= bounds.bottom + 1;
+        const header = pane.querySelector("[data-window] > header"), title = header?.querySelector("h2");
+        return r.width > 0 && r.height > 0 && r.left >= bounds.left - 1 && r.top >= bounds.top - 1 && r.right <= bounds.right + 1 && r.bottom <= bounds.bottom + 1
+          && (!header || header.scrollWidth <= header.clientWidth + 1) && (!title || title.scrollWidth <= title.clientWidth + 1);
       });
     }, space, { timeout: 2000 });
     for (const name of names) {
@@ -100,10 +102,22 @@ export async function verifyPaneSpaces(page, { evidence, spaces }) {
     await host.getByRole("button", { name: "Undo close", exact: true }).click();
     await page.locator(`[data-pane-frame="${ids.at(-1)}"]`).waitFor();
     await host.getByRole("button", { name: "Reset pane layout", exact: true }).click();
-    await page.setViewportSize({ width: 420, height: 900 });
-    await reveal(ids[0]);
+    for (const width of [420, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await reveal(ids[0]);
+      await fits();
+      await openCatalog();
+      const bounds = await catalog.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `${title} catalog fits at ${width}px`);
+      assert.ok(await catalog.evaluate((element) => element.scrollWidth <= element.clientWidth), `${title} catalog content fits at ${width}px`);
+      await page.keyboard.press("Escape");
+      await page.screenshot({ path: join(evidence, `${space}-${width}.png`), animations: "disabled" });
+    }
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     await fits();
-    await page.screenshot({ path: join(evidence, `${space}-narrow.png`), animations: "disabled" });
+    await page.screenshot({ path: join(evidence, `${space}-text-200.png`), animations: "disabled" });
+    await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     report.push({ space, presets: names, panes: ids, catalogRecovery: "passed", lastPane: "passed", narrow: "passed" });
   }
   await page.setViewportSize({ width: 1600, height: 1000 });

@@ -2,6 +2,7 @@
 // this disposable worktree fixture; provenance is injected as in Access tests.
 // PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node packages/ui/test/remote-ui-browser-check.mjs
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -90,6 +91,15 @@ try {
   const response = await page.goto(`${origin}/content`);
   assert.equal(response.status(), 200);
   await page.locator('[data-remote-scope="view"]').waitFor();
+  const originalViewport = page.viewportSize();
+  for (const width of [originalViewport.width, 320]) {
+    await page.setViewportSize({ width, height: originalViewport.height });
+    const scope = await page.locator('[data-remote-scope="view"]').boundingBox();
+    const workspace = await page.getByRole("main", { name: "Content panes", exact: true }).boundingBox();
+    assert.ok(scope.y + scope.height <= workspace.y + 1, `remote authority notice must leave pane controls unobstructed at ${width}px`);
+    assert.ok(scope.x >= 0 && scope.x + scope.width <= width, "remote authority remains readable within the viewport");
+  }
+  await page.setViewportSize(originalViewport);
   const preview = page.locator('[data-window="content-preview"]');
   const documents = page.locator('[data-window="content-documents"]');
   await documents.getByText("Remote note", { exact: true }).first().waitFor();
@@ -111,6 +121,7 @@ try {
   assert.match(await openedDocument.locator("body").innerText(), /Remote note/);
   await openedDocument.close();
   const library = page.locator('[data-window="content-library"]');
+  await revealPane(page, "Content", "content-library");
   await library.getByRole("button", { name: /remote.txt/ }).first().click();
   await preview.getByRole("button", { name: "Open" }).waitFor();
   const itemTab = context.waitForEvent("page");
@@ -120,6 +131,7 @@ try {
   assert.match(await openedItem.locator("body").innerText(), /remote item bytes/);
   await openedItem.close();
   const artifacts = page.locator('[data-window="content-artifacts"]');
+  await revealPane(page, "Content", "content-artifacts");
   await artifacts.getByRole("button", { name: "Show remote-page versions" }).click();
   await artifacts.getByRole("button", { name: /remote-page/ }).nth(1).click();
   await preview.getByRole("button", { name: "Open this version" }).waitFor();
@@ -135,10 +147,13 @@ try {
   store.updateGrant(grant.id, 1, ["ui:view", "ui:control", "content:read"], []);
   await page.locator('[data-remote-scope="control"]').waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('[data-window="content-documents"] button')].some(button => button.textContent?.includes("New document") && !button.disabled));
+  await revealPane(page, "Content", "content-documents");
   assert.equal(await documents.getByRole("button", { name: "New document" }).isEnabled(), true);
   const storage = page.locator('[data-window="content-storage"]');
+  await revealPane(page, "Content", "content-storage");
   await storage.getByText("Available only on the local UI", { exact: true }).waitFor();
   assert.equal(await storage.locator("summary", { hasText: /Maintenance|Retained history/ }).count(), 0, "remote control has no publication or history disclosures");
+  await revealPane(page, "Content", "content-documents");
   await documents.getByRole("button", { name: "Remote note actions", exact: true }).focus(); await page.keyboard.press("Enter");
   await page.getByRole("menuitem", { name: "Open in editor", exact: true }).click();
   const remoteEditor = page.locator('[data-window="content-editor"]');

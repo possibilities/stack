@@ -37,7 +37,6 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const defs = paneDefinitions(space, state, { chats, workers, viewers, procRuns });
   const registryReady = paneRegistryReady(space, state);
   const signature = JSON.stringify(defs.map((def) => def.id));
-  const minimums = useMemo(() => Object.fromEntries(defs.map((def) => [def.id, def.minimum])), [signature]);
   const ids: string[] = useMemo(() => JSON.parse(signature), [signature]);
   const [store] = useState(() => new PaneLayoutStore(space, panePresets[space], ids));
   const layout = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
@@ -45,7 +44,10 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const instancesRestored = restored && chats === chatStore.getWindows() && workers === workerWindows.getWindows() && viewers === viewerStore.getWindows() && procRuns === procWindows.getWindows();
   const viewport = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
-  const [size, setSize] = useState({ width: 1200, height: 800 });
+  const [size, setSize] = useState({ width: 1200, height: 800, fontSize: 16 });
+  const fontScale = Math.max(1, size.fontSize / 16);
+  const tabSize = Math.ceil(34 * fontScale);
+  const minimums = useMemo(() => Object.fromEntries(defs.map((def) => [def.id, { width: def.minimum.width * fontScale, height: def.minimum.height * fontScale }])), [signature, fontScale]);
   const [catalog, setCatalog] = useState<{ side?: Placement } | null>(null);
   const [draft, setDraft] = useState<PaneNode | null>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -72,7 +74,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     const element = viewport.current;
     if (!element) return;
     const observer = new ResizeObserver(() => {
-      if (element.clientWidth && element.clientHeight) setSize({ width: element.clientWidth, height: element.clientHeight });
+      if (element.clientWidth && element.clientHeight) setSize({ width: element.clientWidth, height: element.clientHeight, fontSize: parseFloat(getComputedStyle(element).fontSize) });
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -235,7 +237,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   const renderPane = (def: WindowDef, rect?: StackRect) => {
     const visible = Boolean(rect && rect.active === def.id);
     if (visible) visited.current.add(def.id);
-    const tabHeight = rect && rect.tabs.length > 1 ? 34 : 0;
+    const tabHeight = rect && rect.tabs.length > 1 ? tabSize : 0;
     const placement: WindowPlacement = { x: 0, y: 0, z: 0, width: rect?.width ?? 0, height: (rect?.height ?? 0) - tabHeight, sized: true, collapsed: false, animating: false, dragging, active: false, settling: false, target: null,
       onHeaderPointerDown: (event) => beginDrag(def.id, event), onResizePointerDown: noop, onResetSize: noop, onFocusWithin: () => store.focus(def.id), onToggleCollapse: noop, register: noop };
     const pane = { visible, focused: layout.focus === def.id, zoomed: layout.zoom === def.id, canClose: open.length > 1,
@@ -252,7 +254,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
   };
   const tiles: React.ReactNode[] = [];
   for (const rect of projection.stacks) {
-    if (rect.tabs.length > 1) tiles.push(<div key={`tabs:${rect.id}`} role="tablist" aria-label="Pane tabs" className="absolute flex items-center gap-1 overflow-x-auto rounded-t-xl bg-muted/50 px-1" style={{ left: rect.x, top: rect.y, width: rect.width, height: 32 }}>
+    if (rect.tabs.length > 1) tiles.push(<div key={`tabs:${rect.id}`} role="tablist" aria-label="Pane tabs" className="absolute flex items-center gap-1 overflow-x-auto rounded-t-xl bg-muted/50 px-1" style={{ left: rect.x, top: rect.y, width: rect.width, height: tabSize - 2 }}>
       {rect.tabs.map((id, index) => <button key={id} id={`pane-tab-${id}`} type="button" role="tab" aria-selected={rect.active === id} aria-controls={`pane-${id}`} tabIndex={rect.active === id ? 0 : -1}
         className={cn("shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring", rect.active === id && "bg-card text-foreground shadow-sm")}
         onClick={() => store.focus(id)} onKeyDown={(event) => {
@@ -269,7 +271,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     if (pending.current) { pending.current = null; setNavigation(++sequence.current); }
     if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; }
   };
-  return <main ref={root} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} onKeyDown={key} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)", bottom: "var(--call-height, 0px)" }}>
+  return <main ref={root} id={`workspace-${space}`} onPointerDownCapture={cancelArrival} onKeyDownCapture={cancelArrival} onKeyDown={key} data-canvas="workbench" data-space={space} tabIndex={-1} aria-label={`${spaceTitle(space)} panes`} className="fixed top-16 bottom-0 flex min-h-0 min-w-0 flex-col px-2 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)", bottom: "var(--call-height, 0px)" }}>
     <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 pb-2" data-chrome>
       <div className="flex min-w-0 items-center gap-2 overflow-x-auto"><ToggleGroup size="sm" spacing={0} aria-label={`${spaceTitle(space)} layout preset`} value={[layout.preset]} onValueChange={(values) => { if (values[0]) store.preset(String(values[0])); }}>
         {panePresets[space].map((preset) => <ToggleGroupItem key={preset.id} value={preset.id}>{preset.title}</ToggleGroupItem>)}

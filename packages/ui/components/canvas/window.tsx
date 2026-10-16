@@ -178,7 +178,7 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
           // Controls the drag ignores (see onHeaderPointerDown) keep their own cursor.
           "[&_:where(button,[data-interactive],[tabindex])]:cursor-default",
           !placement.collapsed && "border-b border-border/60",
-          pane && "gap-2 px-2.5 py-2",
+          pane && "flex-wrap gap-2 px-2.5 py-2",
           pane && "touch-none",
         )}
       >
@@ -201,7 +201,7 @@ export function Window({ id, title, subtitle, icon: Icon, accent, count, status,
           </h2>
           {subtitle ? <p className="truncate font-mono text-[0.68rem] text-muted-foreground">{subtitle}</p> : null}
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className={cn("ml-auto flex items-center gap-1", pane && "max-w-full flex-wrap justify-end")}>
           {actions}
           {status ? (
             <Tooltip>

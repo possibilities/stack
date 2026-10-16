@@ -49,14 +49,18 @@ export function SpaceBar({ space, setSpace, back, reference, inspectorAvailable,
   const state = useStack();
   const attention = spaceAttention(state);
   const item = spaces.find((item) => item.id === space)!, Icon = icons[space];
+  const remoteNotice = state.remote ? `Remote Access · ${state.remote.scope === "view" ? "View only. Editing controls require ui:control; sign-in, voice and browser handoff stay local." : "Control granted. Sign-in, voice and browser handoff stay local."}` : null;
   return <header data-chrome className="fixed top-0 z-30 flex h-16 items-center justify-between gap-2 px-3" style={{ left: "var(--rail, 0px)", right: "var(--sheet, 0px)" }}>
     <div className="flex min-w-0 items-center gap-2">
-      <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={`Spaces · ${item.title}`} className="min-w-0 gap-2 px-1" />}><Icon data-icon="inline-start" className={accent[space]} /><h1 className="truncate text-base font-semibold tracking-tight">{item.title}</h1><ChevronDownIcon data-icon="inline-end" /></DropdownMenuTrigger>
+      <div className="flex min-w-0 flex-col">
+      <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={`Spaces · ${item.title}`} className="max-w-full min-w-0 self-start gap-2 px-1" />}><Icon data-icon="inline-start" className={accent[space]} /><h1 className="truncate text-base font-semibold tracking-tight">{item.title}</h1><ChevronDownIcon data-icon="inline-end" /></DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-h-[80dvh] overflow-y-auto">
           {spaceGroups.map((group) => <DropdownMenuGroup key={group.title}><DropdownMenuLabel>{group.title}</DropdownMenuLabel>{group.spaces.map((id) => <DropdownMenuItem key={id} aria-current={id === space ? "location" : undefined} title={attention[id].join(" · ") || undefined} render={<a href={spaceHref(id)} onClick={(event) => { if (plainClick(event)) { event.preventDefault(); setSpace(id); } }} />}>{spaceTitle(id)}{attention[id].length ? <span className="ml-auto size-1.5 rounded-full bg-warning" /> : null}</DropdownMenuItem>)}</DropdownMenuGroup>)}
           <DropdownMenuGroup><DropdownMenuItem onClick={openOverview}><CompassIcon />Space overview</DropdownMenuItem></DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+      {remoteNotice ? <p role="status" data-remote-scope={state.remote?.scope} title={remoteNotice} className="max-w-56 truncate px-1 text-[0.65rem] text-muted-foreground">{remoteNotice}</p> : null}
+      </div>
       {back ? <Button variant="ghost" size="sm" aria-label={`Back to ${back.title}`} title={`Back to ${back.title}`} onClick={back.run}><ArrowLeftIcon data-icon="inline-start" /><span className="hidden sm:inline">{back.title}</span></Button> : null}
       <p className="hidden max-w-72 truncate border-l pl-3 text-xs text-muted-foreground lg:block" title={item.description}>{item.description}</p>
     </div>

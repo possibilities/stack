@@ -2,6 +2,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/fleet-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable.
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
@@ -63,11 +64,16 @@ const usage = { atMs: stamp, inventoryAtMs: stamp, inventoryError: null, account
   { ...workerAccounts[2], scope: "worker", ...observation, usage: { planLabel: "Pro", billing: "monthly", dailyRemainingPercent: null, weeklyRemainingPercent: 55, dailyResetsAt: null, weeklyResetsAt: "2026-09-28", periodStart: "2026-09-01", periodEnd: "2026-10-01", promptCreditsMonthly: 100, promptCreditsAvailable: 72, weeklyQuotaHidden: false, displayName: "Fixture" } },
 ] };
 const calls = [];
+const chatHistory = Array.from({ length: 48 }, (_, index) => ({
+  turnId: `turn-${Math.floor(index / 2)}`, startedAtMs: 1_700_000_000_000 + index * 1000, completedAtMs: 1_700_000_000_500 + index * 1000,
+  item: index % 2 ? { type: "agentMessage", id: `item-${index}`, text: `Fixture reply ${index}\n\n${"Retained **markdown** from the Bot's main thread.\n\n".repeat(8)}`, phase: "final_answer" }
+    : { type: "userMessage", id: `item-${index}`, content: [{ type: "text", text: `Fixture question ${index}`, text_elements: [] }] },
+})).reverse();
 const uploads = new ChatUploads(dir);
 let interruptChunk = true;
 const chunkWritten = Promise.withResolvers();
 const releaseChunk = Promise.withResolvers();
-let chatReadGate;
+let chatReadGate, mainHistoryGate;
 let inferOutcome = "completed";
 let inferAck = "ok";
 let inferObservation = null;
@@ -97,6 +103,8 @@ const handlers = {
   worker_list: () => ({ workers: [] }), worker_runtime_list: () => ({ runtimes: workerAccounts.map((account) => ({ id: account.id, provider: account.provider, state: "running", instance: id(20), pid: 100, error: null })) }),
   worker_catalog: ({ accountId }) => ({ accountId, provider: workerAccounts.find((account) => account.id === accountId).provider, observedAt: new Date().toISOString(), source: "acp-session", runtimeVersion: "2.1.0", modelConfigId: "model", models: [{ id: "model-native-1", name: "Native model one", efforts: ["low", "medium", "high"], effortConfigId: "effort" }], nativeModelIds: accountId === id(5) ? ["devin-native-model"] : [], stale: false, error: null }),
   chat_list: async ({ botId }) => { await chatReadGate?.promise; return { chats: [{ botId, threadId: id(10), parentThreadId: null, title: "Main thread fixture", cwd: "/fixture", createdAt: "2026-09-25", updatedAt: "2026-09-25", messageCount: 2 }] }; },
+  chat_main_items: async () => { await mainHistoryGate?.promise; return { threadId: id(10), data: chatHistory, nextCursor: null }; },
+  chat_main_live: () => ({ threadId: id(10), instance: "fixture-chat", revision: 0, activeTurnId: null, activeTurnStartedAt: null, coverage: "partial", reset: true, items: [] }),
   chat_send: () => ({ turn: { id: "fixture-turn", status: "inProgress" }, threadState: { status: { type: "active" }, activity: "working", observedAt: new Date().toISOString(), error: null } }),
   chat_enqueue: (input) => ({ ...input, state: "pending", turnId: null, issue: null, threadState: { status: { type: "idle" }, activity: "idle", observedAt: new Date().toISOString(), error: null } }),
   chat_upload_start: ({ botId, id, name, bytes, sha256 }) => uploads.start(botId, id, name, bytes, sha256),
@@ -177,6 +185,38 @@ try {
   };
   await page.locator('[data-node="bot:bot-1"]').waitFor();
   await page.screenshot({ path: join(evidence, "fleet-light.png"), fullPage: true, animations: "disabled" });
+  const primaryChat = page.locator('[data-window="chat"]');
+  await primaryChat.getByRole("button", { name: "Switch bot", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: /^bot-1 / }).click();
+  await primaryChat.getByText("Fixture reply 47", { exact: true }).waitFor();
+  const feedReads = calls.filter(({ name }) => name === "chat_main_live").length;
+  await primaryChat.getByRole("button", { name: "New chat window", exact: true }).click();
+  const extraChat = page.locator('[data-window="chat-2"]');
+  await extraChat.getByText("Fixture reply 47", { exact: true }).waitFor();
+  await page.getByRole("group", { name: "Fleet layout preset", exact: true }).getByRole("button", { name: "Tiled chats", exact: true }).click();
+  assert.equal(calls.filter(({ name }) => name === "chat_main_live").length, feedReads, "two windows showing one Bot share its live feed");
+  const scrollback = extraChat.locator(".chat-scroll"), heldScrollback = await scrollback.elementHandle();
+  await scrollback.evaluate((element) => { element.scrollTop = 300; element.dispatchEvent(new Event("scroll")); });
+  assert.equal(await scrollback.evaluate((element) => element.scrollTop), 300, "the reader has moved away from the live end before closing");
+  await extraChat.locator("header").first().getByRole("button", { name: "Close bot-1", exact: true }).click();
+  await revealPane(page, "Fleet", "chat-2");
+  assert.equal(await scrollback.evaluate((element, held) => element === held, heldScrollback), true, "closing a dynamic Chat retains its transcript DOM");
+  assert.equal(await scrollback.evaluate((element) => element.scrollTop), 300, "reopening retains the reader's place");
+  await heldScrollback.dispose();
+  await page.clock.install();
+  await extraChat.locator("header").first().getByRole("button", { name: "Close bot-1", exact: true }).click();
+  await primaryChat.locator("header").first().getByRole("button", { name: "Close bot-1", exact: true }).click();
+  await page.clock.runFor(100);
+  await page.clock.fastForward(120_000);
+  mainHistoryGate = Promise.withResolvers();
+  await revealPane(page, "Fleet", "chat-2");
+  await extraChat.getByText("Reading main thread…", { exact: true }).waitFor();
+  mainHistoryGate.resolve();
+  await extraChat.getByText("Fixture reply 47", { exact: true }).waitFor();
+  assert.equal(await scrollback.evaluate((element) => element.scrollTop), 300, "a fresh history read after a long closure retains the reader's place");
+  await page.clock.setSystemTime(Date.now());
+  await page.getByRole("group", { name: "Fleet layout preset", exact: true }).getByRole("button", { name: "Chat", exact: true }).click();
+  assert.equal(calls.filter(({ name }) => name === "chat_send" || name === "chat_enqueue").length, 0, "layout changes never send a message");
   // Bot and account cards link across the Fleet and Accounts spaces; the Spaces menu follows.
   await page.locator('[data-node="bot:bot-1"]').getByRole("link", { name: /codex-bot-account-1/ }).click();
   await page.waitForURL((url) => url.pathname === "/accounts" && url.searchParams.get("focus") === `account:${id(1)}`);
@@ -651,6 +691,7 @@ try {
   throw error;
 } finally {
   chatReadGate?.resolve();
+  mainHistoryGate?.resolve();
   releaseChunk.resolve();
   await browser?.close();
   if (next && next.exitCode === null) { next.kill("SIGTERM"); await new Promise((resolve) => next.once("exit", resolve)); }

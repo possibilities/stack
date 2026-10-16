@@ -3,6 +3,7 @@
  * REFERENCE_ONLY=1 scopes the run to real reference declarations; REFERENCE_EVIDENCE_DIR retains its screenshots.
  */
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
@@ -205,9 +206,9 @@ try {
     console.log(`PASS: reference capability, exact watch templates, typed occurrence source protocol and events_listen templates, keyboard lifecycle disclosure, light/dark/narrow wrapping; screenshots: ${evidence}`);
   } else {
   await page.goto(`${origin}/fleet`);
-  await page.getByRole("main", { name: "Open bench" }).waitFor();
+  await page.getByRole("main").waitFor();
   await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
-  assert.deepEqual(await page.locator("[data-window]:visible").evaluateAll((nodes) => nodes.map((node) => node.dataset.window).sort()), ["bot-state", "bots", "chat"]);
+  assert.deepEqual(await page.locator("[data-window]:visible").evaluateAll((nodes) => nodes.map((node) => node.dataset.window).sort()), ["bots", "chat"]);
   assert.equal(await page.getByRole("button", { name: "Grid", exact: true }).count(), 0);
   const point = () => page.locator('[data-window="bots"]').evaluate((el) => ({ x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y }));
   const samePoint = (a, b) => { assert.ok(Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1, `${JSON.stringify(a)} != ${JSON.stringify(b)}`); };
@@ -240,25 +241,23 @@ try {
   assert.equal(await page.getByRole("heading", { name: "bot-1", exact: true }).count(), 1);
   await page.getByRole("button", { name: "Close inspector", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Inspect bot bot-1", exact: true }).evaluate((el) => el === document.activeElement), true);
-  // Switching benches retains independent cameras and exposes only the selected space.
+  // Switching spaces retains independent pane layouts and exposes only the selected space.
   await page.getByRole("button", { name: /^Spaces/ }).click();
   await page.getByRole("menuitem", { name: /^System/ }).click();
   await page.locator('[data-window="server"]').waitFor({ state: "visible" });
   assert.ok(new URL(page.url()).pathname.endsWith("/system"));
+  await page.getByRole("group", { name: "System layout preset", exact: true }).getByRole("button", { name: "Monitor", exact: true }).click();
   assert.ok(await page.locator('[data-window="sampling"]').isVisible());
   assert.equal(await page.locator('[data-window="bots"]').isVisible(), false);
   const systemPoint = await page.locator('[data-window="server"]').boundingBox();
-  await page.getByRole("main", { name: "Open bench" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const systemPanned = await page.locator('[data-window="server"]').boundingBox();
-  assert.equal(Math.round(systemPanned.x - systemPoint.x), -64);
+
   await page.goBack();
   assert.ok(new URL(page.url()).pathname.endsWith("/fleet"));
   await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
   samePoint(initial, await point());
   await page.goForward();
   await page.locator('[data-window="server"]').waitFor({ state: "visible" });
-  samePoint(systemPanned, await page.locator('[data-window="server"]').boundingBox());
+  samePoint(systemPoint, await page.locator('[data-window="server"]').boundingBox());
   await page.goBack();
   await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Inspect bot bot-1", exact: true }).click();
@@ -279,7 +278,7 @@ try {
   const clickBench = async () => {
     const spot = await benchPoint();
     if (spot) await page.mouse.click(spot.x, spot.y);
-    else await page.getByRole("main", { name: "Open bench" }).dispatchEvent("click");
+    else await page.getByRole("main").dispatchEvent("click");
   };
   await page.getByRole("button", { name: "Inspect bot bot-1", exact: true }).click();
   await page.getByRole("heading", { name: "bot-1", exact: true }).waitFor();
@@ -288,19 +287,21 @@ try {
   assert.equal(new URL(page.url()).searchParams.get("inspect"), "bot:bot-1");
   await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await page.getByRole("heading", { name: "bot-1", exact: true }).waitFor();
-  // Keyboard input on the bench contracts too; so does wheel panning.
-  await page.getByRole("main", { name: "Open bench" }).focus();
+  // Workspace keyboard and wheel input contract the floating Inspector too.
+  await page.getByRole("main").focus();
   await page.keyboard.press("ArrowDown");
   await page.locator('[data-dock="right"]').waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   const wheelSpot = await benchPoint();
   if (wheelSpot) { await page.mouse.move(wheelSpot.x, wheelSpot.y); await page.mouse.wheel(0, 60); }
-  else await page.getByRole("main", { name: "Open bench" }).dispatchEvent("wheel");
+  else await page.getByRole("main").dispatchEvent("wheel");
   await page.locator('[data-dock="right"]').waitFor({ state: "hidden" });
-  // Interacting inside the inspector — even a control that hands focus to the bench — keeps it open.
+  // A deliberate workspace handoff contracts the floating Inspector without discarding its selection.
   await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await page.getByRole("button", { name: "Show on bench", exact: true }).click();
-  await page.getByRole("heading", { name: "bot-1", exact: true }).waitFor();
+  await page.locator('[data-dock="right"]').waitFor({ state: "hidden" });
+  assert.equal(new URL(page.url()).searchParams.get("inspect"), "bot:bot-1");
+  await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   // Inspecting another record swaps contents without hiding the dock.
   await page.getByRole("button", { name: "Inspect bot bot-2", exact: true }).click();
   await page.getByRole("heading", { name: "bot-2", exact: true }).waitFor();
@@ -322,7 +323,7 @@ try {
   await page.getByRole("button", { name: "Pin inspector", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Pin inspector", exact: true }).getAttribute("aria-pressed"), "false");
   await page.getByRole("button", { name: "Close inspector", exact: true }).click();
-  const bench = page.getByRole("main", { name: "Open bench" });
+  const bench = page.getByRole("main");
   await bench.focus();
   const historyLength = await page.evaluate(() => history.length);
   await page.mouse.move(700, 940); await page.mouse.wheel(90, 60);
@@ -331,7 +332,7 @@ try {
   await page.getByLabel("Find a package or operation").fill("bot_status");
   await page.locator('[aria-label="Reference search results"]').getByRole("link", { name: "bot_status", exact: true }).click();
   await page.getByRole("heading", { name: "Request templates" }).waitFor();
-  const evidence = join(uiDir, ".next", "bench-evidence");
+  const evidence = process.env.BENCH_EVIDENCE_DIR ?? join(uiDir, ".next", "bench-evidence");
   await mkdir(evidence, { recursive: true });
   await page.screenshot({ path: join(evidence, "reference-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -347,37 +348,28 @@ try {
   await page.getByRole("button", { name: "Close inspector", exact: true }).click();
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.getByRole("button", { name: /^Spaces/ }).click(); await page.getByRole("menuitem", { name: /^Fleet/ }).click();
-  const windowHeader = await page.locator('[data-window="bots"] header').boundingBox();
-  const beforeDrag = await point();
-  await page.mouse.move(windowHeader.x + 30, windowHeader.y + 25);
-  // Alt places freely, so the window tracks the pointer exactly instead of snapping to the grid.
-  await page.keyboard.down("Alt");
-  await page.mouse.down(); await page.mouse.move(windowHeader.x + 80, windowHeader.y + 65); await page.mouse.up();
-  await page.keyboard.up("Alt");
-  const afterDrag = await point();
-  assert.ok(Math.abs(afterDrag.x - beforeDrag.x - 50) < 1 && Math.abs(afterDrag.y - beforeDrag.y - 40) < 1, `drag ${JSON.stringify(beforeDrag)} -> ${JSON.stringify(afterDrag)}`);
-  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) ?? "{}").layout?.manual?.bots === true, destinationKey(origin, "uix.bench.v2.fleet"));
-  await page.reload();
-  await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
-  samePoint(afterDrag, await point());
-
   // The retained reference width is bounded by the desktop breakpoint's usable bench.
   await page.getByRole("button", { name: "Show API reference", exact: true }).click();
   const referenceSeparator = page.getByRole("separator", { name: "Resize API reference", exact: true });
   await referenceSeparator.focus();
   await page.keyboard.press("End");
   assert.equal(Number(await referenceSeparator.getAttribute("aria-valuenow")), Number(await referenceSeparator.getAttribute("aria-valuemax")));
-  await page.setViewportSize({ width: 900, height: 1000 });
-  await page.waitForFunction(() => document.querySelector('[aria-label="Resize API reference"]').getAttribute("aria-valuemax") === "660");
-  assert.equal(Number(await referenceSeparator.getAttribute("aria-valuemax")), 660);
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  await page.waitForFunction(() => document.querySelector('[aria-label="Resize API reference"]').getAttribute("aria-valuemax") === "700");
+  assert.equal(Number(await referenceSeparator.getAttribute("aria-valuemax")), 700);
   await page.getByRole("button", { name: "Expand reading mode", exact: true }).click();
-  for (const width of [900, 1100, 1600]) {
+  for (const width of [1000, 1100, 1600]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.waitForFunction(() => document.querySelector('[data-canvas="workbench"][data-space="fleet"]').clientWidth === 240);
     const chromeFits = await page.locator('header[data-chrome]').evaluate((el) => el.scrollWidth <= el.clientWidth);
     assert.ok(chromeFits, `bench controls overflow at ${width}px with both docks`);
+    const overlap = await page.locator('header[data-chrome]').evaluate((header) => {
+      const buttons = [...header.querySelectorAll("button")].filter((button) => button.getClientRects().length).map((button) => ({ name: button.getAttribute("aria-label"), rect: button.getBoundingClientRect() }));
+      return buttons.flatMap((a, i) => buttons.slice(i + 1).filter((b) => Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left) > 1 && Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top) > 1).map((b) => [a.name, b.name]));
+    });
+    assert.deepEqual(overlap, [], `workspace header actions overlap beside expanded reading at ${width}px`);
     assert.equal(await referenceSeparator.getAttribute("aria-valuenow"), await referenceSeparator.getAttribute("aria-valuemax"));
-    if (width === 900) await page.screenshot({ path: join(evidence, "joint-docks-900.png") });
+    if (width === 1000) await page.screenshot({ path: join(evidence, "joint-docks-1000.png") });
   }
 
   // Spatial navigation on mobile hides overlays, not retained inspection or reference state.
@@ -388,7 +380,7 @@ try {
   await page.locator('[data-dock="right"]').waitFor({ state: "hidden" });
   assert.equal(new URL(page.url()).searchParams.get("inspect"), "bot:bot-1");
   assert.equal(new URL(page.url()).searchParams.get("surface"), "bench");
-  assert.equal(await page.getByRole("button", { name: "Inspect bot bot-1", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await page.getByRole("button", { name: "Inspect bot bot-1", exact: true }).getAttribute("aria-pressed"), "false", "contracted inspection stays in the URL without active selection paint");
   await page.screenshot({ path: join(evidence, "mobile-show-on-bench.png") });
   await page.goBack();
   await page.getByRole("heading", { name: "bot-1", exact: true }).waitFor();
@@ -420,35 +412,7 @@ try {
   await page.getByRole("button", { name: "Show API reference", exact: true }).click();
   await page.getByRole("heading", { name: "Request templates" }).waitFor();
 
-  // Reproduce physically overlapping windows without adding temporary production spaces.
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.evaluate((key) => {
-    const saved = JSON.parse(localStorage.getItem(key));
-    saved.space = "another-logical-space"; // forces Fleet's direct URL to fit, rather than reuse this camera
-    saved.layout.positions.chat = { x: 0, y: 0 };
-    saved.layout.positions.bots = { x: 0, y: 0 };
-    saved.layout.manual.chat = true;
-    saved.layout.manual.bots = true;
-    saved.layout.order = ["bot-state", "chat", "bots"];
-    localStorage.setItem(key, JSON.stringify(saved));
-  }, destinationKey(origin, "uix.bench.v2.fleet"));
-  await page.goto(`${origin}/fleet`);
-  await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
-  const expectFront = async (id) => page.waitForFunction((target) => {
-    const windows = [...document.querySelectorAll('[data-space="fleet"] [data-window]')];
-    const front = windows.find((el) => el.dataset.window === target);
-    return front && windows.every((el) => el === front || Number(el.style.zIndex) < Number(front.style.zIndex));
-  }, id);
-  await expectFront("bots");
-  await page.locator('[data-window="chat"] button').first().focus();
-  await expectFront("chat");
-  await page.keyboard.press("Meta+k");
-  await page.getByRole("combobox").fill("bot-1");
-  await page.getByRole("option").filter({ hasText: "bot-1" }).first().click();
-  await page.getByRole("dialog", { name: "Jump to", exact: true }).waitFor({ state: "hidden" });
-  await page.waitForFunction(() => document.activeElement?.matches('[data-canvas="workbench"]'));
-  await expectFront("bots");
-  // Every space is a closed visual/focus boundary, even at minimum zoom and after panning.
   const expectedWindows = {
     HUD: ["hud-attention", "hud-item", "hud-resources", "hud-timeline", "hud-work"],
     Fleet: ["bot-state", "bots", "chat"], Accounts: ["accounts", "model-catalogs", "usage"],
@@ -460,6 +424,10 @@ try {
     Content: ["content-artifacts", "content-documents", "content-editor", "content-library", "content-preview", "content-storage"],
     Workers: ["worker", "worker-runtimes", "workers"],
     Scrape: ["scrape-checks", "scrape-convert", "scrape-extract", "scrape-feeds", "scrape-presets", "scrape-queue", "scrape-status"],
+    Browse: ["browse-controllers", "browse-handoffs", "browse-profiles", "browse-toolchain", "browse-viewer"],
+    Brain: ["brain-ingest", "brain-jobs", "brain-reader", "brain-search", "brain-sources"],
+    Proc: ["proc-run", "proc-runs", "proc-schedule", "proc-schedules", "proc-timeline"],
+    Source: ["source-catalog", "source-deliveries", "source-delivery", "source-receivers", "source-watches"],
   };
   const switchSpace = async (title) => {
     await page.getByRole("button", { name: /^Spaces/ }).click();
@@ -468,35 +436,37 @@ try {
   };
   for (const [title, ids] of Object.entries(expectedWindows)) {
     await switchSpace(title);
-    const bench = page.getByRole("main", { name: "Open bench" });
+    const bench = page.getByRole("main", { name: `${title} panes`, exact: true });
+    await bench.getByRole("button", { name: /^Panes/ }).click();
+    const catalog = page.getByRole("dialog", { name: `Panes in ${title}`, exact: true });
+    assert.deepEqual(await catalog.getByRole("group", { name: "All available panes", exact: true }).getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("data-value").split(" ")[0]).sort()), ids);
+    await page.keyboard.press("Escape");
     await bench.focus();
-    for (let i = 0; i < 7; i++) await page.keyboard.press("-");
-    await page.keyboard.press("Shift+ArrowRight");
-    assert.deepEqual(await page.locator("[data-window]:visible").evaluateAll((nodes) => nodes.map((n) => n.dataset.window).sort()), ids);
-    assert.equal(await page.getByRole("main", { name: "Open bench" }).count(), 1);
+    assert.equal(await page.getByRole("main").count(), 1);
     await page.locator('[hidden] [data-window] button').first().evaluate((el) => el.focus());
     assert.equal(await bench.evaluate((el) => document.activeElement === el), true, "hidden controls cannot take focus");
-    await page.keyboard.press("f");
   }
   await switchSpace("Lab");
+  await revealPane(page, "Lab", "inference");
   await page.getByPlaceholder("Ask something").fill("Keep this unsent draft across benches");
   await switchSpace("Fleet");
-  await page.getByRole("button", { name: "Collapse Bots", exact: true }).click();
+  await page.getByRole("button", { name: "Close Bots", exact: true }).click();
   await switchSpace("Lab");
   assert.equal(await page.getByPlaceholder("Ask something").inputValue(), "Keep this unsent draft across benches");
   await switchSpace("Fleet");
-  assert.equal(await page.getByRole("button", { name: "Expand Bots", exact: true }).count(), 1);
+  await page.locator('[data-pane-frame="bots"]').waitFor({ state: "hidden" });
+  await revealPane(page, "Fleet", "bots");
   assert.equal(await page.locator(':not([hidden]) > .bench-enter').evaluate((el) => getComputedStyle(el).animationName), "none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.getByRole("main", { name: "Open bench" }).evaluate((el) => {
+  await page.getByRole("main").evaluate((el) => {
     for (const key of ["2", "3", "4", "5"]) el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
   await page.locator('[data-space="roles"]').waitFor({ state: "visible" });
   assert.equal(new URL(page.url()).pathname, "/roles");
   assert.equal(await page.locator(':not([hidden]) > .bench-enter').evaluate((el) => getComputedStyle(el).animationDuration), "0.15s");
   await page.waitForTimeout(200);
-  assert.deepEqual(await page.locator("[data-window]:visible").evaluateAll((nodes) => nodes.map((n) => n.dataset.window).sort()), expectedWindows.Roles);
-  await page.screenshot({ path: join(evidence, "isolated-roles-bench.png") });
+  assert.ok(await page.locator('[data-window="role-catalog"]').isVisible());
+  await page.screenshot({ path: join(evidence, "isolated-roles-panes.png") });
   // A save from before destination isolation names no platform: it is quarantined, never read, migrated or rewritten.
   const legacyBench = JSON.stringify({
     space: "fleet", camera: { x: 100, y: 200, k: 0.8 }, anchor: { id: "bots", point: { x: 1000, y: 1000 } },
@@ -504,24 +474,26 @@ try {
       collapsed: { accounts: true }, sizes: { bots: { width: 500 } }, order: ["bots", "accounts"] },
   });
   await page.evaluate((legacy) => {
-    for (const key of Object.keys(localStorage)) if (key.includes(".uix.bench.v2.")) localStorage.removeItem(key);
+    for (const key of Object.keys(localStorage)) if (key.includes(".uix.panes.v1.")) localStorage.removeItem(key);
     localStorage.setItem("stack.uix.bench.v1", legacy);
     localStorage.setItem("stack.uix.bench.v2.fleet", legacy);
   }, legacyBench);
   await page.goto(`${origin}/fleet`);
   await page.locator('[data-window="bots"]').waitFor({ state: "visible" });
-  assert.ok(Math.abs((await point()).x - 900) > 1 || Math.abs((await point()).y - 1000) > 1, "the legacy anchor was not applied");
+  assert.equal(await page.getByRole("main", { name: "Fleet panes", exact: true }).count(), 1);
   await switchSpace("Accounts");
-  assert.equal(await page.getByRole("button", { name: "Expand Accounts", exact: true }).count(), 0, "the legacy collapsed state was not applied");
-  const accountsKey = destinationKey(origin, "uix.bench.v2.accounts");
+  await page.locator('[data-window="accounts"]').waitFor({ state: "visible" });
+  const accountsKey = destinationKey(origin, "uix.panes.v1.accounts");
   await page.waitForFunction((key) => localStorage.getItem(key) !== null, accountsKey);
-  assert.deepEqual(await page.evaluate((key) => Object.keys(JSON.parse(localStorage.getItem(key)).layout.positions).sort(), accountsKey), expectedWindows.Accounts);
-  const stored = await page.evaluate(([fleet]) => ({ v1: localStorage.getItem("stack.uix.bench.v1"), v2: localStorage.getItem("stack.uix.bench.v2.fleet"), own: JSON.parse(localStorage.getItem(fleet) ?? "null") }), [destinationKey(origin, "uix.bench.v2.fleet")]);
+  assert.deepEqual(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).closed, accountsKey), []);
+  const stored = await page.evaluate(([fleet]) => ({ v1: localStorage.getItem("stack.uix.bench.v1"), v2: localStorage.getItem("stack.uix.bench.v2.fleet"), own: JSON.parse(localStorage.getItem(fleet) ?? "null") }), [destinationKey(origin, "uix.panes.v1.fleet")]);
   assert.equal(stored.v1, legacyBench, "the unqualified v1 save is left exactly as it was");
   assert.equal(stored.v2, legacyBench, "the unqualified v2 save is left exactly as it was");
-  assert.notDeepEqual(stored.own?.layout?.positions?.bots, { x: 123, y: 234 }, "nothing was migrated from it");
+  assert.equal(stored.own?.version, 1, "the workspace saves only the new pane schema");
+  assert.equal(stored.own?.preset, "chat");
+  assert.deepEqual(stored.own?.closed, []);
   assert.deepEqual(issues, []);
-  console.log("PASS: isolated spaces at minimum zoom/pan, independent cameras/history, hidden focus exclusion, retained draft/collapse state, reduced motion and rapid navigation, legacy layout quarantine; desktop/mobile navigation, joint dock sizing/expanded reading, keyboard resize/Escape/focus return, retained inspection/reference, stacking, inspector scroll, pin persistence, schemas, search, deep links and manual placement reload; no page errors.");
+  console.log("PASS: all-space catalog, independent layouts/history, hidden focus exclusion, retained draft/closed pane, reduced motion, rapid navigation and legacy quarantine; desktop/mobile surfaces, dock allocation/reading/keyboard resizing, retained inspection/reference, focus return, pin persistence, schemas, search and deep links; no page errors.");
   console.log(`Screenshots: ${evidence}`);
   }
 } catch (error) {
