@@ -132,10 +132,6 @@ test("viewer windows switch the primary, keep pinned viewers, prune deleted prof
   assert.deepEqual(store.getGrants(), {});
   store.prune(new Set(["p2"]));
   assert.deepEqual(store.getWindows(), [{ id: primaryViewer, profileId: null }, { id: second, profileId: "p2" }]);
-  store.close(second);
-  store.close(primaryViewer);
-  assert.deepEqual(store.getWindows(), [{ id: primaryViewer, profileId: null }]);
-
   const restored = new ViewerWindowStore();
   storage.setItem("uix.browse-viewers.v1", JSON.stringify([{ id: "browse-viewer-3", profileId: "p3" }, { id: "evil", profileId: "p4" }, { id: "browse-viewer-3", profileId: "dup" }]));
   restored.attach(storage);

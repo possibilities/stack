@@ -72,7 +72,7 @@ export function DeliveriesWindow() {
 
   return (
     <Window id="source-deliveries" title="Deliveries" icon={InboxIcon} accent="source" count={ledger.through !== null ? ledger.entries.length : null}
-      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={sourceStatus.at} error={ledger.error ?? sourceStatus.error} bleed empty={!endpoints.source}>
+      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={sourceStatus.at} error={ledger.error ?? sourceStatus.error} bleed>
       {!endpoints.source ? <div className="p-3.5"><Empty icon={InboxIcon} title="Source isn't served by this server" /></div> : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-3.5 py-2.5">

@@ -27,7 +27,7 @@ export function SpaceRail({ compact, openOverview }: { compact: boolean; openOve
     <div className="flex h-16 shrink-0 items-center justify-center gap-2 px-3 font-semibold tracking-tight"><span className="flex size-7 items-center justify-center rounded-lg bg-foreground text-background"><LayersMark /></span>{!compact ? <span className="mr-auto">Stack</span> : null}</div>
     <nav aria-label="Canvas spaces" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3">
       {spaceGroups.map((group) => <div key={group.title} className="flex flex-col gap-0.5" role="group" aria-label={group.title}>
-        {compact ? <div className="mx-2 border-t border-border/50" /> : <h2 className="px-2 pb-1 text-[0.6rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">{group.title}</h2>}
+        {compact ? <div className="mx-2 border-t border-border/50" /> : <h2 className="px-2 pb-1 text-[0.6rem] font-semibold tracking-[0.14em] wrap-anywhere text-muted-foreground uppercase">{group.title}</h2>}
         {group.spaces.map((id) => {
           const item = spaces.find((item) => item.id === id)!, Icon = icons[id], reasons = attention[id];
           return <Tooltip key={id}><TooltipTrigger render={<a href={spaceHref(id)} aria-label={item.title} aria-current={space === id ? "page" : undefined} onClick={(event) => { if (plainClick(event)) { event.preventDefault(); setSpace(id); } }}
@@ -38,7 +38,7 @@ export function SpaceRail({ compact, openOverview }: { compact: boolean; openOve
         })}
       </div>)}
     </nav>
-    <div className="shrink-0 border-t border-border/60 p-2"><Button variant="ghost" size={compact ? "icon" : "sm"} className={compact ? "w-full" : "w-full justify-start"} aria-label="Space overview" onClick={openOverview}><CompassIcon data-icon="inline-start" />{compact ? null : "Overview"}</Button></div>
+    <div className="shrink-0 border-t border-border/60 p-2"><Button variant="ghost" size={compact ? "icon" : "sm"} className={compact ? "w-full" : "w-full justify-start"} aria-label="Space overview" title="Space overview" onClick={openOverview}><CompassIcon data-icon="inline-start" />{compact ? null : <span className="truncate">Overview</span>}</Button></div>
   </aside>;
 }
 function LayersMark() { return <FileTextIcon className="size-4" />; }

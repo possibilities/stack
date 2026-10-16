@@ -128,7 +128,7 @@ export function AccountsWindow() {
   const empty = !attempt && (!loaded || !loaded.bots.length && !loaded.workers.length);
 
   return (
-    <Window id="accounts" title="Accounts" subtitle="auth" icon={KeyRoundIcon} accent="auth" empty={empty}
+    <Window id="accounts" title="Accounts" subtitle="auth" icon={KeyRoundIcon} accent="auth"
       count={loaded ? loaded.bots.length + loaded.workers.length : undefined} status={status.auth} endpoint={endpoints.auth}
       updatedAt={accounts.at} error={accounts.error ?? workerAccounts.error ?? login.error} footer={<AddAccountMenu />}>
       {attempt ? <SignInCard key={attempt.id} attempt={attempt} labels={labels} accounts={accounts.data} catalog={catalog.data} /> : null}
@@ -613,7 +613,7 @@ export function BotsWindow() {
   const now = useNow();
 
   return (
-    <Window id="bots" title="Bots" subtitle="bots" icon={BotIcon} accent="bots" empty={!bots.data?.length}
+    <Window id="bots" title="Bots" subtitle="bots" icon={BotIcon} accent="bots"
       count={bots.data?.length} status={status.bots} endpoint={endpoints.bots} updatedAt={bots.at} error={bots.error} actions={<BotWindowActions />} footer={<CreateBotButton />}>
       {bots.data?.length ? (
         <div className="flex flex-col gap-2">

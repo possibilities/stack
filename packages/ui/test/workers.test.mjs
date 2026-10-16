@@ -169,8 +169,7 @@ test("WorkerWindowStore follows Workers like chat windows and restores a valid a
   windows.prune(new Set(["c"]));
   assert.deepEqual(windows.getWindows(), [{ id: "worker", workerId: "c" }]);
   windows.open(null);
-  windows.close("worker");
-  assert.deepEqual(windows.getWindows(), [{ id: "worker", workerId: null }, { id: "worker-2", workerId: null }]);
+  assert.deepEqual(windows.getWindows(), [{ id: "worker", workerId: "c" }, { id: "worker-2", workerId: null }]);
   windows.setFilter({ botId: "bot-1" });
   assert.deepEqual(windows.getFilter(), { botId: "bot-1" });
 

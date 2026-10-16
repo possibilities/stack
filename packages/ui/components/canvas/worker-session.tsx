@@ -2,7 +2,7 @@
 
 import { WorkerFilesTab } from "./worker-files";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronsUpDownIcon, CircleCheckIcon, CircleDashedIcon, CircleDotIcon, CopyPlusIcon, FolderGitIcon, GitBranchIcon, HammerIcon, LockIcon, ScrollTextIcon, ShieldQuestionIcon, SparklesIcon, TriangleAlertIcon, WrenchIcon, XIcon } from "lucide-react";
+import { ChevronsUpDownIcon, CircleCheckIcon, CircleDashedIcon, CircleDotIcon, CopyPlusIcon, FolderGitIcon, GitBranchIcon, HammerIcon, LockIcon, ScrollTextIcon, ShieldQuestionIcon, SparklesIcon, TriangleAlertIcon, WrenchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -11,7 +11,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { providerTitle, shortId, workerAccountLabels } from "@/lib/stack/derive";
 import { classifyWorkerRole, workerRoleHint, workerRoleLabel, type WorkerRole } from "@/lib/stack/roles";
 import { workerEventFence, workerEventReceiptLabels, workerObservationPhaseLabels } from "@/lib/stack/completion";
-import { primaryWorker } from "@/lib/stack/worker-windows";
 import type { StackStore } from "@/lib/stack/store";
 import { localOperation, localOperations } from "@/lib/stack/state";
 import type { RoleCatalog, ServeCompletionReceipt, WorkerDiff, WorkerDiffFile, WorkerDetail, WorkerEventPage, WorkerEventReceipt, WorkerPermission, WorkerRecord, WorkerRecordChunk, WorkerRecordPage, WorkerSession, WorkerStatus, WorkerTool, WorkerToolPage, WorkerTranscriptEntry, WorkerTranscriptPage, WorkerTurn, WorkerTurnObservation, WorkerTurnPage } from "@/lib/stack/types";
@@ -23,7 +22,6 @@ import { RecordTree } from "./record-tree";
 import { useNow, useStack, useStore, useWorkbench, useWorkerWindows } from "./provider";
 import { phaseTitle, phaseTone } from "./worker-windows";
 import { Window } from "./window";
-import { usePane } from "./pane-context";
 import { WorkerSettingsTab } from "./worker-settings";
 import { WorkContextLink } from "./hud-shared";
 import { WorkerMaintenance, WorkerSessionMaintenance, workerStateOperations } from "./worker-maintenance";
@@ -156,7 +154,6 @@ async function readTools(store: StackStore, id: string, pages: number): Promise<
   * window reads, except for managed settings and explicit local state maintenance.
  */
 export function WorkerWindow({ id }: { id: string }) {
-  const pane = usePane();
   const { windows, workerWindows, turnFocus } = useWorkerWindows();
   const { workerSessions, workerAccounts, remote } = useStack();
   const { goTo } = useWorkbench();
@@ -175,7 +172,6 @@ export function WorkerWindow({ id }: { id: string }) {
     setFocus(match);
     if (match) setTab("turns");
   }, [focusSeq]);
-  const primary = id === primaryWorker;
   const actions = (
     <>
       <WorkerSwitcher windowId={id} workerId={workerId} />
@@ -186,14 +182,6 @@ export function WorkerWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New Worker window</TooltipContent>
       </Tooltip>
-      {primary || pane ? null : (
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close Worker window" className="text-muted-foreground" onClick={() => workerWindows.close(id)} />}>
-            <XIcon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close</TooltipContent>
-        </Tooltip>
-      )}
     </>
   );
   return (

@@ -97,7 +97,7 @@ export function RolePreviewWindow() {
     const launch = roleLaunch.data;
     return (
       <Window id="role-preview" title="Preview" subtitle={[roleView.label, "skills, MCP servers and trust"].filter(Boolean).join(" · ")} icon={FileTextIcon} accent="roles"
-        status={status.roles} endpoint={endpoints.roles} updatedAt={roleLaunch.at} error={roleLaunch.error} empty={!launch}>
+        status={status.roles} endpoint={endpoints.roles} updatedAt={roleLaunch.at} error={roleLaunch.error}>
         <DefaultNote />
         {tabs}
         {context}
@@ -110,7 +110,7 @@ export function RolePreviewWindow() {
 
   return (
     <Window id="role-preview" title="Preview" subtitle={[roleView.label, "SYSTEM_APPEND.md"].filter(Boolean).join(" · ")} icon={FileTextIcon} accent="roles"
-      status={status.roles} endpoint={endpoints.roles} updatedAt={rolePreview.at} error={rolePreview.error} empty={!preview?.rendered && !personality}
+      status={status.roles} endpoint={endpoints.roles} updatedAt={rolePreview.at} error={rolePreview.error}
       actions={preview?.rendered ? <CopyButton value={preview.rendered} label="Fragments" className="opacity-100" /> : undefined}>
       <DefaultNote />
       {tabs}

@@ -91,7 +91,7 @@ test("finished turns carry their span and the active turn reports its phase and 
   assert.equal(reasoningHeadline({ summary: [] }), null);
 });
 
-test("chat windows switch the primary, reveal an existing Bot, add and close extras, and restore safely", () => {
+test("chat windows follow existing Bots, allocate retained bindings, prune removed Bots and restore safely", () => {
   const saved = new Map();
   const storage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
   const chats = new ChatWindowStore();
@@ -102,10 +102,7 @@ test("chat windows switch the primary, reveal an existing Bot, add and close ext
   assert.equal(chats.show("bot-2"), "chat-2", "a Bot already shown is revealed, not duplicated");
   assert.equal(chats.getWindows()[0].botId, "bot-1");
   assert.equal(chats.open(null), "chat-3");
-  chats.close("chat-2");
-  assert.equal(chats.open("bot-4"), "chat-2", "window IDs are reused");
-  chats.close(primaryChat);
-  assert.equal(chats.getWindows()[0].botId, null, "the primary window empties instead of closing");
+  assert.equal(chats.open("bot-4"), "chat-4", "existing bindings keep their IDs");
   chats.prune(new Set(["bot-1"]));
   assert.deepEqual(chats.getWindows().map((chat) => chat.id), [primaryChat, "chat-3"]);
 

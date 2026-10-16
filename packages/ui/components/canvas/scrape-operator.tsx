@@ -42,7 +42,6 @@ export function PresetsWindow() {
   return (
     <Window id="scrape-presets" title="Presets" icon={BlocksIcon} accent="scrape" count={scrapePresets.data ? presets.length : null}
       status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape} updatedAt={scrapePresets.at} error={scrapePresets.error ?? scrapeCanaries.error}
-      empty={!presets.length}
       actions={endpoints.scrape ? (
         <Button type="button" size="icon-sm" variant="ghost" aria-label="Read presets again" title="Read presets again" disabled={status.scrape !== "open"} onClick={store.refreshScrape}>
           <RefreshCwIcon />
@@ -114,7 +113,7 @@ export function ChecksWindow() {
   });
 
   return (
-    <Window id="scrape-checks" title="Checks" icon={ListChecksIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape} empty={!endpoints.scrape}>
+    <Window id="scrape-checks" title="Checks" icon={ListChecksIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape}>
       {!endpoints.scrape ? <Empty icon={ListChecksIcon} title="Scrape isn't served by this server" /> : (
         <>
           <Section title="Corpus replay" aside={<span className="text-[0.65rem] text-muted-foreground">Offline · recorded shapes</span>}>
@@ -210,7 +209,7 @@ export function StatusWindow() {
   const data = scrapeStatus.data;
   return (
     <Window id="scrape-status" title="Status" icon={GaugeIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape}
-      updatedAt={scrapeStatus.at} error={scrapeStatus.error} empty={!data}
+      updatedAt={scrapeStatus.at} error={scrapeStatus.error}
       actions={endpoints.scrape ? (
         <Button type="button" size="icon-sm" variant="ghost" aria-label="Read status again" title="Read status again" disabled={status.scrape !== "open"} onClick={store.refreshScrape}>
           <RefreshCwIcon />
@@ -302,7 +301,6 @@ export function QueueWindow() {
   return (
     <Window id="scrape-queue" title="Queue" icon={FolderInputIcon} accent="scrape" count={queue ? queue.counts.pending + queue.counts.retrying + queue.counts.failed : null}
       status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape} updatedAt={scrapeQueue.at} error={scrapeQueue.error}
-      empty={!queue?.jobs.length && !composing && !processed}
       footer={endpoints.scrape ? (
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" className={footerButton} aria-expanded={composing} onClick={() => setComposing(!composing)}><SendIcon data-icon="inline-start" />Submit job…</Button>

@@ -64,7 +64,7 @@ export function BotStateWindow() {
   const read = useBotRead(() => store.call<BotStateRead>("bots", "bot_state_read", { botId }), botId, observe, { pkg: "bots", operation: "bot_state_read" });
   if (remote) {
     return (
-      <Window id="bot-state" title="Bot state" icon={HardDriveIcon} accent="bots" empty>
+      <Window id="bot-state" title="Bot state" icon={HardDriveIcon} accent="bots">
         <div className="flex flex-col items-center gap-1.5 p-6 text-center">
           <HardDriveIcon className="size-5 text-muted-foreground/70" />
           <p className="text-sm font-medium">Available only on the local UI</p>
@@ -77,7 +77,7 @@ export function BotStateWindow() {
   const scope: BotScope | null = botId && data ? { botId, incarnation: data.incarnation, generation: data.generation, observe, unavailable } : null;
   return (
     <Window id="bot-state" title="Bot state" subtitle={botId ?? undefined} icon={HardDriveIcon} accent="bots" node={botId ? { kind: "bot-state", id: botId } : undefined}
-      status={status.bots} endpoint={endpoints.bots} error={read.error} empty={!scope}>
+      status={status.bots} endpoint={endpoints.bots} error={read.error}>
       <div className="flex flex-col gap-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <NativeSelect size="sm" aria-label="Bot" className="min-w-0 flex-1" value={botId ?? ""} onChange={(event) => store.selectBotState(event.target.value || null)}>

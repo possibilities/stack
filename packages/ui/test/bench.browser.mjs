@@ -456,14 +456,14 @@ try {
   await switchSpace("Fleet");
   await page.locator('[data-pane-frame="bots"]').waitFor({ state: "hidden" });
   await revealPane(page, "Fleet", "bots");
-  assert.equal(await page.locator(':not([hidden]) > .bench-enter').evaluate((el) => getComputedStyle(el).animationName), "none");
+  assert.equal(await page.locator(':not([hidden]) > .space-enter').evaluate((el) => getComputedStyle(el).animationName), "none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.getByRole("main").evaluate((el) => {
     for (const key of ["2", "3", "4", "5"]) el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
   await page.locator('[data-space="roles"]').waitFor({ state: "visible" });
   assert.equal(new URL(page.url()).pathname, "/roles");
-  assert.equal(await page.locator(':not([hidden]) > .bench-enter').evaluate((el) => getComputedStyle(el).animationDuration), "0.15s");
+  assert.equal(await page.locator(':not([hidden]) > .space-enter').evaluate((el) => getComputedStyle(el).animationDuration), "0.15s");
   await page.waitForTimeout(200);
   assert.ok(await page.locator('[data-window="role-catalog"]').isVisible());
   await page.screenshot({ path: join(evidence, "isolated-roles-panes.png") });

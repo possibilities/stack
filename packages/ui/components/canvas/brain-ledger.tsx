@@ -55,7 +55,7 @@ export function JobsWindow() {
   return (
     <Window id="brain-jobs" title="Jobs" icon={ListChecksIcon} accent="brain" count={stats?.total ?? null}
       status={endpoints.brain ? status.brain : undefined} endpoint={endpoints.brain} updatedAt={brainJobStats.at} error={brainJobStats.error ?? brainJobs.error ?? brainStatus.error}
-      empty={!endpoints.brain}>
+      >
       {!endpoints.brain ? <Empty icon={ListChecksIcon} title="Brain isn't served by this server" /> : (
         <>
           <div className="flex flex-col gap-1 px-0.5">
@@ -333,7 +333,6 @@ export function SourcesWindow() {
   return (
     <Window id="brain-sources" title="Sources" icon={SatelliteDishIcon} accent="brain" count={brainSources.data ? sources.length : null}
       status={endpoints.brain ? status.brain : undefined} endpoint={endpoints.brain} updatedAt={brainSources.at} error={brainSources.error}
-      empty={!sources.length && !bulkResult}
       footer={endpoints.brain && sources.length ? (
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" className={footerButton} disabled={Boolean(blocked) || bulk !== null} title={blocked ?? "Report which due sources would sync, without admitting anything"} onClick={() => void syncDue(true)}>

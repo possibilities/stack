@@ -67,11 +67,11 @@ function OpenLocally() {
 export function ContentPreviewWindow() {
   const { selection } = useContentActions();
   const { status, endpoints } = useStack();
-  const frame = (subtitle: string | undefined, body: React.ReactNode, empty = false, updatedAt: number | null = null, error: string | null = null, actions?: React.ReactNode) => (
+  const frame = (subtitle: string | undefined, body: React.ReactNode, updatedAt: number | null = null, error: string | null = null, actions?: React.ReactNode) => (
     <Window id="content-preview" title="Preview" subtitle={subtitle} icon={EyeIcon} accent="content" status={status.content} endpoint={endpoints.content}
-      updatedAt={updatedAt} error={error} empty={empty} actions={actions}>{body}</Window>
+      updatedAt={updatedAt} error={error} actions={actions}>{body}</Window>
   );
-  if (!selection) return frame(undefined, <Empty icon={EyeIcon} title="Choose something to preview" />, true);
+  if (!selection) return frame(undefined, <Empty icon={EyeIcon} title="Choose something to preview" />);
   switch (selection.kind) {
     case "document": return <DocumentPreview key={selection.slug} slug={selection.slug} frame={frame} />;
     case "item": return <ItemPreview key={selection.id} id={selection.id} frame={frame} />;
@@ -79,7 +79,7 @@ export function ContentPreviewWindow() {
   }
 }
 
-type Frame = (subtitle: string | undefined, body: React.ReactNode, empty?: boolean, updatedAt?: number | null, error?: string | null, actions?: React.ReactNode) => React.ReactNode;
+type Frame = (subtitle: string | undefined, body: React.ReactNode, updatedAt?: number | null, error?: string | null, actions?: React.ReactNode) => React.ReactNode;
 
 function DocumentPreview({ slug, frame }: { slug: string; frame: Frame }) {
   const actions = useContentActions();
@@ -89,7 +89,7 @@ function DocumentPreview({ slug, frame }: { slug: string; frame: Frame }) {
   const backlinks = useContentRead<ContentBacklinks>("backlinks", { ref: slug });
   const show = useCallback((target: string) => actions.preview({ kind: "document", slug: target }), [actions]);
   const path = fillRoute(contentRoutes.data?.documentPath ?? defaultRoutes.documentPath, { slug });
-  if (!document.data) return frame(`document · ${slug}`, <Empty icon={EyeIcon} title={document.error ?? "Loading…"} />, true, document.at, document.error);
+  if (!document.data) return frame(`document · ${slug}`, <Empty icon={EyeIcon} title={document.error ?? "Loading…"} />, document.at, document.error);
   const outgoing = links.data?.outgoing ?? [];
   const dangling = (links.data?.dangling ?? []) as Array<{ target?: string; reason?: string }>;
   const incoming = backlinks.data?.incoming ?? [];
@@ -139,7 +139,7 @@ function DocumentPreview({ slug, frame }: { slug: string; frame: Frame }) {
         )}
       </Section>
     </>
-  ), false, document.at, document.error);
+  ), document.at, document.error);
 }
 
 type ItemRead = ContentItem & { content: string | null; base64: string | null };
@@ -148,7 +148,7 @@ function ItemPreview({ id, frame }: { id: string; frame: Frame }) {
   const actions = useContentActions();
   const read = useContentRead<ItemRead>("item_get", { id, includeData: true });
   const item = read.data;
-  if (!item) return frame("item", <Empty icon={EyeIcon} title={read.error ?? "Loading…"} />, true, read.at, read.error);
+  if (!item) return frame("item", <Empty icon={EyeIcon} title={read.error ?? "Loading…"} />, read.at, read.error);
   return frame(`item · ${item.kind}`, (
     <>
       <div className="flex flex-col gap-1.5">
@@ -173,7 +173,7 @@ function ItemPreview({ id, frame }: { id: string; frame: Frame }) {
       {item.kind === "image" ? <ImageBody item={item} /> : item.kind === "document" ? <TextBody item={item} /> : <PeekBody item={item} />}
       <OpenLocally />
     </>
-  ), false, read.at, read.error);
+  ), read.at, read.error);
 }
 
 /** Read an item's bytes through the Package API in bounded chunks. */
@@ -261,7 +261,7 @@ function ArtifactPreview({ name, version, frame }: { name: string; version?: str
   const versions = useContentRead<{ versions: ContentArtifact[] }>("artifacts_versions", version ? { name } : null);
   const artifact = version ? versions.data?.versions.find((item) => item.version === version) ?? null : latest.data;
   const read = version ? versions : latest;
-  if (!artifact) return frame(`artifact · ${name}`, <Empty icon={EyeIcon} title={read.error ?? (read.data ? "That version no longer exists" : "Loading…")} />, true, read.at, read.error);
+  if (!artifact) return frame(`artifact · ${name}`, <Empty icon={EyeIcon} title={read.error ?? (read.data ? "That version no longer exists" : "Loading…")} />, read.at, read.error);
   const tombstoned = Boolean(artifact.deleted);
   return frame(`artifact · ${artifact.kind}`, (
     <>
@@ -296,5 +296,5 @@ function ArtifactPreview({ name, version, frame }: { name: string; version?: str
       </p>
       <OpenLocally />
     </>
-  ), false, read.at, read.error);
+  ), read.at, read.error);
 }

@@ -4,6 +4,7 @@
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node test/workers-browser-check.mjs
 // CHROME_BIN may override the local headless Chrome executable.
 import assert from "node:assert/strict";
+import { revealPane } from "./pane-spaces-browser.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
@@ -415,6 +416,7 @@ try {
   // A linked turn focus from System's subscription detail takes the highlight and clears the receipt-clicked
   // one; clicking a receipt's turn afterward still wins over the now-stale linked focus.
   await page.goto(`${origin}/system`);
+  await revealPane(page, "System", "subscriptions");
   const subs = page.locator('[data-window="subscriptions"]');
   await subs.waitFor();
   await subs.getByRole("button", { name: "History", exact: true }).click();

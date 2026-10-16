@@ -71,7 +71,7 @@ export function DeveloperWindow() {
   const data = harnessReleases.data;
   const busy = Boolean(harnessCheck?.pending || data?.checking);
   return (
-    <Window id="developer" title="Developer" subtitle="developer mode" icon={HammerIcon} accent="server" empty={!data && !harnessReleases.error}
+    <Window id="developer" title="Developer" subtitle="developer mode" icon={HammerIcon} accent="server"
       status={status.serve} endpoint={endpoints.serve} updatedAt={harnessReleases.at} error={harnessReleases.error}
       actions={
         <Button size="xs" variant="outline" disabled={busy || status.serve !== "open"} onClick={() => void store.checkHarnessReleases()}

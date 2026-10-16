@@ -232,7 +232,7 @@ try {
   assert.equal(await title.inputValue(), "", "A's draft is not B's");
   assert.equal(await pin.getAttribute("aria-pressed"), "false", "A's inspector pin is not B's");
   assert.ok(Math.abs((await point()).height - home.height) < 2, "A's pane arrangement is not B's");
-  // Pin first: an unpinned inspector contracts on any other interaction with the bench.
+  // Pin first: an unpinned inspector contracts on other workspace interaction.
   if (!await pin.isVisible()) await page.getByRole("button", { name: "Return to inspector", exact: true }).click();
   await pin.click();
   const prefixB = destinationKey(origin, "", { serverId: idB });
@@ -379,7 +379,8 @@ try {
   await page.goto(`${origin}/fleet`);
   await page.locator('[data-window="chat"]').waitFor();
   const fleet = page.getByRole("main", { name: "Fleet panes", exact: true });
-  if (await fleet.count()) {
+  await fleet.waitFor();
+  {
     await page.locator('[data-pane-frame="chat"]').focus();
     await fleet.getByRole("button", { name: /^Panes/ }).click();
     await page.getByRole("dialog", { name: "Panes in Fleet" }).getByRole("button", { name: "Below", exact: true }).click();
@@ -406,14 +407,15 @@ try {
     await chat.getByText("fixture-bot is stopped", { exact: true }).waitFor();
     assert.equal(await page.locator('[data-pane-frame="chat-2"]').count(), 1, "reopening reuses the restored binding without duplicating it");
     report.dynamicRestore = "passed";
-  } else report.dynamicRestore = "skipped: Fleet still uses Bench";
+  }
 
   platform.developer(true);
   await page.goto(`${origin}/system`);
   const server = page.locator('[data-window="server"]');
   await server.waitFor();
   const system = page.getByRole("main", { name: "System panes", exact: true });
-  if (await system.count()) {
+  await system.waitFor();
+  {
     await server.getByRole("switch", { name: "Developer mode" }).waitFor();
     await page.waitForFunction(() => document.querySelector('[data-window="server"] [role="switch"]')?.getAttribute("aria-checked") === "true");
     await revealPane(system, "System", "developer");
@@ -443,7 +445,7 @@ try {
     await page.locator('[data-pane-frame="developer"]').waitFor({ state: "detached" });
     await page.waitForFunction((key) => !localStorage.getItem(key)?.includes('"developer"'), key);
     report.conditionalRegistry = "passed";
-  } else report.conditionalRegistry = "skipped: System still uses Bench";
+  }
   assert.deepEqual(problems, [], "restoring registrations has no page errors");
   report.final = Object.keys(await storage());
   await writeFile(join(evidence, "destination-keys.json"), JSON.stringify({ origin, idA, idB, legacy: Object.keys(legacy), ...report }, null, 2));

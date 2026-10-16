@@ -311,7 +311,7 @@ export function SignalWindow() {
   const inference = data?.lastInference;
   return (
     <Window id="signal" title="Signal" icon={RadarIcon} accent="events" node={{ kind: "signal" }}
-      status={status.signal} endpoint={endpoints.signal} updatedAt={signalStatus.at} error={signalStatus.error} empty={!data}>
+      status={status.signal} endpoint={endpoints.signal} updatedAt={signalStatus.at} error={signalStatus.error}>
       {data ? (
         <>
           <div className="flex items-center gap-3 rounded-xl border px-3 py-2.5">

@@ -38,7 +38,7 @@ export function ServerWindow() {
   const serverScope = resources.data?.scopes.find((scope) => scope.id === "component:server");
   const scopeOf = (name: string) => resources.data?.scopes.find((scope) => scope.id === componentScopeId(name));
   return (
-    <Window id="server" title="Server" subtitle="server" icon={CpuIcon} accent="server" node={{ kind: "server" }} empty={!data && !server.error}
+    <Window id="server" title="Server" subtitle="server" icon={CpuIcon} accent="server" node={{ kind: "server" }}
       status={status.serve} endpoint={endpoints.serve} updatedAt={server.at} error={server.error}
       actions={inspectorUrl ? (
         <Button variant="ghost" size="xs" nativeButton={false} render={<a href={inspectorUrl} target="_blank" rel="noreferrer" title={inspectorUrl} />}>
@@ -180,7 +180,7 @@ export function PackagesWindow() {
   const packages = [...new Set([...Object.keys(endpoints), ...Object.keys(status), ...Object.keys(mcpUrls), ...(catalog.data ?? []).map((doc) => doc.name)])].sort();
   const subscriptions = Object.values(scoped);
   return (
-    <Window id="packages" title="Packages" subtitle="discovery" icon={PackageIcon} accent="server" empty={!packages.length}
+    <Window id="packages" title="Packages" subtitle="discovery" icon={PackageIcon} accent="server"
       count={packages.length || null} updatedAt={catalog.at ?? server.at} error={catalog.error}>
       {packages.length ? (
         <div className="-mx-1 flex flex-col">
@@ -216,7 +216,7 @@ export function ActivityWindow() {
   const activity = events.filter((event) => !search || [event.pkg, event.topic, event.scope].join(" ").toLowerCase().includes(search));
   return (
     <Window id="activity" title="Activity" subtitle="notices" icon={RadioIcon} accent="events" count={activity.length}
-      empty={!events.length}>
+      >
       <InputGroup className="h-8">
         <InputGroupAddon><SearchIcon /></InputGroupAddon>
         <InputGroupInput id="activity-filter" type="search" autoComplete="off" aria-label="Filter activity" placeholder="Filter" value={query} onChange={(event) => setQuery(event.target.value)} />

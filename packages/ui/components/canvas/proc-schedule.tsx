@@ -65,7 +65,6 @@ export function ProcScheduleWindow() {
     <Window id="proc-schedule" title={schedule ? scheduleTitle(schedule) : "Schedule"} subtitle="proc" icon={CalendarClockIcon} accent="proc"
       node={schedule ? { kind: "proc-schedule", id: schedule.id } : undefined}
       status={status.proc} endpoint={endpoints.proc} updatedAt={detail.at} error={detail.error}
-      empty={!schedule}
       footer={schedule && !remote ? <ScheduleControls schedule={schedule} onChanged={() => setEpoch((value) => value + 1)} /> : undefined}>
       {unavailable ? <ProcPlaceholder title={unavailable} hint="Process output and schedule definitions stay on the Stack machine." />
         : !selectedScheduleId ? <ProcPlaceholder title="Choose a schedule" hint="Pick one in the Schedules list." />

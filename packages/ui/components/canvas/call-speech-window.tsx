@@ -55,7 +55,7 @@ export function CallSpeechWindow() {
 
   return (
     <Window id="call-speech" title="Call speech" icon={MegaphoneIcon} accent="bots" count={call ? 1 : 0}
-      status={status.bots} endpoint={endpoints.bots} updatedAt={voice.at} error={voice.error} empty={!call && !submissions.length}>
+      status={status.bots} endpoint={endpoints.bots} updatedAt={voice.at} error={voice.error}>
       {call ? (
         <Section title="Open call">
           <div className="flex items-center gap-2.5 rounded-xl border p-2.5">

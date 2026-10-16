@@ -47,7 +47,7 @@ export function WatchesWindow() {
 
   return (
     <Window id="source-watches" title="Watches" icon={EyeIcon} accent="source" count={list?.length ?? null}
-      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={sourceWatches.at ?? sourceStatus.at} error={sourceWatches.error} bleed empty={!endpoints.source}
+      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={sourceWatches.at ?? sourceStatus.at} error={sourceWatches.error} bleed
       actions={createAccess ? (
         <Button size="xs" variant="outline" disabled={!createAccess.available || status.source !== "open" || (list?.length ?? 0) >= maxWatches || creating !== null} title={createAccess.available ? undefined : createAccess.reason}
           onClick={() => setCreating({ filter: null })}><PlusIcon data-icon="inline-start" />New watch</Button>

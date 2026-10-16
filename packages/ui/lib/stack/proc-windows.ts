@@ -4,7 +4,7 @@ import type { ProcRunFilter, ProcScheduleFilter } from "./proc";
  * Which run each Proc-space Run window shows, which schedule the Schedule window
  * follows, and the Schedules and Runs lists' filters. The primary Run window
  * always exists and is the one choosing a run switches; additional windows keep
- * their run until closed. The arrangement and selection are browser-local and
+ * their run independently of pane visibility. The arrangement and selection are browser-local and
  * optional: losing them only resets them. The filters are not kept.
  */
 export type ProcRunWindow = { id: string; runId: string | null };
@@ -42,7 +42,7 @@ export class ProcWindowStore {
   getSelected = (): string | null => this.selected;
   getScheduleFilter = (): ProcScheduleFilter => this.scheduleFilter;
   getRunFilter = (): ProcRunFilter => this.runFilter;
-  /** Benches may hydrate after attach; keep the snapshots SSR rendered. */
+  /** Spaces may hydrate after attach; keep the snapshots SSR rendered. */
   getServerWindows = (): ProcRunWindows => this.serverWindows;
   getServerSelected = (): string | null => null;
   getServerScheduleFilter = (): ProcScheduleFilter => this.serverScheduleFilter;
@@ -69,13 +69,6 @@ export class ProcWindowStore {
     const id = `proc-run-${n}`;
     this.setWindows([...this.windows, { id, runId }]);
     return id;
-  }
-
-  /** The primary window stays; closing it clears its run instead. */
-  close(id: string): void {
-    this.setWindows(id === primaryProcRun
-      ? this.windows.map((window) => window.id === id ? { ...window, runId: null } : window)
-      : this.windows.filter((window) => window.id !== id));
   }
 
   /** The Schedule window follows this selection. */

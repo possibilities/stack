@@ -73,7 +73,7 @@ export function ContentStorageWindow() {
   const { remote, status, endpoints } = state;
   if (remote) {
     return (
-      <Window id="content-storage" title="Storage" icon={HardDriveIcon} accent="content" empty>
+      <Window id="content-storage" title="Storage" icon={HardDriveIcon} accent="content">
         <div className="flex flex-col items-center gap-1.5 p-6 text-center">
           <HardDriveIcon className="size-5 text-muted-foreground/70" />
           <p className="text-sm font-medium">Available only on the local UI</p>

@@ -123,7 +123,6 @@ export function RoleInstructionsWindow() {
   return (
     <Window id="role-instructions" title="Instructions" subtitle={[view.label ?? "roles", data ? `revision ${data.revision}` : null].filter(Boolean).join(" · ")} icon={ScrollTextIcon} accent="roles"
       count={counts?.fragments ?? null} status={status.roles} endpoint={endpoints.roles} updatedAt={role.at} error={role.error}
-      empty={!data?.categories.length}
       footer={
         <Button size="sm" variant="ghost" className={footerButton} disabled={!data || !connected} title={remote?.scope === "view" ? "Requires ui:control" : undefined} onClick={() => actions.open({ kind: "new-category" })}>
           <FolderPlusIcon data-icon="inline-start" />New category

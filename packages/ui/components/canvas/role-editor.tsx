@@ -143,8 +143,8 @@ export function RoleEditorWindow() {
   const view = useRoleView();
   if (target?.kind === "new-role") return <NewRoleEditor />;
   if (view.state === "missing" && roleId) return <DeletedRoleEditor id={roleId} />;
-  if (view.blank) return <EditorFrame empty unscoped><Empty icon={FilePenLineIcon} title={view.blank} /></EditorFrame>;
-  if (!target) return <EditorFrame empty><Empty icon={FilePenLineIcon} title={role.data?.categories.length ? "Choose a record to edit" : "Nothing to edit yet"} /></EditorFrame>;
+  if (view.blank) return <EditorFrame unscoped><Empty icon={FilePenLineIcon} title={view.blank} /></EditorFrame>;
+  if (!target) return <EditorFrame><Empty icon={FilePenLineIcon} title={role.data?.categories.length ? "Choose a record to edit" : "Nothing to edit yet"} /></EditorFrame>;
   // The Role keys the editor, so state made for one never carries over to another.
   return <Fragment key={roleId}>{editorFor(target)}</Fragment>;
 }
@@ -544,7 +544,7 @@ function RoleDetailsEditor({ id }: { id: string }) {
   const draft = useDraft(key, saved);
   const connected = status.roles === "open";
   const saving = actions.pending.has(`save:${key}`);
-  if (!found || role.data?.id !== id) return <EditorFrame empty><Empty icon={FilePenLineIcon} title={role.error ? "Role unavailable" : "Reading Role…"} /></EditorFrame>;
+  if (!found || role.data?.id !== id) return <EditorFrame><Empty icon={FilePenLineIcon} title={role.error ? "Role unavailable" : "Reading Role…"} /></EditorFrame>;
 
   const dirty = Object.keys(draft.changes).length > 0;
   const personalityIssue = utf8Bytes(draft.value("botMarkdown")) > 65_536 ? "bot.md exceeds 65,536 UTF-8 bytes" : null;

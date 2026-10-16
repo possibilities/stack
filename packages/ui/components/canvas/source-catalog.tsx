@@ -48,7 +48,7 @@ export function CatalogWindow() {
   const unavailable = sourceUnavailable(endpoints, status);
   return (
     <Window id="source-catalog" title="Event catalog" icon={BookMarkedIcon} accent="source" count={catalog?.entries.length ?? null}
-      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} error={state.key === key ? state.error : null} empty={!endpoints.source}>
+      status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} error={state.key === key ? state.error : null}>
       {!endpoints.source ? <Empty icon={BookMarkedIcon} title="Source isn't served by this server" /> : (
         <>
           <div className="grid grid-cols-2 gap-2">

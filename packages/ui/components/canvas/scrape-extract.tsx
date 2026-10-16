@@ -144,7 +144,7 @@ export function ExtractWindow() {
 
   return (
     <Window id="scrape-extract" title="Extract" icon={GlobeIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape}
-      updatedAt={scrapePresets.at} error={scrapePresets.error} empty={!endpoints.scrape}>
+      updatedAt={scrapePresets.at} error={scrapePresets.error}>
       {!endpoints.scrape ? <Empty icon={GlobeIcon} title="Scrape isn't served by this server" /> : (
         <>
           <form id={formId} className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void submit(); }}>

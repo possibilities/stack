@@ -49,7 +49,7 @@ export function ReceiversWindow() {
   return (
     <Window id="source-receivers" title="Receivers" icon={RadioTowerIcon} accent="source" count={list?.length ?? null}
       status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={sourceEndpoints.at ?? sourceStatus.at}
-      error={sourceEndpoints.error ?? sourceStatus.error} empty={!endpoints.source}
+      error={sourceEndpoints.error ?? sourceStatus.error}
       actions={createAccess ? (
         <Button size="xs" variant="outline" disabled={!createAccess.available || status.source !== "open" || (list?.length ?? 0) >= maxReceivers || creating !== null} title={createAccess.available ? undefined : createAccess.reason}
           onClick={() => setCreating({ resume: null })}><PlusIcon data-icon="inline-start" />New receiver</Button>

@@ -40,24 +40,29 @@ Structured documents for every package API — operations with their JSON Schema
 Discovery is also available over authenticated MCP. Worker-visible reads must be named in `mcp.workerOperations`; omission denies all, and the effective list is intersected with ordinary MCP exposure. Read-only annotations alone grant no access. The API reference displays this effective selection. Workers can read their own records and selected shared Role/Brain/Content data; sign-in state, Bot conversations, notifications and Proc output are excluded. Changing a selection applies to subsequent calls in existing native sessions. See [ADR 0114](adr/0114-explicit-worker-disclosure.md).
 
 The browsable Package API reference is built into UI. Open **API reference**
-from anywhere on the bench, or follow a contextual operation link. Its searchable
+from any Canvas space, or follow a contextual operation link. Its searchable
 reader uses `docs_snapshot` and exposes descriptions, full input/output schemas,
 transports and scoped event subscriptions. The direct entry is
 `http://127.0.0.1:8745/?reference=overview` with the default UI port.
 There is no separate docs listener, `stack docs` command or Markdown twin.
 
 The server also starts the standalone UI app at `http://127.0.0.1:8745/` and
-prints this UI entry URL. The root serves the live Fleet open bench; there is no
-separate index page. System holds current local links, full Package API MCP URLs,
-server processes, and host/resource sampling.
-Fleet holds Bot accounts,
-Worker accounts, Bots, Usage and Model catalogs, with explicit Bot lifecycle
-controls and a discovery-driven Bot tools dialog. Spaces are
-physical regions of one shared canvas, initially Fleet. API reference and record
-inspection share the right dock. Space
-navigation moves the camera, and window headers let you arrange the composition.
-The server
-also prints the canvas URL. Set `STACK_UI_PORT` before starting to choose
+prints this UI entry URL. The root opens HUD for shared Work. The grouped rail
+connects fifteen Canvas spaces, each with task presets and a remembered pane
+layout. Fleet holds Bots and their live chats; Accounts holds sign-ins, Usage
+and Model catalogs. System holds server settings, local links, Package API MCP
+URLs, processes, host resources, state and subscriptions.
+
+Use **Panes** to see a space's full catalog, reveal a tab or reopen a closed pane.
+Closing hides the pane and retains its binding and work. Arrange panes using
+their header menus or drag handles, resize the separators, and zoom a pane for
+focused reading. **Keys** lists the keyboard controls. Narrow screens show a
+compact tab arrangement while retaining the desktop layout. API reference and
+record inspection share the right dock; pinning inspection reserves reading
+space. Links connect records across spaces without discarding retained editors.
+See [ADR 0180](adr/0180-tiled-pane-spaces.md) for the layout and lifetime contract.
+
+Set `STACK_UI_PORT` before starting to choose
 another port. `pnpm build` prepares `packages/ui` for `stack serve`.
 The UI follows the system light/dark preference. The server stops the app
 on shutdown.

@@ -80,7 +80,7 @@ export function ResourcesWindow() {
   const activeName = active === "total" ? "Stack" : scopeName(data?.scopes.find((scope) => scope.id === active) ?? ({ name: active } as ResourceScope));
   return (
     <Window id="resources" title="Resources" subtitle="server sampler" icon={ChartLineIcon} accent="server" node={{ kind: "resource", id: "total" }}
-      count={data?.scopes.length ?? null} updatedAt={resources.at} error={resources.error} empty={!data && !resources.error}>
+      count={data?.scopes.length ?? null} updatedAt={resources.at} error={resources.error}>
       {resources.error && data ? <p className="text-xs text-destructive" role="status">Resources read failed: {resources.error} · showing last good read</p> : null}
       {data ? (
         <div className="flex flex-col gap-4">
@@ -155,7 +155,7 @@ export function HostWindow() {
   const agentShare = host?.totalMemoryBytes && totalRss !== null ? totalRss / host.totalMemoryBytes : null;
   return (
     <Window id="host" title="Host" subtitle={host?.hostname ?? "machine"} icon={ServerIcon} accent="server"
-      updatedAt={resources.at} error={resources.error} empty={!host && !resources.error}>
+      updatedAt={resources.at} error={resources.error}>
       {host ? (
         <div className="flex flex-col gap-4">
           <dl>
@@ -218,7 +218,7 @@ export function ProcessesWindow() {
   const blockedDepths: number[] = [];
   return (
     <Window id="processes" title="Processes" subtitle="server tree" icon={ListTreeIcon} accent="server"
-      count={data ? visible.length : null} updatedAt={resources.at} error={resources.error} empty={!data && !resources.error}
+      count={data ? visible.length : null} updatedAt={resources.at} error={resources.error}
       actions={<InputGroup className="h-7 w-36">
         <InputGroupAddon><SearchIcon /></InputGroupAddon>
         <InputGroupInput id="process-filter" type="search" autoComplete="off" aria-label="Filter processes" placeholder="Filter" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -289,7 +289,7 @@ export function SamplingWindow() {
   const coverage = observation?.coverage ?? null;
   return (
     <Window id="sampling" title="Sampling" subtitle="observation" icon={ScanLineIcon} accent="server"
-      updatedAt={resources.at} error={resources.error} empty={!data && !resources.error}>
+      updatedAt={resources.at} error={resources.error}>
       {data && observation ? (
         <div className="flex flex-col gap-4">
           <Section title="Observation">

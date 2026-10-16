@@ -3,11 +3,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronsUpDownIcon, CopyPlusIcon, SquareTerminalIcon, XIcon } from "lucide-react";
+import { ChevronsUpDownIcon, CopyPlusIcon, SquareTerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { primaryChat } from "@/lib/stack/chat-windows";
 import { shortId } from "@/lib/stack/derive";
 import { holdMainChat, type MainChatFeed, type MainChatView } from "@/lib/stack/main-chat";
 import { markdownBlocks } from "@/lib/stack/markdown-blocks";
@@ -17,7 +16,6 @@ import { cn } from "@/lib/utils";
 import { StatusDot } from "./primitives";
 import { useChatWindows, useNow, useStack, useStore, useWorkbench } from "./provider";
 import { Window } from "./window";
-import { usePane } from "./pane-context";
 
 /** One shared feed per Bot while any window shows it. */
 function useMainChat(botId: string | null): { view: MainChatView | null; loadOlder(): void } {
@@ -38,7 +36,6 @@ function useMainChat(botId: string | null): { view: MainChatView | null; loadOld
 }
 
 export function ChatWindow({ id }: { id: string }) {
-  const pane = usePane();
   const { windows, chats } = useChatWindows();
   const { bots } = useStack();
   const { goTo } = useWorkbench();
@@ -46,7 +43,6 @@ export function ChatWindow({ id }: { id: string }) {
   const bot = bots.data?.find((item) => item.id === botId);
   const { view, loadOlder } = useMainChat(botId);
   const threadId = view?.threadId ?? bot?.mainThreadId ?? null;
-  const primary = id === primaryChat;
   const actions = (
     <>
       <BotSwitcher windowId={id} botId={botId} />
@@ -57,14 +53,6 @@ export function ChatWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New chat window</TooltipContent>
       </Tooltip>
-      {primary || pane ? null : (
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close chat window" className="text-muted-foreground" onClick={() => chats.close(id)} />}>
-            <XIcon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close</TooltipContent>
-        </Tooltip>
-      )}
     </>
   );
   return (

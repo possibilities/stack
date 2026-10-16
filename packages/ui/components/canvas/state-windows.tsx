@@ -27,7 +27,7 @@ const hintClass = "text-[0.72rem] text-pretty text-muted-foreground";
 
 function LocalOnly({ id, title, icon: Icon, what }: { id: string; title: string; icon: React.ComponentType<{ className?: string }>; what: string }) {
   return (
-    <Window id={id} title={title} icon={Icon} accent="server" empty>
+    <Window id={id} title={title} icon={Icon} accent="server">
       <div className="flex flex-col items-center gap-1.5 p-6 text-center">
         <Icon className="size-5 text-muted-foreground/70" />
         <p className="text-sm font-medium">Available only on the local UI</p>
@@ -274,7 +274,7 @@ export function StateInventoryWindow() {
   const run = (work: Promise<void>) => { void work; };
   return (
     <Window id="state" title="State" subtitle="owner inventories" icon={DatabaseIcon} accent="server" count={data?.entries.length ?? null}
-      status={status.serve} endpoint={endpoints.serve} updatedAt={stateInventory.at} error={stateInventory.error} empty={!data}
+      status={status.serve} endpoint={endpoints.serve} updatedAt={stateInventory.at} error={stateInventory.error}
       actions={<Button variant="ghost" size="xs" disabled={!access.available || loading} onClick={() => run(store.refreshStateInventory())} aria-label="Refresh state inventory">
         {loading ? <Spinner /> : <RefreshCwIcon />}
       </Button>}
@@ -484,7 +484,7 @@ export function SubscriptionsWindow() {
   const more = () => run(view === "watches" ? store.moreSubscriptions() : view === "occurrences" ? store.moreOccurrences() : store.moreCompletions());
   return (
     <Window id="subscriptions" title="Subscriptions" subtitle="Watches, occurrences and history" icon={CableIcon} accent="server" count={count}
-      status={status.serve} endpoint={endpoints.serve} updatedAt={resource.at} error={resource.error} empty={!data}
+      status={status.serve} endpoint={endpoints.serve} updatedAt={resource.at} error={resource.error}
       actions={<Button variant="ghost" size="xs" disabled={!listAccess.available || loading} onClick={refresh} aria-label="Refresh subscriptions">
         {loading ? <Spinner /> : <RefreshCwIcon />}
       </Button>}

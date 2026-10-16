@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ScopedStorage } from "@/lib/stack/destination";
-import { clamp } from "@/lib/stack/geometry";
+import { clamp } from "@/lib/stack/dock-layout";
 import { useDestination } from "./provider";
 
 /** A nonmodal landmark, not a dialog: the bench stays reachable by keyboard. */

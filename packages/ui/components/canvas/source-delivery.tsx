@@ -42,7 +42,7 @@ export function DeliveryWindow() {
   const missing = held?.error && /not_found/i.test(held.error);
   return (
     <Window id="source-delivery" title="Delivery" subtitle={delivery ? `#${delivery.sequence} · ${deliveryName(delivery)}` : sequence !== null ? `#${sequence}` : undefined} icon={FileJsonIcon} accent="source"
-      node={node} reveal={node} status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={held?.at} error={missing ? null : held?.error} empty={!endpoints.source || !delivery}>
+      node={node} reveal={node} status={endpoints.source ? status.source : undefined} endpoint={endpoints.source} updatedAt={held?.at} error={missing ? null : held?.error}>
       {!endpoints.source ? <Empty icon={FileJsonIcon} title="Source isn't served by this server" />
         : sequence === null ? <Empty icon={PackageOpenIcon} title="Open a delivery from the ledger" hint="A link to a delivery reads it directly, even when it is not in the loaded page." />
         : missing ? <Empty icon={FileJsonIcon} title={`Delivery #${sequence} does not exist`} hint="Local sequences are assigned on arrival; this one has not been assigned." />

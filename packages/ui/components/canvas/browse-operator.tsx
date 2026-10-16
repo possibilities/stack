@@ -156,7 +156,6 @@ export function ProfilesWindow() {
   return (
     <Window id="browse-profiles" title="Profiles" icon={HardDriveIcon} accent="browse" count={browserProfiles.data ? profiles.length : null}
       status={endpoints.browse ? status.browse : undefined} endpoint={endpoints.browse} updatedAt={browserProfiles.at} error={browserProfiles.error}
-      empty={!profiles.length && !composing}
       footer={unavailable ? undefined : (
         <Button variant="ghost" size="sm" className={footerButton} aria-expanded={composing} onClick={() => setComposing(!composing)}><PlusIcon data-icon="inline-start" />New profile…</Button>
       )}>
@@ -211,7 +210,7 @@ export function ControllersWindow() {
   return (
     <Window id="browse-controllers" title="Controllers" icon={CableIcon} accent="browse" count={browserControllers.data ? controllers.length : null}
       status={endpoints.browse ? status.browse : undefined} endpoint={endpoints.browse} updatedAt={browserControllers.at} error={browserControllers.error}
-      empty={!controllers.length}>
+      >
       {unavailable ? <Empty icon={CableIcon} title={unavailable} />
         : !browserControllers.data ? <Empty icon={CableIcon} title="Reading controllers…" />
         : !controllers.length ? <Empty icon={CableIcon} title="No controllers yet" />
@@ -340,7 +339,7 @@ export function ToolchainWindow() {
   const locked = data && selected && (data.status.profiles || data.status.sessions) ? "Delete every profile before changing Hypeman" : null;
   return (
     <Window id="browse-toolchain" title="Toolchain" icon={WrenchIcon} accent="browse" status={endpoints.browse ? status.browse : undefined} endpoint={endpoints.browse}
-      updatedAt={browserToolchain.at} error={browserToolchain.error} empty={!data}
+      updatedAt={browserToolchain.at} error={browserToolchain.error}
       actions={endpoints.browse && !remote ? (
         <Button type="button" size="icon-sm" variant="ghost" aria-label="Detect again" title="Detect again" disabled={status.browse !== "open"} onClick={store.refreshBrowse}><RefreshCwIcon /></Button>
       ) : null}>

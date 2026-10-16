@@ -149,7 +149,7 @@ export function ProcTimelineWindow() {
 
   return (
     <Window id="proc-timeline" title="Timeline" subtitle={`${range} h each way`} icon={ChartGanttIcon} accent="proc"
-      status={status.proc} endpoint={endpoints.proc} updatedAt={procSchedules.at} error={error ?? procSchedules.error} empty={!lanes.length}
+      status={status.proc} endpoint={endpoints.proc} updatedAt={procSchedules.at} error={error ?? procSchedules.error}
       actions={
         <NativeSelect size="sm" aria-label="Range" value={String(range)} onChange={(event) => setRange(Number(event.target.value))} className="mr-1">
           <NativeSelectOption value="6">6 h</NativeSelectOption>

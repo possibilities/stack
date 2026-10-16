@@ -89,7 +89,6 @@ export function InboxWindow() {
     <Window id="notify-inbox" title="Inbox" subtitle="notifications" icon={InboxIcon} accent="notify" count={notifyCounts.data?.open ?? null}
       actions={sendAccess.exposed && !sendAccess.reason ? <Button variant="ghost" size="icon-sm" aria-label="New notification" title="New notification" onClick={() => goTo({ kind: "notification-compose" })}><PlusIcon /></Button> : undefined}
       status={endpoints.notify ? status.notify : undefined} endpoint={endpoints.notify} updatedAt={notifications.at} error={notifications.error ?? notifyCounts.error}
-      empty={!endpoints.notify}
       footer={endpoints.notify ? (
         <Button variant="ghost" size="sm" className={footerButton} disabled={!notifyCounts.data?.open || status.notify !== "open" || remote?.scope === "view"} title={remote?.scope === "view" ? "Requires ui:control" : undefined} onClick={actions.confirmDismissAll}>
           <BellOffIcon data-icon="inline-start" />Dismiss all…
@@ -204,7 +203,7 @@ export function NotificationWindow() {
   const hint = (name: string) => (fields[name] as { description?: string } | undefined)?.description;
   return (
     <Window id="notify-detail" title="Notification" subtitle={record ? record.dismissedAt ? "dismissed" : "open" : undefined} icon={BellIcon} accent="notify"
-      node={record ? { kind: "notification", id: record.id } : undefined} empty={!record}>
+      node={record ? { kind: "notification", id: record.id } : undefined}>
       {!id ? <Empty icon={BellIcon} title="Choose a notification" />
         : !record ? <p className="flex items-center gap-1.5 px-0.5 text-[0.72rem] text-muted-foreground"><Spinner className="size-3" />Loading…</p>
         : (

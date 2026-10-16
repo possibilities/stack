@@ -116,7 +116,7 @@ export function FeedsWindow() {
   );
 
   return (
-    <Window id="scrape-feeds" title="Feeds" icon={RssIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape} empty={!endpoints.scrape}>
+    <Window id="scrape-feeds" title="Feeds" icon={RssIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape}>
       {!endpoints.scrape ? <Empty icon={RssIcon} title="Scrape isn't served by this server" /> : (
         <>
           <form id={formId} className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); submit(); }}>
@@ -255,7 +255,7 @@ export function ConvertWindow() {
     finally { setRunning(false); }
   };
   return (
-    <Window id="scrape-convert" title="Convert" icon={ArrowRightLeftIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape} empty={!endpoints.scrape}>
+    <Window id="scrape-convert" title="Convert" icon={ArrowRightLeftIcon} accent="scrape" status={endpoints.scrape ? status.scrape : undefined} endpoint={endpoints.scrape}>
       {!endpoints.scrape ? <Empty icon={ArrowRightLeftIcon} title="Scrape isn't served by this server" /> : (
         <>
           <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void convert(); }}>

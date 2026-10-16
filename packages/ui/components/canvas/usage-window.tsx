@@ -221,7 +221,7 @@ export function UsageWindow() {
     waiting: waiting.filter((account) => account.provider === provider),
   })).filter((group) => group.rows.length || group.waiting.length);
   return (
-    <Window id="usage" title="Usage" subtitle="usage" icon={GaugeIcon} accent="server" node={{ kind: "usage" }} empty={!usage.data || !rows.length && !waiting.length}
+    <Window id="usage" title="Usage" subtitle="usage" icon={GaugeIcon} accent="server" node={{ kind: "usage" }}
       count={usage.data?.accounts.length} status={status.usage} endpoint={endpoints.usage} updatedAt={usage.at} error={usage.error}
       actions={
         <Tooltip>

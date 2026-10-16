@@ -66,7 +66,7 @@ export function ResourcesWindow() {
 
   return (
     <Window id="hud-resources" title="Resources" subtitle={item ? workTitle(item) : "hud"} icon={NetworkIcon} accent="hud"
-      status={status.hud} endpoint={endpoints.hud} updatedAt={resources.at} error={missing ? null : resources.error} empty={!data}>
+      status={status.hud} endpoint={endpoints.hud} updatedAt={resources.at} error={missing ? null : resources.error}>
       {!id ? <HudPlaceholder title="Choose work" hint="Its Chats, Workers and linked resources appear here." icon={NetworkIcon} />
         : missing ? <HudPlaceholder title="This item no longer exists" icon={NetworkIcon} />
         : !data ? <HudPlaceholder title={resources.error ? "Resources unavailable" : "Reading resources…"} hint={resources.error ?? undefined} icon={NetworkIcon} />

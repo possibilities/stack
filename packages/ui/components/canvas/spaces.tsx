@@ -79,12 +79,6 @@ export type WindowDef = {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   accent: Accent;
-  width: number;
-  /** Packing footprint, independent of live record count; content grows the window past it and pushes windows below. Defaults to 760. */
-  height?: number;
-  column: number;
-  /** Keep the footprint height until a human sizes it, for windows that scroll their own content. */
-  fixed?: boolean;
   element: React.ReactNode;
 };
 
@@ -97,10 +91,9 @@ export const spaceViews: Record<SpaceId, {
     icon: BotIcon,
     accent: "bots",
     windows: (_state, { chats }) => [
-      { id: "bots", title: "Bots", icon: BotIcon, accent: "bots", width: 420, height: 620, column: 0, element: <BotsWindow /> },
-      { id: "bot-state", title: "Bot state", icon: HardDriveIcon, accent: "bots", width: 420, height: 760, column: 0, element: <BotStateWindow /> },
-      // The primary chat sits beside Bots; each additional chat opens in the next column.
-      ...chats.map((chat, index) => ({ id: chat.id, title: "Chat", icon: SquareTerminalIcon, accent: "bots" as const, width: 640, height: 720, column: index + 1, fixed: true,
+      { id: "bots", title: "Bots", icon: BotIcon, accent: "bots", element: <BotsWindow /> },
+      { id: "bot-state", title: "Bot state", icon: HardDriveIcon, accent: "bots", element: <BotStateWindow /> },
+      ...chats.map((chat) => ({ id: chat.id, title: "Chat", icon: SquareTerminalIcon, accent: "bots" as const,
         element: <ChatWindow id={chat.id} /> })),
     ],
   },
@@ -109,73 +102,73 @@ export const spaceViews: Record<SpaceId, {
     accent: "hud",
     // Overview and attention on the left; the selected item's detail, history and deployed resources follow it.
     windows: () => [
-      { id: "hud-attention", title: "Needs attention", icon: HandIcon, accent: "hud", width: 460, height: 380, column: 0, element: <WorkAttentionWindow /> },
-      { id: "hud-work", title: "Work", icon: ListTreeIcon, accent: "hud", width: 460, height: 760, column: 0, fixed: true, element: <WorkWindow /> },
-      { id: "hud-item", title: "Work item", icon: FileTextIcon, accent: "hud", width: 540, height: 820, column: 1, element: <ItemWindow /> },
-      { id: "hud-timeline", title: "Timeline", icon: HistoryIcon, accent: "hud", width: 460, height: 820, column: 2, fixed: true, element: <TimelineWindow /> },
-      { id: "hud-resources", title: "Resources", icon: NetworkIcon, accent: "hud", width: 460, height: 720, column: 3, element: <WorkResourcesWindow /> },
+      { id: "hud-attention", title: "Needs attention", icon: HandIcon, accent: "hud", element: <WorkAttentionWindow /> },
+      { id: "hud-work", title: "Work", icon: ListTreeIcon, accent: "hud", element: <WorkWindow /> },
+      { id: "hud-item", title: "Work item", icon: FileTextIcon, accent: "hud", element: <ItemWindow /> },
+      { id: "hud-timeline", title: "Timeline", icon: HistoryIcon, accent: "hud", element: <TimelineWindow /> },
+      { id: "hud-resources", title: "Resources", icon: NetworkIcon, accent: "hud", element: <WorkResourcesWindow /> },
     ],
   },
   accounts: {
     icon: KeyRoundIcon,
     accent: "auth",
     windows: () => [
-      { id: "accounts", title: "Accounts", icon: KeyRoundIcon, accent: "auth", width: 380, column: 0, element: <AccountsWindow /> },
-      { id: "usage", title: "Usage", icon: GaugeIcon, accent: "server", width: 360, height: 520, column: 1, element: <UsageWindow /> },
-      { id: "model-catalogs", title: "Models", icon: ListTreeIcon, accent: "bots", width: 460, height: 620, column: 2, element: <CatalogWindow /> },
+      { id: "accounts", title: "Accounts", icon: KeyRoundIcon, accent: "auth", element: <AccountsWindow /> },
+      { id: "usage", title: "Usage", icon: GaugeIcon, accent: "server", element: <UsageWindow /> },
+      { id: "model-catalogs", title: "Models", icon: ListTreeIcon, accent: "bots", element: <CatalogWindow /> },
     ],
   },
   lab: {
     icon: FlaskConicalIcon,
     accent: "events",
     windows: () => [
-      { id: "call-speech", title: "Call speech", icon: MegaphoneIcon, accent: "bots", width: 400, height: 420, column: 0, element: <CallSpeechWindow /> },
-      { id: "inference", title: "Inference", icon: SparklesIcon, accent: "bots", width: 440, height: 720, column: 1, element: <InferenceWindow /> },
+      { id: "call-speech", title: "Call speech", icon: MegaphoneIcon, accent: "bots", element: <CallSpeechWindow /> },
+      { id: "inference", title: "Inference", icon: SparklesIcon, accent: "bots", element: <InferenceWindow /> },
     ],
   },
   system: {
     icon: CpuIcon,
     accent: "server",
     windows: (state) => [
-      { id: "server", title: "Server", icon: CpuIcon, accent: "server", width: 400, height: 520, column: 0, element: <ServerWindow /> },
-      { id: "access", title: "Access", icon: KeyRoundIcon, accent: "server", width: 460, height: 720, column: 4, element: <AccessWindow /> },
-      { id: "packages", title: "Packages", icon: PackageIcon, accent: "server", width: 400, height: 420, column: 0, element: <PackagesWindow /> },
-      { id: "resources", title: "Resources", icon: ChartLineIcon, accent: "server", width: 460, height: 640, column: 1, element: <ResourcesWindow /> },
-      { id: "host", title: "Host", icon: ServerIcon, accent: "server", width: 400, height: 460, column: 1, element: <HostWindow /> },
-      { id: "codex-tools", title: "Codex tools", icon: WrenchIcon, accent: "server", width: 460, height: 620, column: 2, element: <CodexToolsWindow /> },
-      { id: "processes", title: "Processes", icon: ListTreeIcon, accent: "server", width: 560, height: 760, column: 2, element: <ProcessesWindow /> },
-      { id: "sampling", title: "Sampling", icon: ScanLineIcon, accent: "server", width: 400, height: 560, column: 3, element: <SamplingWindow /> },
-      { id: "activity", title: "Activity", icon: RadioIcon, accent: "events", width: 400, height: 460, column: 3, element: <ActivityWindow /> },
-      { id: "state", title: "State", icon: DatabaseIcon, accent: "server", width: 500, height: 760, column: 5, element: <StateInventoryWindow /> },
-      { id: "subscriptions", title: "Subscriptions", icon: CableIcon, accent: "server", width: 460, height: 560, column: 6, element: <SubscriptionsWindow /> },
-      { id: "xcom-state", title: "Xcom", icon: ArchiveIcon, accent: "server", width: 440, height: 720, column: 6, element: <XcomStateWindow /> },
+      { id: "server", title: "Server", icon: CpuIcon, accent: "server", element: <ServerWindow /> },
+      { id: "access", title: "Access", icon: KeyRoundIcon, accent: "server", element: <AccessWindow /> },
+      { id: "packages", title: "Packages", icon: PackageIcon, accent: "server", element: <PackagesWindow /> },
+      { id: "resources", title: "Resources", icon: ChartLineIcon, accent: "server", element: <ResourcesWindow /> },
+      { id: "host", title: "Host", icon: ServerIcon, accent: "server", element: <HostWindow /> },
+      { id: "codex-tools", title: "Codex tools", icon: WrenchIcon, accent: "server", element: <CodexToolsWindow /> },
+      { id: "processes", title: "Processes", icon: ListTreeIcon, accent: "server", element: <ProcessesWindow /> },
+      { id: "sampling", title: "Sampling", icon: ScanLineIcon, accent: "server", element: <SamplingWindow /> },
+      { id: "activity", title: "Activity", icon: RadioIcon, accent: "events", element: <ActivityWindow /> },
+      { id: "state", title: "State", icon: DatabaseIcon, accent: "server", element: <StateInventoryWindow /> },
+      { id: "subscriptions", title: "Subscriptions", icon: CableIcon, accent: "server", element: <SubscriptionsWindow /> },
+      { id: "xcom-state", title: "Xcom", icon: ArchiveIcon, accent: "server", element: <XcomStateWindow /> },
       // Registered only while this page's current serve connection read developer mode on (ADR 0138). Last in the
       // Server column and no wider or taller than it has room for, so it appears and leaves without moving other windows.
-      ...developerModeOn(state) ? [{ id: "developer", title: "Developer", icon: HammerIcon, accent: "server" as const, width: 400, height: 400, column: 0, element: <DeveloperWindow /> }] : [],
+      ...developerModeOn(state) ? [{ id: "developer", title: "Developer", icon: HammerIcon, accent: "server" as const, element: <DeveloperWindow /> }] : [],
     ],
   },
   roles: {
     icon: UserCogIcon,
     accent: "roles",
     windows: () => [
-      { id: "role-catalog", title: "Roles", icon: UsersRoundIcon, accent: "roles", width: 380, height: 560, column: 0, element: <RoleCatalogWindow /> },
-      { id: "role-instructions", title: "Instructions", icon: ScrollTextIcon, accent: "roles", width: 440, height: 720, column: 1, element: <RoleInstructionsWindow /> },
-      { id: "role-editor", title: "Editor", icon: FilePenLineIcon, accent: "roles", width: 520, height: 760, column: 2, element: <RoleEditorWindow /> },
-      { id: "role-preview", title: "Preview", icon: FileTextIcon, accent: "roles", width: 460, height: 720, column: 3, element: <RolePreviewWindow /> },
-      { id: "role-skills", title: "Skills", icon: BlocksIcon, accent: "roles", width: 400, height: 300, column: 4, element: <RoleSkillsWindow /> },
-      { id: "role-mcp-servers", title: "MCP servers", icon: PlugIcon, accent: "roles", width: 400, height: 440, column: 4, element: <RoleMcpServersWindow /> },
-      { id: "role-projects", title: "Trusted projects", icon: FolderLockIcon, accent: "roles", width: 400, height: 240, column: 4, element: <RoleProjectsWindow /> },
-      { id: "role-shims", title: "Shims", icon: SquareTerminalIcon, accent: "roles", width: 480, height: 560, column: 5, element: <RoleShimsWindow /> },
+      { id: "role-catalog", title: "Roles", icon: UsersRoundIcon, accent: "roles", element: <RoleCatalogWindow /> },
+      { id: "role-instructions", title: "Instructions", icon: ScrollTextIcon, accent: "roles", element: <RoleInstructionsWindow /> },
+      { id: "role-editor", title: "Editor", icon: FilePenLineIcon, accent: "roles", element: <RoleEditorWindow /> },
+      { id: "role-preview", title: "Preview", icon: FileTextIcon, accent: "roles", element: <RolePreviewWindow /> },
+      { id: "role-skills", title: "Skills", icon: BlocksIcon, accent: "roles", element: <RoleSkillsWindow /> },
+      { id: "role-mcp-servers", title: "MCP servers", icon: PlugIcon, accent: "roles", element: <RoleMcpServersWindow /> },
+      { id: "role-projects", title: "Trusted projects", icon: FolderLockIcon, accent: "roles", element: <RoleProjectsWindow /> },
+      { id: "role-shims", title: "Shims", icon: SquareTerminalIcon, accent: "roles", element: <RoleShimsWindow /> },
     ],
   },
   inbox: {
     icon: InboxIcon,
     accent: "notify",
     windows: (state) => [
-      { id: "notify-inbox", title: "Inbox", icon: InboxIcon, accent: "notify", width: 440, height: 720, column: 0, fixed: true, element: <InboxWindow /> },
-      { id: "notify-detail", title: "Notification", icon: BellIcon, accent: "notify", width: 480, height: 640, column: 1, element: <NotificationWindow /> },
+      { id: "notify-inbox", title: "Inbox", icon: InboxIcon, accent: "notify", element: <InboxWindow /> },
+      { id: "notify-detail", title: "Notification", icon: BellIcon, accent: "notify", element: <NotificationWindow /> },
       ...(!state.remote || (notificationSendAccess(state).exposed && !notificationSendAccess(state).reason) ? [
-        { id: "notify-compose", title: "Compose", icon: SendIcon, accent: "notify" as const, width: 440, height: 920, column: 2, element: <ComposeWindow /> },
+        { id: "notify-compose", title: "Compose", icon: SendIcon, accent: "notify" as const, element: <ComposeWindow /> },
       ] : []),
     ],
   },
@@ -183,71 +176,69 @@ export const spaceViews: Record<SpaceId, {
     icon: RadarIcon,
     accent: "events",
     windows: () => [
-      { id: "signal", title: "Signal", icon: RadarIcon, accent: "events", width: 400, height: 640, column: 0, element: <SignalWindow /> },
-      { id: "attention", title: "Attention", icon: MessageSquareWarningIcon, accent: "events", width: 520, height: 780, column: 1, fixed: true, element: <AttentionWindow /> },
-      { id: "attention-messages", title: "Messages", icon: MessagesSquareIcon, accent: "events", width: 460, height: 780, column: 2, fixed: true, element: <AttentionMessagesWindow /> },
-      { id: "attention-runs", title: "Runs", icon: HistoryIcon, accent: "events", width: 500, height: 520, column: 3, fixed: true, element: <AttentionRunsWindow /> },
-      { id: "attention-changes", title: "Changes", icon: ActivityIcon, accent: "events", width: 500, height: 420, column: 3, fixed: true, element: <AttentionChangesWindow /> },
+      { id: "signal", title: "Signal", icon: RadarIcon, accent: "events", element: <SignalWindow /> },
+      { id: "attention", title: "Attention", icon: MessageSquareWarningIcon, accent: "events", element: <AttentionWindow /> },
+      { id: "attention-messages", title: "Messages", icon: MessagesSquareIcon, accent: "events", element: <AttentionMessagesWindow /> },
+      { id: "attention-runs", title: "Runs", icon: HistoryIcon, accent: "events", element: <AttentionRunsWindow /> },
+      { id: "attention-changes", title: "Changes", icon: ActivityIcon, accent: "events", element: <AttentionChangesWindow /> },
     ],
   },
   content: {
     icon: NotebookTextIcon,
     accent: "content",
     windows: () => [
-      { id: "content-documents", title: "Documents", icon: NotebookTextIcon, accent: "content", width: 420, height: 560, column: 0, element: <ContentDocumentsWindow /> },
-      { id: "content-library", title: "Library", icon: LibraryIcon, accent: "content", width: 560, height: 520, column: 0, element: <ContentLibraryWindow /> },
-      { id: "content-editor", title: "Editor", icon: FilePenLineIcon, accent: "content", width: 540, height: 760, column: 1, element: <ContentEditorWindow /> },
-      { id: "content-preview", title: "Preview", icon: EyeIcon, accent: "content", width: 480, height: 760, column: 2, element: <ContentPreviewWindow /> },
-      { id: "content-artifacts", title: "Artifacts", icon: BoxesIcon, accent: "content", width: 400, height: 640, column: 3, element: <ContentArtifactsWindow /> },
-      { id: "content-storage", title: "Storage", icon: HardDriveIcon, accent: "content", width: 460, height: 640, column: 4, element: <ContentStorageWindow /> },
+      { id: "content-documents", title: "Documents", icon: NotebookTextIcon, accent: "content", element: <ContentDocumentsWindow /> },
+      { id: "content-library", title: "Library", icon: LibraryIcon, accent: "content", element: <ContentLibraryWindow /> },
+      { id: "content-editor", title: "Editor", icon: FilePenLineIcon, accent: "content", element: <ContentEditorWindow /> },
+      { id: "content-preview", title: "Preview", icon: EyeIcon, accent: "content", element: <ContentPreviewWindow /> },
+      { id: "content-artifacts", title: "Artifacts", icon: BoxesIcon, accent: "content", element: <ContentArtifactsWindow /> },
+      { id: "content-storage", title: "Storage", icon: HardDriveIcon, accent: "content", element: <ContentStorageWindow /> },
     ],
   },
   workers: {
     icon: HammerIcon,
     accent: "worker",
     windows: (_state, { workers }) => [
-      { id: "workers", title: "Workers", icon: HammerIcon, accent: "worker", width: 420, height: 720, column: 0, element: <WorkersWindow /> },
-      // The primary Worker window sits beside the list; each additional one opens in the next column.
-      ...workers.map((window, index) => ({ id: window.id, title: "Worker", icon: HammerIcon, accent: "worker" as const, width: 620, height: 760, column: index + 1, fixed: true,
+      { id: "workers", title: "Workers", icon: HammerIcon, accent: "worker", element: <WorkersWindow /> },
+      ...workers.map((window) => ({ id: window.id, title: "Worker", icon: HammerIcon, accent: "worker" as const,
         element: <WorkerWindow id={window.id} /> })),
-      { id: "worker-runtimes", title: "Runtimes", icon: CpuIcon, accent: "worker", width: 380, height: 420, column: workers.length + 1, element: <WorkerRuntimesWindow /> },
+      { id: "worker-runtimes", title: "Runtimes", icon: CpuIcon, accent: "worker", element: <WorkerRuntimesWindow /> },
     ],
   },
   scrape: {
     icon: GlobeIcon,
     accent: "scrape",
     windows: () => [
-      { id: "scrape-extract", title: "Extract", icon: GlobeIcon, accent: "scrape", width: 580, height: 800, column: 0, fixed: true, element: <ExtractWindow /> },
-      { id: "scrape-feeds", title: "Feeds", icon: RssIcon, accent: "scrape", width: 520, height: 640, column: 1, fixed: true, element: <FeedsWindow /> },
-      { id: "scrape-convert", title: "Convert", icon: ArrowRightLeftIcon, accent: "scrape", width: 520, height: 420, column: 1, element: <ConvertWindow /> },
-      { id: "scrape-presets", title: "Presets", icon: BlocksIcon, accent: "scrape", width: 460, height: 640, column: 2, element: <PresetsWindow /> },
-      { id: "scrape-status", title: "Status", icon: GaugeIcon, accent: "scrape", width: 460, height: 340, column: 2, element: <StatusWindow /> },
-      { id: "scrape-checks", title: "Checks", icon: ListChecksIcon, accent: "scrape", width: 440, height: 760, column: 3, fixed: true, element: <ChecksWindow /> },
-      { id: "scrape-queue", title: "Queue", icon: FolderInputIcon, accent: "scrape", width: 480, height: 760, column: 4, fixed: true, element: <QueueWindow /> },
+      { id: "scrape-extract", title: "Extract", icon: GlobeIcon, accent: "scrape", element: <ExtractWindow /> },
+      { id: "scrape-feeds", title: "Feeds", icon: RssIcon, accent: "scrape", element: <FeedsWindow /> },
+      { id: "scrape-convert", title: "Convert", icon: ArrowRightLeftIcon, accent: "scrape", element: <ConvertWindow /> },
+      { id: "scrape-presets", title: "Presets", icon: BlocksIcon, accent: "scrape", element: <PresetsWindow /> },
+      { id: "scrape-status", title: "Status", icon: GaugeIcon, accent: "scrape", element: <StatusWindow /> },
+      { id: "scrape-checks", title: "Checks", icon: ListChecksIcon, accent: "scrape", element: <ChecksWindow /> },
+      { id: "scrape-queue", title: "Queue", icon: FolderInputIcon, accent: "scrape", element: <QueueWindow /> },
     ],
   },
   browse: {
     icon: MonitorIcon,
     accent: "browse",
     windows: (_state, { viewers }) => [
-      { id: "browse-handoffs", title: "Handoffs", icon: LifeBuoyIcon, accent: "browse", width: 420, height: 640, column: 0, element: <HandoffsWindow /> },
-      // The primary viewer sits beside Handoffs; each additional viewer opens in the next column.
-      ...viewers.map((viewer, index) => ({ id: viewer.id, title: "Viewer", icon: MonitorIcon, accent: "browse" as const, width: 800, height: 640, column: index + 1, fixed: true,
+      { id: "browse-handoffs", title: "Handoffs", icon: LifeBuoyIcon, accent: "browse", element: <HandoffsWindow /> },
+      ...viewers.map((viewer) => ({ id: viewer.id, title: "Viewer", icon: MonitorIcon, accent: "browse" as const,
         element: <ViewerWindow id={viewer.id} /> })),
-      { id: "browse-profiles", title: "Profiles", icon: HardDriveIcon, accent: "browse", width: 420, height: 460, column: viewers.length + 1, element: <ProfilesWindow /> },
-      { id: "browse-controllers", title: "Controllers", icon: CableIcon, accent: "browse", width: 420, height: 320, column: viewers.length + 1, element: <ControllersWindow /> },
-      { id: "browse-toolchain", title: "Toolchain", icon: WrenchIcon, accent: "browse", width: 420, height: 720, column: viewers.length + 2, element: <ToolchainWindow /> },
+      { id: "browse-profiles", title: "Profiles", icon: HardDriveIcon, accent: "browse", element: <ProfilesWindow /> },
+      { id: "browse-controllers", title: "Controllers", icon: CableIcon, accent: "browse", element: <ControllersWindow /> },
+      { id: "browse-toolchain", title: "Toolchain", icon: WrenchIcon, accent: "browse", element: <ToolchainWindow /> },
     ],
   },
   brain: {
     icon: BrainIcon,
     accent: "brain",
     windows: () => [
-      { id: "brain-search", title: "Search", icon: SearchIcon, accent: "brain", width: 520, height: 780, column: 0, fixed: true, element: <SearchWindow /> },
-      { id: "brain-reader", title: "Reader", icon: BookOpenTextIcon, accent: "brain", width: 580, height: 780, column: 1, fixed: true, element: <ReaderWindow /> },
-      { id: "brain-ingest", title: "Ingest", icon: ImportIcon, accent: "brain", width: 400, height: 560, column: 2, element: <IngestWindow /> },
-      { id: "brain-jobs", title: "Jobs", icon: ListChecksIcon, accent: "brain", width: 480, height: 780, column: 3, fixed: true, element: <JobsWindow /> },
-      { id: "brain-sources", title: "Sources", icon: SatelliteDishIcon, accent: "brain", width: 460, height: 640, column: 4, element: <SourcesWindow /> },
+      { id: "brain-search", title: "Search", icon: SearchIcon, accent: "brain", element: <SearchWindow /> },
+      { id: "brain-reader", title: "Reader", icon: BookOpenTextIcon, accent: "brain", element: <ReaderWindow /> },
+      { id: "brain-ingest", title: "Ingest", icon: ImportIcon, accent: "brain", element: <IngestWindow /> },
+      { id: "brain-jobs", title: "Jobs", icon: ListChecksIcon, accent: "brain", element: <JobsWindow /> },
+      { id: "brain-sources", title: "Sources", icon: SatelliteDishIcon, accent: "brain", element: <SourcesWindow /> },
     ],
   },
   source: {
@@ -255,24 +246,23 @@ export const spaceViews: Record<SpaceId, {
     accent: "source",
     // Where deliveries come from beside what arrived, then the one selected: evidence first, setup detail disclosed on demand.
     windows: () => [
-      { id: "source-receivers", title: "Receivers", icon: RadioTowerIcon, accent: "source", width: 460, height: 660, column: 0, element: <ReceiversWindow /> },
-      { id: "source-catalog", title: "Event catalog", icon: BookMarkedIcon, accent: "source", width: 460, height: 480, column: 0, element: <SourceCatalogWindow /> },
-      { id: "source-deliveries", title: "Deliveries", icon: InboxIcon, accent: "source", width: 620, height: 780, column: 1, fixed: true, element: <DeliveriesWindow /> },
-      { id: "source-delivery", title: "Delivery", icon: FileJsonIcon, accent: "source", width: 640, height: 780, column: 2, fixed: true, element: <DeliveryWindow /> },
-      { id: "source-watches", title: "Watches", icon: EyeIcon, accent: "source", width: 540, height: 780, column: 3, fixed: true, element: <WatchesWindow /> },
+      { id: "source-receivers", title: "Receivers", icon: RadioTowerIcon, accent: "source", element: <ReceiversWindow /> },
+      { id: "source-catalog", title: "Event catalog", icon: BookMarkedIcon, accent: "source", element: <SourceCatalogWindow /> },
+      { id: "source-deliveries", title: "Deliveries", icon: InboxIcon, accent: "source", element: <DeliveriesWindow /> },
+      { id: "source-delivery", title: "Delivery", icon: FileJsonIcon, accent: "source", element: <DeliveryWindow /> },
+      { id: "source-watches", title: "Watches", icon: EyeIcon, accent: "source", element: <WatchesWindow /> },
     ],
   },
   proc: {
     icon: CalendarClockIcon,
     accent: "proc",
     windows: (_state, { procRuns }) => [
-      { id: "proc-schedules", title: "Schedules", icon: CalendarClockIcon, accent: "proc", width: 440, height: 720, column: 0, fixed: true, element: <ProcSchedulesWindow /> },
-      { id: "proc-schedule", title: "Schedule", icon: CalendarClockIcon, accent: "proc", width: 520, height: 780, column: 1, element: <ProcScheduleWindow /> },
-      { id: "proc-runs", title: "Runs", icon: SquareTerminalIcon, accent: "proc", width: 440, height: 720, column: 2, fixed: true, element: <ProcRunsWindow /> },
-      // The primary Run window follows the list; each additional one keeps its run until closed.
-      ...procRuns.map((window, index) => ({ id: window.id, title: "Run", icon: SquareTerminalIcon, accent: "proc" as const, width: 680, height: 780, column: index + 3, fixed: true,
+      { id: "proc-schedules", title: "Schedules", icon: CalendarClockIcon, accent: "proc", element: <ProcSchedulesWindow /> },
+      { id: "proc-schedule", title: "Schedule", icon: CalendarClockIcon, accent: "proc", element: <ProcScheduleWindow /> },
+      { id: "proc-runs", title: "Runs", icon: SquareTerminalIcon, accent: "proc", element: <ProcRunsWindow /> },
+      ...procRuns.map((window) => ({ id: window.id, title: "Run", icon: SquareTerminalIcon, accent: "proc" as const,
         element: <ProcRunWindow id={window.id} /> })),
-      { id: "proc-timeline", title: "Timeline", icon: ChartGanttIcon, accent: "proc", width: 760, height: 460, column: procRuns.length + 3, element: <ProcTimelineWindow /> },
+      { id: "proc-timeline", title: "Timeline", icon: ChartGanttIcon, accent: "proc", element: <ProcTimelineWindow /> },
     ],
   },
 };

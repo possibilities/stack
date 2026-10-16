@@ -3,7 +3,7 @@ import type { BrowseCallError } from "./browse";
 /**
  * Which Browser profile each Browse viewer window shows, and this page's human control grants.
  * The primary viewer always exists and is the one choosing a profile switches; additional viewers
- * keep their own profile until closed. The arrangement is browser-local and optional: losing it
+ * keep their own profile independently of pane visibility. The arrangement is browser-local and optional: losing it
  * only resets it. Grants are human input URLs and live only in this page's memory.
  */
 export type ViewerWindow = { id: string; profileId: string | null };
@@ -19,7 +19,7 @@ const storageKey = "uix.browse-viewers.v1";
 
 type Listener = () => void;
 
-// Benches hydrate lazily, possibly after the saved arrangement is restored: hydration must see what the server rendered.
+// Spaces hydrate lazily, possibly after the saved arrangement is restored: hydration must see what the server rendered.
 const serverWindows: ViewerWindows = [{ id: primaryViewer, profileId: null }];
 const serverGrants: ControlGrants = {};
 const serverActions: HandoffActions = {};
@@ -75,11 +75,6 @@ export class ViewerWindowStore {
 
   setProfile(id: string, profileId: string | null): void {
     this.set(this.windows.map((window) => window.id === id ? { ...window, profileId } : window));
-  }
-
-  /** The primary viewer stays; closing it clears its profile instead. Closing never resolves a handoff. */
-  close(id: string): void {
-    this.set(id === primaryViewer ? this.windows.map((window) => window.id === id ? { ...window, profileId: null } : window) : this.windows.filter((window) => window.id !== id));
   }
 
   /** Forget viewers whose profile was deleted; the primary empties instead. */

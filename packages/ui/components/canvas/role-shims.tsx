@@ -176,7 +176,7 @@ export function RoleShimsWindow() {
 
   if (remote) {
     return (
-      <Window id="role-shims" title="Shims" icon={SquareTerminalIcon} accent="roles" empty>
+      <Window id="role-shims" title="Shims" icon={SquareTerminalIcon} accent="roles">
         <div className="flex flex-col items-center gap-1.5 p-6 text-center">
           <SquareTerminalIcon className="size-5 text-muted-foreground/70" />
           <p className="text-sm font-medium">Available only on the local UI</p>
@@ -188,7 +188,7 @@ export function RoleShimsWindow() {
 
   return (
     <Window id="role-shims" title="Shims" subtitle={data ? data.binDir : undefined} icon={SquareTerminalIcon} accent="roles"
-      count={data?.shims.length ?? null} status={status.roles} endpoint={endpoints.roles} updatedAt={roleShims.at} error={roleShims.error} empty={!data}
+      count={data?.shims.length ?? null} status={status.roles} endpoint={endpoints.roles} updatedAt={roleShims.at} error={roleShims.error}
       footer={data && actions.draft?.mode !== "new" ? (
         <Button size="sm" variant="ghost" className={footerButton} disabled={!connected} onClick={actions.create}>
           <PlusIcon data-icon="inline-start" />New shim

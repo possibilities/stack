@@ -44,7 +44,7 @@ export function ItemWindow() {
 
   return (
     <Window id="hud-item" title={item ? workTitle(item) : "Work item"} subtitle={item ? `rev ${item.revision} · scope ${item.scopeRevision}` : "hud"} icon={FileTextIcon} accent="hud"
-      node={item ? { kind: "work-item", id: item.id } : undefined} empty={!item}
+      node={item ? { kind: "work-item", id: item.id } : undefined}
       status={status.hud} endpoint={endpoints.hud} updatedAt={detail.at} error={missing ? null : detail.error}
       actions={item ? (
         <Button size="icon-sm" variant="ghost" aria-label="Show only this subtree" title="Show only this subtree in Work" onClick={() => hudView.focusSubtree(item.id)}>

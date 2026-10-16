@@ -3,7 +3,7 @@ import type { WorkerFilter } from "./workers";
 /**
  * Which Worker each Workers-space window shows, and the Workers list's filter.
  * The primary window always exists and is the one choosing a Worker switches;
- * additional windows keep their own Worker until closed. The arrangement is
+ * additional windows retain their own Worker independently of pane visibility. The arrangement is
  * browser-local and optional: losing it only resets it. The filter is not kept.
  */
 export type WorkerWindow = { id: string; workerId: string | null };
@@ -41,7 +41,7 @@ export class WorkerWindowStore {
   getWindows = (): WorkerWindows => this.windows;
   getFilter = (): WorkerFilter => this.filter;
   getTurnFocus = (): TurnFocus | null => this.turnFocus;
-  /** Benches may hydrate after attach; keep the snapshots SSR rendered. */
+  /** Spaces may hydrate after attach; keep the snapshots SSR rendered. */
   getServerWindows = (): WorkerWindows => this.serverWindows;
   getServerFilter = (): WorkerFilter => this.serverFilter;
   /** Turn focus is never persisted; SSR always renders without one. */
@@ -80,11 +80,6 @@ export class WorkerWindowStore {
 
   setWorker(id: string, workerId: string | null): void {
     this.set(this.windows.map((window) => window.id === id ? { ...window, workerId } : window));
-  }
-
-  /** The primary window stays; closing it clears its Worker instead. */
-  close(id: string): void {
-    this.set(id === primaryWorker ? this.windows.map((window) => window.id === id ? { ...window, workerId: null } : window) : this.windows.filter((window) => window.id !== id));
   }
 
   /** Forget windows whose Worker was removed; the primary empties instead. */

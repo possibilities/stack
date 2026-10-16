@@ -157,7 +157,7 @@ export function InferenceWindow() {
   return (
     <Window id="inference" title="Inference" icon={SparklesIcon} accent="bots" count={requests.length || null}
       status={status.infer} endpoint={endpoints.infer} updatedAt={inferRequests.at} error={inferRequests.error}
-      empty={!accounts.data?.length && !requests.length}>
+      >
       {accounts.data?.length ? (
         <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); run(); }}>
           <div className="flex flex-col gap-1.5">

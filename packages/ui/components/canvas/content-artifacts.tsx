@@ -36,7 +36,6 @@ export function ContentArtifactsWindow() {
   return (
     <Window id="content-artifacts" title="Artifacts" subtitle="content · published by agents" icon={BoxesIcon} accent="content"
       count={contentArtifacts.data?.length ?? null} status={status.content} endpoint={endpoints.content} updatedAt={contentArtifacts.at} error={contentArtifacts.error}
-      empty={!contentArtifacts.data?.length}
       actions={
         <Button size="icon-sm" variant="ghost" className="text-muted-foreground" aria-label="Restore a tombstoned Artifact" title={remote?.scope === "view" ? "Requires ui:control" : "Restore a tombstoned Artifact"}
           disabled={status.content !== "open" || remote?.scope === "view"} onClick={() => actions.restoreByName("artifact")}><ArchiveRestoreIcon /></Button>

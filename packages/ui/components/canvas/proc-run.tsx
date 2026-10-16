@@ -2,7 +2,7 @@
 
 import { ProcClear } from "./proc-maintenance";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, CopyPlusIcon, OctagonXIcon, SearchIcon, SquareTerminalIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, CopyPlusIcon, OctagonXIcon, SearchIcon, SquareTerminalIcon } from "lucide-react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,6 @@ import { useNow, useProcWindows, useStack, useStore, useWorkbench } from "./prov
 import { BotWatch, useObservedRead } from "./watch-receipts";
 import { ObservationStatus } from "./owner-reads";
 import { Window } from "./window";
-import { usePane } from "./pane-context";
 
 const pageSize = 100;
 
@@ -35,7 +34,6 @@ function useWatchedRun(id: string | null): number {
 
 /** One process run: its identity, exit state and bounded retained output. */
 export function ProcRunWindow({ id }: { id: string }) {
-  const pane = usePane();
   const { windows, procWindows } = useProcWindows();
   const { remote, endpoints, resources } = useStack();
   const { goTo } = useWorkbench();
@@ -44,7 +42,6 @@ export function ProcRunWindow({ id }: { id: string }) {
   const store = useStore();
   const detail = useProcSnapshot<ProcRunDetail>(runId, generation, () => store.call<ProcRunDetail>("proc", "proc_run_get", { id: runId! }));
   const run = detail.data ?? null;
-  const primary = id === "proc-run";
   // A completed output clear remounts the log so nothing loaded before it stays on screen.
   const [outputEpoch, setOutputEpoch] = useState(0);
   const actions = (
@@ -56,14 +53,6 @@ export function ProcRunWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">Open in new window</TooltipContent>
       </Tooltip>
-      {primary || pane ? null : (
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close Run window" className="text-muted-foreground" onClick={() => procWindows.close(id)} />}>
-            <XIcon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close</TooltipContent>
-        </Tooltip>
-      )}
     </>
   );
   return (

@@ -31,7 +31,7 @@ registerHooks({
 });
 
 const { StackProvider, WorkbenchContext, useStore } = await import("../components/canvas/provider.tsx");
-const { PlacementContext } = await import("../components/canvas/window.tsx");
+const { PaneContext } = await import("../components/canvas/pane-context.tsx");
 const { AuthActionsProvider } = await import("../components/canvas/auth-actions.tsx");
 const { AccountsWindow } = await import("../components/canvas/windows.tsx");
 const { ObservationStatus, UsageWindow } = await import("../components/canvas/usage-window.tsx");
@@ -40,8 +40,8 @@ const { TooltipProvider } = await import("../components/ui/tooltip.tsx");
 const resource = (data) => ({ data, error: null, at: Date.now() });
 const account = (id, extra = {}) => ({ id, provider: "claude", ready: true, enabled: true, removing: false, linkedAccounts: [], ...extra });
 const noop = () => {};
-const placement = () => ({ x: 0, y: 0, z: 1, width: 400, height: 900, collapsed: false, animating: false, dragging: false,
-  onHeaderPointerDown: noop, onFocusWithin: noop, onToggleCollapse: noop, register: noop });
+const pane = { visible: true, focused: false, zoomed: false, canClose: true, dragging: false, destinations: [],
+  focus: noop, startDrag: noop, close: noop, zoom: noop, catalog: noop, move: noop };
 const workbench = { space: "fleet", selected: null, hovered: null, flash: null, setSpace: noop, select: noop, hover: noop, goTo: noop };
 function Seed({ state, children }) {
   Object.assign(useStore().getState(), state);
@@ -52,7 +52,7 @@ function render(Component, { accounts, bots = [], logins = [], usage = null, run
     workerSessions: resource([]), login: resource(null), workerLogins: resource(logins), bots: resource([]), botDefaults: resource(null),
     voice: resource(null), catalog: resource([]), usage: resource(usage), endpoints: {} };
   return renderToStaticMarkup(h(StackProvider, { snapshot }, h(Seed, { state },
-    h(WorkbenchContext, { value: workbench }, h(PlacementContext, { value: placement }, h(TooltipProvider, null,
+    h(WorkbenchContext, { value: workbench }, h(PaneContext, { value: pane }, h(TooltipProvider, null,
       h(AuthActionsProvider, null, h(Component))))))));
 }
 const text = (html) => html.replace(/<[^>]+>/g, "");

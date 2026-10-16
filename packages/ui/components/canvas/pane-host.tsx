@@ -14,7 +14,6 @@ import { PaneLayoutStore, type PaneLayout } from "@/lib/stack/pane-state";
 import { cn } from "@/lib/utils";
 import { useChatWindows, useDestination, useProcWindows, useStack, useViewerWindows, useWorkerWindows } from "./provider";
 import { paneDefinitions, paneRegistryReady, type WindowDef } from "./spaces";
-import { PlacementContext, type WindowPlacement } from "./window";
 import { PaneContext } from "./pane-context";
 import { PaneCatalog } from "./pane-catalog";
 
@@ -23,7 +22,6 @@ export type PaneControls = {
   goToNode(ref: NodeRef): void; catalog(): void; preset(id: string): void; zoom(): void; reveal(id: string, focus?: boolean): void; undo(): void;
 };
 type Drop = { target: string; side: Placement; rect: StackRect };
-const noop = () => {};
 const excluded = 'input,textarea,select,[contenteditable=true],[role=dialog],[role=alertdialog],[role=menu],[role=listbox],[role=combobox],[role=separator],[role=tablist]';
 
 export function PaneHost({ space, blocked, onControls, onArrive }: {
@@ -238,9 +236,8 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
     const visible = Boolean(rect && rect.active === def.id);
     if (visible) visited.current.add(def.id);
     const tabHeight = rect && rect.tabs.length > 1 ? tabSize : 0;
-    const placement: WindowPlacement = { x: 0, y: 0, z: 0, width: rect?.width ?? 0, height: (rect?.height ?? 0) - tabHeight, sized: true, collapsed: false, animating: false, dragging, active: false, settling: false, target: null,
-      onHeaderPointerDown: (event) => beginDrag(def.id, event), onResizePointerDown: noop, onResetSize: noop, onFocusWithin: () => store.focus(def.id), onToggleCollapse: noop, register: noop };
-    const pane = { visible, focused: layout.focus === def.id, zoomed: layout.zoom === def.id, canClose: open.length > 1,
+    const pane = { visible, focused: layout.focus === def.id, zoomed: layout.zoom === def.id, canClose: open.length > 1, dragging,
+      focus: () => store.focus(def.id), startDrag: (event: React.PointerEvent) => beginDrag(def.id, event),
       destinations: defs.filter((other) => other.id !== def.id && open.includes(other.id)).map(({ id, title }) => ({ id, title: `${title}${/-\d+$/.test(id) ? ` · ${id}` : ""}` })),
       close: () => { store.close(def.id); const focus = store.getSnapshot().focus; if (focus) focusFrame(focus); }, zoom: () => { store.zoom(def.id); focusFrame(def.id); },
       catalog: (side: Placement) => { store.focus(def.id); showCatalog(side); }, move: (target: string, side: Placement) => { store.move(def.id, target, side); focusFrame(def.id); } };
@@ -249,7 +246,7 @@ export function PaneHost({ space, blocked, onControls, onArrive }: {
       className="absolute min-h-0 min-w-0 rounded-xl outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
       style={rect ? { left: rect.x, top: rect.y + tabHeight, width: rect.width, height: Math.max(0, rect.height - tabHeight) } : undefined}>
       {leader && visible ? <span aria-hidden className="pointer-events-none absolute top-1 right-1 z-20 rounded bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground">{projection.stacks.indexOf(rect!) + 1}</span> : null}
-      <PaneContext value={pane}><PlacementContext value={() => placement}><Activity mode={visible ? "visible" : "hidden"}>{visited.current.has(def.id) ? def.element : null}</Activity></PlacementContext></PaneContext>
+      <PaneContext value={pane}><Activity mode={visible ? "visible" : "hidden"}>{visited.current.has(def.id) ? def.element : null}</Activity></PaneContext>
     </div>;
   };
   const tiles: React.ReactNode[] = [];

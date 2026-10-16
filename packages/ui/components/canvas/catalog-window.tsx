@@ -179,7 +179,7 @@ export function CatalogWindow() {
   };
 
   return (
-    <Window id="model-catalogs" title="Models" subtitle="worker" icon={ListTreeIcon} accent="bots" empty={!accounts.length || !active}
+    <Window id="model-catalogs" title="Models" subtitle="worker" icon={ListTreeIcon} accent="bots"
       count={workerAccounts.data?.length} status={status.worker} endpoint={endpoints.worker} updatedAt={workerAccounts.at} error={workerAccounts.error ?? workerRuntimes.error}>
       {accounts.length && active ? (
         <>

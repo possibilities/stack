@@ -347,7 +347,7 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(`${error.message} (${page.url()})`));
   const shot = (name, locator) => (locator ?? page).screenshot({ path: join(evidence, `${name}.png`), animations: "disabled" });
-  const go = async (space) => { await page.goto(`${origin}/${space}`); const fit = page.getByRole("button", { name: /Fit bench/ }); if (await fit.count()) await fit.click(); };
+  const go = async (space) => { await page.goto(`${origin}/${space}`); };
   const completed = (scope) => scope.getByText("Completed for the declared scope only.");
 
   if (process.env.DOMAIN_STATE_SLICE === "content") {

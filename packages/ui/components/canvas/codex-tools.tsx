@@ -120,7 +120,7 @@ export function CodexToolsWindow() {
   const { data } = tools;
   const available = tools.readable && !tools.checking ? data!.connections.filter((item) => item.catalog.state === "available").length : null;
   return (
-    <Window id="codex-tools" title="Codex tools" subtitle="serve" icon={WrenchIcon} accent="server" empty={!data && !codexTools.error}
+    <Window id="codex-tools" title="Codex tools" subtitle="serve" icon={WrenchIcon} accent="server"
       status={status.serve} endpoint={endpoints.serve} updatedAt={codexTools.at} error={codexTools.error}
       actions={<CheckButton tools={tools} />}>
       <div className="flex flex-col gap-2.5">

@@ -1,7 +1,7 @@
 "use client";
 
-import { use, useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronsUpDownIcon, CopyPlusIcon, EyeIcon, HandIcon, LifeBuoyIcon, MonitorIcon, RotateCcwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { ChevronsUpDownIcon, CopyPlusIcon, EyeIcon, HandIcon, LifeBuoyIcon, MonitorIcon, RotateCcwIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -12,7 +12,7 @@ import { browseReportText } from "@/lib/stack/completion";
 import { shortId } from "@/lib/stack/derive";
 import { localOperation, localOperations } from "@/lib/stack/state";
 import { stateOperations } from "@/lib/stack/maintenance";
-import { primaryViewer, type HandoffActionState } from "@/lib/stack/browse-viewers";
+import type { HandoffActionState } from "@/lib/stack/browse-viewers";
 import type { BrowserHandoff, BrowserHandoffAction, BrowserHandoffObservation, BrowserProfile } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
 import { ContentCleared, Empty, Flash, NodeCard, NodeLink, NodeTitle, Row, StatusDot, Time } from "./primitives";
@@ -22,7 +22,7 @@ import { notRecorded, waitingForIdentity } from "@/lib/stack/destination";
 import { useDestination, useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
 import { BotWatch, useObservedRead } from "./watch-receipts";
 import { ObservationStatus } from "./owner-reads";
-import { PlacementContext, Section, Window } from "./window";
+import { Section, Window } from "./window";
 import { usePane } from "./pane-context";
 
 function mint(): string {
@@ -343,7 +343,6 @@ export function HandoffsWindow() {
   return (
     <Window id="browse-handoffs" title="Handoffs" icon={LifeBuoyIcon} accent="browse" count={browserHandoffs.data ? open.reduce((sum, group) => sum + group.handoffs.length, 0) : null}
       status={endpoints.browse ? status.browse : undefined} endpoint={endpoints.browse} updatedAt={browserHandoffs.at} error={browserHandoffs.error}
-      empty={!handoffs.length}
       actions={endpoints.browse ? (
         <Button type="button" size="icon-sm" variant="ghost" aria-label="Read browse again" title="Read browse again" disabled={status.browse !== "open"} onClick={store.refreshBrowse}>
           <RotateCcwIcon />
@@ -425,16 +424,14 @@ export function ViewerWindow({ id }: { id: string }) {
   const { windows, grants, viewers } = useViewerWindows();
   const { browserProfiles, browserHandoffs, remote } = useStack();
   const { goTo, space } = useWorkbench();
-  const placement = use(PlacementContext)?.(id);
   const profileId = windows.find((window) => window.id === id)?.profileId ?? null;
   const profile = browserProfiles.data?.find((item) => item.id === profileId) ?? null;
   const handoff = profile ? heldBy(profile.id, browserHandoffs.data) : null;
   const grant = handoff?.state === "human_controlling" ? grants[handoff.id] ?? null : null;
   const src = grant ?? profile?.observation?.url ?? null;
-  const primary = id === primaryViewer;
   const pane = usePane();
   const frame = useRef<HTMLIFrameElement>(null);
-  const visible = space === "browse" && !placement?.collapsed && pane?.visible !== false;
+  const visible = space === "browse" && pane?.visible !== false;
   const active = visible && !remote && profile?.state === "ready";
   useLayoutEffect(() => {
     const element = frame.current;
@@ -451,14 +448,6 @@ export function ViewerWindow({ id }: { id: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">New viewer</TooltipContent>
       </Tooltip>
-      {primary || pane ? null : (
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close viewer" className="text-muted-foreground" onClick={() => viewers.close(id)} />}>
-            <XIcon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Close{grant ? " · doesn't hand back" : ""}</TooltipContent>
-        </Tooltip>
-      )}
     </>
   );
   return (
@@ -488,7 +477,7 @@ export function ViewerWindow({ id }: { id: string }) {
               <iframe ref={frame} key={src} src={src} title={`${profileName(profile)} browser${grant ? " (control)" : ""}`}
                 allow="autoplay; clipboard-read; clipboard-write; fullscreen" referrerPolicy="no-referrer"
                 sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms"
-                className={cn("min-h-0 w-full flex-1 border-0 bg-black", placement?.dragging && "pointer-events-none", grant && "outline-2 -outline-offset-2 outline-pkg-browse")} />
+                className={cn("min-h-0 w-full flex-1 border-0 bg-black", pane?.dragging && "pointer-events-none", grant && "outline-2 -outline-offset-2 outline-pkg-browse")} />
             )}
             {grant && handoff ? <div className="shrink-0 border-t border-border/60 p-2"><ActionNote handoff={handoff} /><FinishForm handoff={handoff} compact /></div> : null}
           </>

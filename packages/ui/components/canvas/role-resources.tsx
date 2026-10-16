@@ -349,7 +349,7 @@ function ResourceList<T extends Item>({ spec }: { spec: ListSpec<T> }) {
 
   return (
     <Window id={spec.windowId} title={spec.title} subtitle={[view.label ?? "roles", role.data && !spec.lead ? `${enabled} of ${items.length} on` : null].filter(Boolean).join(" · ")} icon={spec.icon} accent="roles"
-      count={spec.lead ? null : items.length} status={status.roles} endpoint={endpoints.roles} updatedAt={role.at} error={role.error} empty={!items.length && !spec.lead}
+      count={spec.lead ? null : items.length} status={status.roles} endpoint={endpoints.roles} updatedAt={role.at} error={role.error}
       footer={
         <Button size="sm" variant="ghost" className={footerButton} disabled={!role.data || !connected} title={state.remote?.scope === "view" ? "Requires ui:control" : undefined} onClick={() => actions.open({ kind: `new-${spec.kind}`, enabled: true })}>
           <PlusIcon data-icon="inline-start" />{spec.newLabel}

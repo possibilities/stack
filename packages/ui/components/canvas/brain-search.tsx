@@ -101,7 +101,7 @@ export function SearchWindow() {
 
   return (
     <Window id="brain-search" title="Search" icon={SearchIcon} accent="brain" status={endpoints.brain ? status.brain : undefined} endpoint={endpoints.brain}
-      updatedAt={brainStats.at} error={brainStats.error} empty={!endpoints.brain}>
+      updatedAt={brainStats.at} error={brainStats.error}>
       {!endpoints.brain ? <Empty icon={SearchIcon} title="Brain isn't served by this server" /> : (
         <>
           <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); submit(); }}>
@@ -374,7 +374,7 @@ export function ReaderWindow() {
   const node = documentId !== null ? { kind: "research-document" as const, id: String(documentId) } : undefined;
   return (
     <Window id="brain-reader" title="Reader" subtitle={doc?.title ?? undefined} icon={BookOpenTextIcon} accent="brain" node={node} reveal={node}
-      status={endpoints.brain ? status.brain : undefined} endpoint={endpoints.brain} empty={!doc}
+      status={endpoints.brain ? status.brain : undefined} endpoint={endpoints.brain}
       actions={doc ? <DeleteDocument document={doc} blocked={brainLocalReason(remote) ?? brainUnavailable(endpoints, status)} /> : null}>
       {documentId === null ? <Empty icon={BookOpenTextIcon} title="Open a document from Search" />
         : missing ? <Empty icon={BookOpenTextIcon} title={`Document ${documentId} is no longer indexed`} />

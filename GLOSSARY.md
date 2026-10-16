@@ -232,11 +232,11 @@ A Codex app-server thread in an Stack-owned Bot's sanctioned main-thread lineage
 
 ## Chat window
 
-A Fleet window that follows one Bot's main thread: human and assistant text, streamed live, with the turn's activity in a status line. The primary chat window always exists and switches between Bots; additional chat windows keep their own Bot until closed. The arrangement is browser-local. _Avoid_: chat tab, transcript pane
+A Fleet pane that follows one Bot's main thread: human and assistant text, streamed live, with the turn's activity in a status line. The primary chat window switches between Bots; additional chat windows retain their own Bot when hidden. _Avoid_: chat tab
 
 ## Worker window
 
-A Workers-space window that follows one Worker: its summary, pending permissions, conversation, turns, tools, records and session metadata, all read-only, plus its managed model and effort settings, which it can save and apply to the exact idle runtime. The primary Worker window follows the Workers list; additional windows keep their own Worker until closed. The arrangement is browser-local. Its Bot, not the window, answers and steers the Worker. _Avoid_: Worker chat, Worker console
+A Workers-space pane that follows one Worker: its summary, pending permissions, conversation, turns, tools, records and session metadata, all read-only, plus its managed model and effort settings, which it can save and apply to the exact idle runtime. The primary Worker window follows the Workers list; additional windows retain their own Worker when hidden. Its Bot, not the window, answers and steers the Worker. _Avoid_: Worker chat, Worker console
 
 ## Bot subagent
 

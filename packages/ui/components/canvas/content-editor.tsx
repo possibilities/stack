@@ -35,7 +35,7 @@ const hintClass = "px-0.5 text-[0.68rem] text-pretty text-muted-foreground";
 /** The one editing surface for Vault documents and document items. Bodies are page-local drafts until saved. */
 export function ContentEditorWindow() {
   const { target } = useContentActions();
-  if (!target) return <EditorFrame empty><Empty icon={FilePenLineIcon} title="Choose a document to edit" /></EditorFrame>;
+  if (!target) return <EditorFrame><Empty icon={FilePenLineIcon} title="Choose a document to edit" /></EditorFrame>;
   switch (target.kind) {
     case "document": return <DocumentEditor key={target.slug} slug={target.slug} />;
     case "item": return <ItemEditor key={target.id} id={target.id} />;
@@ -43,13 +43,13 @@ export function ContentEditorWindow() {
   }
 }
 
-function EditorFrame({ subtitle, footer, actions, empty = false, updatedAt, children }: {
-  subtitle?: string; footer?: React.ReactNode; actions?: React.ReactNode; empty?: boolean; updatedAt?: number | null; children: React.ReactNode;
+function EditorFrame({ subtitle, footer, actions, updatedAt, children }: {
+  subtitle?: string; footer?: React.ReactNode; actions?: React.ReactNode; updatedAt?: number | null; children: React.ReactNode;
 }) {
   const { status, endpoints } = useStack();
   return (
     <Window id="content-editor" title="Editor" subtitle={subtitle} icon={FilePenLineIcon} accent="content" status={status.content} endpoint={endpoints.content}
-      updatedAt={updatedAt} footer={footer} actions={actions} empty={empty}>
+      updatedAt={updatedAt} footer={footer} actions={actions}>
       {children}
     </Window>
   );
@@ -229,7 +229,7 @@ function DocumentEditor({ slug }: { slug: string }) {
   const fields = { body: saved?.body ?? "" };
   const draft = useDraft(key, fields);
   if (gone) return <Gone what="document" onClose={() => { draft.clear(); actions.edit(null); }} />;
-  if (!saved) return <EditorFrame subtitle={`document · ${slug}`} empty><Empty icon={FilePenLineIcon} title={readError ?? "Loading document…"} /></EditorFrame>;
+  if (!saved) return <EditorFrame subtitle={`document · ${slug}`}><Empty icon={FilePenLineIcon} title={readError ?? "Loading document…"} /></EditorFrame>;
 
   const dirty = Object.keys(draft.changes).length > 0;
   const conflicted = draft.conflicts.length > 0;
@@ -341,7 +341,7 @@ function ItemEditor({ id }: { id: string }) {
   const draft = useDraft(key, fields);
   if (gone) return <Gone what="item" onClose={() => { draft.clear(); actions.edit(null); }} />;
   if (blocked) return (
-    <EditorFrame subtitle={`item · ${blocked.item.name}`} empty>
+    <EditorFrame subtitle={`item · ${blocked.item.name}`}>
       <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-6 text-center">
         <KindIcon kind={blocked.item.kind} className="size-5" />
         <p className="text-sm font-medium">{blocked.reason}</p>
@@ -349,7 +349,7 @@ function ItemEditor({ id }: { id: string }) {
       </div>
     </EditorFrame>
   );
-  if (!saved) return <EditorFrame subtitle="item" empty><Empty icon={FilePenLineIcon} title={readError ?? "Loading item…"} /></EditorFrame>;
+  if (!saved) return <EditorFrame subtitle="item"><Empty icon={FilePenLineIcon} title={readError ?? "Loading item…"} /></EditorFrame>;
 
   const { item } = saved;
   const dirty = Object.keys(draft.changes).length > 0;

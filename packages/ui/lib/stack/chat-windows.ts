@@ -1,7 +1,8 @@
 /**
  * Which Bot each Fleet chat window shows. The primary window always exists and
  * is the one a Bot card switches; additional windows keep their own Bot until
- * closed. Browser-local and optional: losing it only resets the arrangement.
+ * explicitly rebound or the Bot is removed. Pane visibility is independent.
+ * Browser-local and optional: losing it only resets the bindings.
  */
 export type ChatWindow = { id: string; botId: string | null };
 export type ChatWindows = readonly ChatWindow[];
@@ -31,7 +32,7 @@ export class ChatWindowStore {
   }
 
   getWindows = (): ChatWindows => this.windows;
-  /** Benches may hydrate after attach; keep the snapshot SSR rendered. */
+  /** Spaces may hydrate after attach; keep the snapshot SSR rendered. */
   getServerWindows = (): ChatWindows => this.serverWindows;
 
   subscribe = (listener: Listener): (() => void) => {
@@ -59,11 +60,6 @@ export class ChatWindowStore {
 
   setBot(id: string, botId: string | null): void {
     this.set(this.windows.map((window) => window.id === id ? { ...window, botId } : window));
-  }
-
-  /** The primary window stays; closing it clears its Bot instead. */
-  close(id: string): void {
-    this.set(id === primaryChat ? this.windows.map((window) => window.id === id ? { ...window, botId: null } : window) : this.windows.filter((window) => window.id !== id));
   }
 
   /** Forget windows whose Bot was removed; the primary empties instead. */

@@ -95,7 +95,7 @@ export const serverStatus = operation({
     pid: z.number().int().describe("Server process id."),
     startedAt: z.iso.datetime().describe("Time the server process started."),
     nodeVersion: z.string().describe("Node.js version string of the server process."),
-    indexUrl: z.string().nullable().describe("Loopback UI entry URL for the Fleet bench while the server runs it."),
+    indexUrl: z.string().nullable().describe("Loopback UI entry URL at /, opening HUD while the server runs it."),
     uiUrl: z.string().nullable().describe("Loopback UI canvas URL at / while the server runs it."),
     inspectorUrl: z.string().nullable().describe("Loopback Inspector URL while the server runs it."),
     mcpUrls: z.record(z.string(), z.string()).describe("External-consumer loopback HTTP MCP URLs by fleet connection name. Internal launches use stdio."),

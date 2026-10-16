@@ -35,7 +35,7 @@ export function RoleCatalogWindow() {
 
   return (
     <Window id="role-catalog" title="Roles" subtitle={catalog ? `Bots · ${view.defaultRole?.name ?? "no default"} · Workers · ${view.workerDefaultRole?.name ?? "no default"}` : undefined} icon={UsersRoundIcon} accent="roles"
-      count={catalog?.roles.length ?? null} status={status.roles} endpoint={endpoints.roles} updatedAt={roleCatalog.at} error={roleCatalog.error} empty={!catalog?.roles.length}
+      count={catalog?.roles.length ?? null} status={status.roles} endpoint={endpoints.roles} updatedAt={roleCatalog.at} error={roleCatalog.error}
       footer={catalog?.roles.length ? (
         <Button size="sm" variant="ghost" className={footerButton} disabled={!connected} title={remote?.scope === "view" ? "Requires ui:control" : undefined} onClick={() => actions.open({ kind: "new-role" })}>
           <PlusIcon data-icon="inline-start" />New role

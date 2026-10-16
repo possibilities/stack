@@ -72,7 +72,7 @@ export function WorkersWindow() {
 
   return (
     <Window id="workers" title="Workers" subtitle="worker" icon={HammerIcon} accent="worker" count={workerSessions.data ? shown.length : null}
-      status={status.worker} endpoint={endpoints.worker} updatedAt={workerSessions.at} error={workerSessions.error} empty={!all.length}
+      status={status.worker} endpoint={endpoints.worker} updatedAt={workerSessions.at} error={workerSessions.error}
       actions={endpoints.worker ? <WorkerDefaultsButton /> : undefined}>
       {!endpoints.worker ? <Empty icon={HammerIcon} title="Worker isn’t served by this server" />
         : !workerSessions.data ? <Empty icon={HammerIcon} title={workerSessions.error ? "Workers unavailable" : "Reading Workers…"} />
@@ -173,7 +173,7 @@ export function WorkerRuntimesWindow() {
   const runtimes = workerRuntimes.data ?? [];
   return (
     <Window id="worker-runtimes" title="Runtimes" subtitle="worker" icon={CpuIcon} accent="worker" count={workerRuntimes.data ? runtimes.length : null}
-      status={status.worker} endpoint={endpoints.worker} updatedAt={workerRuntimes.at} error={workerRuntimes.error} empty={!runtimes.length}>
+      status={status.worker} endpoint={endpoints.worker} updatedAt={workerRuntimes.at} error={workerRuntimes.error}>
       {runtimes.length ? (
         <ul className="flex flex-col gap-1.5">
           {runtimes.map((runtime) => (

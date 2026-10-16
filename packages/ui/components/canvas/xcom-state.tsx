@@ -63,7 +63,7 @@ export function XcomStateWindow() {
   };
   if (remote) {
     return (
-      <Window id="xcom-state" title="Xcom" icon={ArchiveIcon} accent="server" empty>
+      <Window id="xcom-state" title="Xcom" icon={ArchiveIcon} accent="server">
         <div className="flex flex-col items-center gap-1.5 p-6 text-center">
           <ArchiveIcon className="size-5 text-muted-foreground/70" />
           <p className="text-sm font-medium">Available only on the local UI</p>
@@ -75,7 +75,7 @@ export function XcomStateWindow() {
   const unavailable = error ? "Refresh Xcom status before preparing." : !data ? "Reading Xcom status…" : !data.paused ? "Pause Xcom first."
     : data.sync.running ? "Wait for the running sync to finish." : null;
   return (
-    <Window id="xcom-state" title="Xcom" subtitle="archive maintenance" icon={ArchiveIcon} accent="server" status={status.xcom} endpoint={endpoints.xcom} error={error} empty={!data}>
+    <Window id="xcom-state" title="Xcom" subtitle="archive maintenance" icon={ArchiveIcon} accent="server" status={status.xcom} endpoint={endpoints.xcom} error={error}>
       {!access.available ? <p className={hint}>{access.reason}</p> : !data ? <p className={hint}>{error ? `Xcom unavailable: ${error}` : "Reading Xcom status…"}</p> : (
         <div className="flex flex-col gap-2.5">
           <div className="flex items-center gap-3 rounded-xl border px-3 py-2.5">

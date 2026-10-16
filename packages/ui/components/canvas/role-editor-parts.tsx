@@ -26,14 +26,14 @@ export const hintClass = "px-0.5 text-[0.68rem] text-pretty text-muted-foregroun
 export const fieldLabels: Record<string, string> = { botMarkdown: "bot.md", title: "title", description: "description", body: "instructions", name: "name", files: "supporting files", definition: "connection", path: "path", conditions: "conditions", harnesses: "harness filter" };
 
 /** The window every editor renders in. It names the Role being edited, and says so when that is not the default; `unscoped` frames what belongs to no Role, such as a Role not yet created. */
-export function EditorFrame({ subtitle, footer, actions, empty = false, unscoped = false, children }: {
-  subtitle?: string; footer?: React.ReactNode; actions?: React.ReactNode; empty?: boolean; unscoped?: boolean; children: React.ReactNode;
+export function EditorFrame({ subtitle, footer, actions, unscoped = false, children }: {
+  subtitle?: string; footer?: React.ReactNode; actions?: React.ReactNode; unscoped?: boolean; children: React.ReactNode;
 }) {
   const { role, status, endpoints } = useStack();
   const view = useRoleView();
   return (
     <Window id="role-editor" title="Editor" subtitle={[unscoped ? null : view.label, subtitle].filter(Boolean).join(" · ") || undefined} icon={FilePenLineIcon} accent="roles" status={status.roles} endpoint={endpoints.roles}
-      updatedAt={role.at} error={role.error} footer={footer} actions={actions} empty={empty}>
+      updatedAt={role.at} error={role.error} footer={footer} actions={actions}>
       {unscoped ? null : <DefaultNote />}
       {children}
     </Window>
@@ -108,7 +108,7 @@ export function Gone({ noun, draft, onRestore }: { noun: string; draft: Draft; o
   const actions = useRoleActions();
   const { role } = useStack();
   return (
-    <EditorFrame empty={!role.data}>
+    <EditorFrame>
       {role.data ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-6 text-center">
           <Trash2Icon className="size-5 text-muted-foreground/70" />
