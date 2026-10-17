@@ -87,12 +87,29 @@ export class BrowserGate {
         const peer: Peer = { client, upstream, pending: new Set() };
         const peers = agent ? this.peers : this.viewers;
         peers.add(peer);
+        const targets = new Map<string, string>();
+        const destroyedSessions = new Set<string>();
+        let finished = false;
+        let disconnectTimer: NodeJS.Timeout | undefined;
         const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(disconnectTimer);
           if (agent && peer.pending.size) this.uncertain = true;
           peers.delete(peer); client.terminate(); upstream.terminate();
         };
-        client.on("error", finish); upstream.on("error", finish);
-        client.on("close", finish); upstream.on("close", finish);
+        const clientGone = () => {
+          // Client disconnect does not lose the still-open upstream evidence.
+          // Retain accepted requests until their replies or a bounded failure;
+          // terminating upstream here made ordinary driver close permanently
+          // poison a reusable profile's quiescence state.
+          if (agent && peer.pending.size && upstream.readyState === WebSocket.OPEN) {
+            disconnectTimer ??= setTimeout(finish, 5000);
+            disconnectTimer.unref();
+          } else finish();
+        };
+        client.on("error", clientGone); upstream.on("error", finish);
+        client.on("close", clientGone); upstream.on("close", finish);
         let queued = 0;
         const forward = (raw: WebSocket.RawData, binary: boolean) => {
           if (upstream.readyState === WebSocket.CONNECTING && queued++ < 100) { upstream.once("open", () => forward(raw, binary)); return; }
@@ -101,6 +118,9 @@ export class BrowserGate {
             const frame = JSON.parse(raw.toString());
             if (agent) {
               // Nested CDP sessions would hide pending work behind an outer ack.
+              if (typeof frame.sessionId === "string" && destroyedSessions.has(frame.sessionId)) {
+                client.send(JSON.stringify({ id: frame.id, sessionId: frame.sessionId, error: { code: -32000, message: "CDP target was destroyed; take a fresh snapshot" } })); return;
+              }
               if (this.held || frame.method === "Target.sendMessageToTarget") {
                 client.send(JSON.stringify({ id: frame.id, sessionId: frame.sessionId, error: { code: -32000, message: "Managed browser held; reconnect and take a fresh snapshot after return" } })); return;
               }
@@ -122,11 +142,26 @@ export class BrowserGate {
         client.on("message", forward);
         upstream.on("message", (raw, binary) => {
           if (agent) {
-            try { const frame = JSON.parse(raw.toString()); if (frame.id !== undefined) peer.pending.delete(key(frame)); } catch { this.uncertain = true; finish(); return; }
+            try {
+              const frame = JSON.parse(raw.toString());
+              if (frame.id !== undefined) peer.pending.delete(key(frame));
+              if (frame.method === "Target.attachedToTarget" && typeof frame.params?.sessionId === "string" && typeof frame.params?.targetInfo?.targetId === "string")
+                targets.set(frame.params.sessionId, frame.params.targetInfo.targetId);
+              // A destroyed target cannot finish commands in its old sessions.
+              // Chrome can omit replies to teardown-racing debugger commands;
+              // destruction is terminal evidence, unlike session detachment.
+              if (frame.method === "Target.targetDestroyed" && typeof frame.params?.targetId === "string") {
+                for (const [session, target] of targets) if (target === frame.params.targetId) {
+                  destroyedSessions.add(session); targets.delete(session);
+                  for (const request of peer.pending) if (JSON.parse(request)[0] === session) peer.pending.delete(request);
+                }
+              }
+            } catch { this.uncertain = true; finish(); return; }
           } else if (token === this.human && this.viewAllowed(token)) {
             try { if (JSON.parse(raw.toString()).event === "system/init") upstream.send(JSON.stringify({ event: "admin/control" })); } catch { finish(); return; }
           }
           if (client.readyState === WebSocket.OPEN) client.send(raw, { binary });
+          else if (agent && !peer.pending.size) finish();
         });
       });
       })().catch(() => socket.destroy());

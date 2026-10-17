@@ -10,6 +10,8 @@ test("managed gate drains accepted CDP, rejects new work on existing and new con
   const sessions: Array<{ id: string; profile: { name: string } }> = [];
   const received: Array<{ method?: string; event?: string }> = [];
   let pending: (() => void) | undefined;
+  let loseUpstream: (() => void) | undefined;
+  let targetEvent: ((method: string) => void) | undefined;
   const upstream = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     let value: unknown = {};
@@ -28,7 +30,12 @@ test("managed gate drains accepted CDP, rejects new work on existing and new con
     }
     socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString()); received.push(frame);
-      if (frame.method === "Runtime.evaluate") pending = () => socket.send(JSON.stringify({ id: frame.id, sessionId: frame.sessionId, result: {} }));
+      if (frame.method === "Runtime.evaluate") {
+        pending = () => socket.send(JSON.stringify({ id: frame.id, sessionId: frame.sessionId, result: {} }));
+        loseUpstream = () => socket.terminate();
+        targetEvent = method => socket.send(JSON.stringify({ method, params: { sessionId: frame.sessionId, targetId: "ending-target" } }));
+        if (frame.sessionId === "ending") socket.send(JSON.stringify({ method: "Target.attachedToTarget", params: { sessionId: "ending", targetInfo: { targetId: "ending-target" } } }));
+      }
       else if (frame.id !== undefined) socket.send(JSON.stringify({ id: frame.id, result: {} }));
       else socket.send(JSON.stringify({ event: "ack", original: frame.event }));
     });
@@ -78,11 +85,33 @@ test("managed gate drains accepted CDP, rejects new work on existing and new con
     await gate.revokeHuman();
     assert.equal(sessions.length, 1); assert.equal((await fetch(grant)).status, 403);
     gate.resume(); assert.equal((await fetch(gate.cdpUrl + "/json/version")).status, 200);
-    const slow = await open(version.webSocketDebuggerUrl); pending = undefined;
-    slow.send(JSON.stringify({ id: 3, method: "Runtime.evaluate" }));
+    // The gate can still observe an accepted command's reply after its client
+    // disconnects. Closing upstream early would turn ordinary detach into a
+    // permanent unknown-drain fence on the next standalone attachment.
+    const lost = await open(version.webSocketDebuggerUrl); pending = undefined;
+    lost.send(JSON.stringify({ id: 4, method: "Runtime.evaluate" }));
     while (!pending) await new Promise((r) => setTimeout(r, 5));
+    lost.terminate(); await new Promise((r) => setTimeout(r, 10));
+    (pending as (() => void) | undefined)!(); await gate.drain(1000); gate.resume();
+    assert.equal((await fetch(gate.cdpUrl + "/json/version")).status, 200);
+    const terminal = await open(version.webSocketDebuggerUrl);
+    const attached = once(terminal, "message");
+    terminal.send(JSON.stringify({ id: 5, sessionId: "ending", method: "Runtime.evaluate" }));
+    await attached;
+    const destroyed = once(terminal, "message"); targetEvent!("Target.targetDestroyed"); await destroyed;
+    const beforeLate = received.length;
+    const late = once(terminal, "message");
+    terminal.send(JSON.stringify({ id: 6, sessionId: "ending", method: "Runtime.runIfWaitingForDebugger" }));
+    assert.match(String((await late)[0]), /target was destroyed/);
+    assert.equal(received.length, beforeLate, "old-session commands never reach the destroyed target");
+    terminal.terminate(); await new Promise((r) => setTimeout(r, 10));
+    await gate.drain(1000); gate.resume();
+    const slow = await open(version.webSocketDebuggerUrl); pending = undefined;
+    slow.send(JSON.stringify({ id: 3, sessionId: "ending", method: "Runtime.evaluate" }));
+    while (!pending) await new Promise((r) => setTimeout(r, 5));
+    targetEvent!("Target.detachedFromTarget");
     await assert.rejects(gate.drain(20), /deadline/);
-    slow.terminate(); await new Promise((r) => setTimeout(r, 10));
+    loseUpstream!(); await new Promise((r) => setTimeout(r, 10));
     await assert.rejects(gate.drain(20), /quiescence is unknown/);
     assert.throws(() => gate.resume(), /unknown/);
   } finally {

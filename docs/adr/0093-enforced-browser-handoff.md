@@ -39,6 +39,14 @@ its outer acknowledgment does not establish completion of nested work. Chrome
 HTTP exposure is restricted to read-only discovery. Agent-browser continues to
 own page/tab commands, and its native HTTP discovery requires root CDP paths.
 
+A client disconnect does not discard a still-open upstream's completion evidence:
+the gate waits up to five seconds for replies before marking their outcome unknown.
+An observed `Target.targetDestroyed` also terminates commands in that target's
+flattened sessions, and later commands for those sessions are refused before
+forwarding. A session detachment alone is not target destruction or quiescence.
+This handles Chrome's missing replies to commands racing target teardown while
+preserving the unknown-outcome fence.
+
 The drain deadline is five seconds. If an accepted request has not replied, the
 handoff remains preparing with an issue; retrying its identical admission can
 finish a later drain. Losing a connection with accepted work is unknown, not
