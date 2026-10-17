@@ -23,7 +23,7 @@ export const spaces: { id: SpaceId; title: string; description: string; key: str
   { id: "content", title: "Content", description: "Vault documents, collections, files and Artifacts", key: "8" },
   { id: "workers", title: "Workers", description: "What Workers started by Bots are doing, and their saved model settings", key: "9" },
   { id: "scrape", title: "Scrape", description: "Extraction, feeds, presets and their health, and the scrape-to-file queue", key: "0" },
-  { id: "browse", title: "Browse", description: "Bot browser profiles, human handoffs and the browser toolchain", key: "b" },
+  { id: "browse", title: "Browse", description: "Bot and named browsers, human handoffs and the browser toolchain", key: "b" },
   { id: "brain", title: "Brain", description: "Search and read collected research, submit material, and follow ingestion and sources", key: "n" },
   { id: "proc", title: "Proc", description: "What agents scheduled and ran on this machine, and what it printed", key: "p" },
   { id: "source", title: "Source", description: "Signed webhook receivers, the deliveries that arrived and their original payloads", key: "s" },
@@ -127,6 +127,8 @@ export function homeOf(ref: NodeRef): NodeHome {
       return { kind: "space", space: "browse", window: "browse-controllers" };
     case "browser-viewer":
       return { kind: "space", space: "browse", window: ref.id };
+    case "standalone-browser":
+      return { kind: "space", space: "browse", window: "browse-browsers" };
     case "research-document":
       return { kind: "space", space: "brain", window: "brain-reader" };
     case "ingestion-job":
@@ -265,7 +267,7 @@ export function parseNodeKey(key: string): NodeRef | null {
   if (kind === "worker" || kind === "worker-runtime" || kind === "worker-window") return { kind, id: rest };
   if (kind === "preset" || kind === "scrape-job") return { kind, id: rest };
   if (kind === "codex-tool" || kind === "state-entry" || kind === "subscription" || kind === "bot-state") return { kind, id: rest };
-  if (kind === "browser-profile" || kind === "browser-handoff" || kind === "browser-controller" || kind === "browser-viewer") return { kind, id: rest };
+  if (kind === "browser-profile" || kind === "browser-handoff" || kind === "browser-controller" || kind === "browser-viewer" || kind === "standalone-browser") return { kind, id: rest };
   if (kind === "research-document" || kind === "ingestion-job" || kind === "research-source") return { kind, id: rest };
   if (kind === "proc-schedule" || kind === "proc-execution" || kind === "proc-run" || kind === "proc-run-window") return { kind, id: rest };
   if (kind === "work-item") return { kind, id: rest };

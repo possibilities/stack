@@ -1079,3 +1079,75 @@ test("a remote page never reads global settings or subscribes to their notices",
     globalThis.WebSocket = original;
   }
 });
+
+test("browse subscribes the standalone notice, re-reads named browsers on it without logging, and every standalone write re-reads them", async () => {
+  const original = globalThis.WebSocket;
+  const sockets = new Set();
+  const calls = [];
+  const named = (name, patch = {}) => ({ id: `id-${name}`, botId: null, name, label: name, default: false, stopped: false, createdAt: "2026-10-16T00:00:00Z", generation: 0,
+    maintenanceRequestId: null, state: "ready", error: null, observedAt: null, cdpUrl: null, observation: null, ...patch });
+  let browsers = [named("research")];
+  const results = {
+    browser_standalone_list: () => ({ browsers }), browser_profile_list: () => ({ profiles: browsers }), browser_controller_list: () => ({ controllers: [] }),
+    browser_handoff_list: () => ({ handoffs: [] }), browser_status: () => ({ provider: "hypeman", mode: "durable", sessions: 0, profiles: browsers.length }),
+    agent_browser_status: () => ({}), agent_browser_detect: () => ({ installations: [] }), hypeman_detect: () => ({ installations: [] }),
+    browser_standalone_stop: ({ name }) => { browsers = browsers.map((item) => item.name === name ? { ...item, stopped: true, state: "stopped" } : item); return browsers[0]; },
+  };
+
+  class FakeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    readyState = FakeWebSocket.CONNECTING;
+    subscriptions = new Map();
+    constructor(url) {
+      this.url = url;
+      sockets.add(this);
+      queueMicrotask(() => { this.readyState = FakeWebSocket.OPEN; this.onopen?.(); });
+    }
+    send(raw) {
+      const { id, method, params } = JSON.parse(raw);
+      if (method === "events/subscribe") this.subscriptions.set(params.subscription, params);
+      if (method === "events/unsubscribe") this.subscriptions.delete(params.subscription);
+      if (method === "tools/call") calls.push(params.name);
+      const result = method.startsWith("events/") ? params : results[params.name]?.(params.arguments);
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+    close() { this.readyState = 3; sockets.delete(this); this.onclose?.(); }
+  }
+  const publish = (pkg, topic) => {
+    for (const socket of sockets) for (const subscription of socket.subscriptions.values()) {
+      if (subscription.package !== pkg || !subscription.topics.includes(topic)) continue;
+      socket.onmessage?.({ data: JSON.stringify({ method: "events/changed", params: { package: pkg, subscription: subscription.subscription, topic } }) });
+    }
+  };
+
+  globalThis.WebSocket = FakeWebSocket;
+  const snapshot = {
+    server: resource(null), resources: resource(null), accounts: resource([]), workerAccounts: resource([]), workerRuntimes: resource([]),
+    login: resource(null), workerLogins: resource([]), bots: resource([]), voice: resource(null), catalog: resource(null),
+    endpoints: { browse: "ws://fixture.invalid/websocket" },
+  };
+  const store = new StackStore(snapshot);
+  try {
+    store.start();
+    await until(store, () => store.getState().browserStandalone.data?.length === 1);
+    const main = [...sockets].flatMap((socket) => [...socket.subscriptions.values()]).find((subscription) => subscription.package === "browse");
+    assert.deepEqual([...main.topics].sort(), ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed"]);
+
+    // The notice is an invalidation: re-read, never a payload, and it accompanies every ledger save, so it stays out of the log.
+    browsers = [...browsers, named("major-briggs", { state: "starting" })];
+    publish("browse", "browser_standalone_changed");
+    await until(store, () => store.getState().browserStandalone.data?.length === 2);
+    assert.ok(!store.getState().events.some((event) => event.topic === "browser_standalone_changed"));
+
+    // A write re-reads the named list, the shared profiles and controllers whichever way it settles.
+    calls.length = 0;
+    const result = await store.browse("browser_standalone_stop", { name: "research" });
+    assert.equal(result.state, "stopped");
+    await until(store, () => store.getState().browserStandalone.data?.find((item) => item.name === "research")?.state === "stopped");
+    for (const name of ["browser_standalone_list", "browser_profile_list", "browser_controller_list"]) assert.ok(calls.includes(name), `${name} re-read after the write`);
+  } finally {
+    store.stop();
+    globalThis.WebSocket = original;
+  }
+});

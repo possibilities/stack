@@ -154,6 +154,8 @@ export type StackState = Snapshot & {
   /** A preset another window asked Extract to try; `seq` distinguishes repeated requests. */
   scrapeCompose: { seq: number; preset: string; mode: "page" | "links" } | null;
   browserProfiles: Resource<BrowserProfile[]>;
+  /** Named standalone browsers (`browser_standalone_list`): the same profile records, without Bot or legacy profiles. */
+  browserStandalone: Resource<BrowserProfile[]>;
   /** Last confirmed controller bindings; observations, not liveness. */
   browserControllers: Resource<BrowserController[]>;
   browserHandoffs: Resource<BrowserHandoff[]>;
@@ -260,14 +262,15 @@ const settingsWrites = new Set(["bot_settings_patch", "bot_settings_apply", "wor
 export const contentDocumentLimit = 200;
 
 type ResourceKey = ContentKey | "access" | "server" | "codexTools" | "resources" | "accounts" | "workerAccounts" | "workerRuntimes" | "workerSessions" | "login" | "workerLogins" | "bots" | "botDefaults" | "voice" | "roleCatalog" | "role" | "rolePreview" | "roleLaunch" | "roleInternal" | "roleShims" | "catalog" | "usage" | "inferRequests" | "inferModels" | "notifications" | "notifyCounts" | "signalStatus" | "scrapeStatus" | "scrapePresets" | "scrapeCanaries" | "scrapeQueue"
-  | "browserProfiles" | "browserControllers" | "browserHandoffs" | "browserToolchain"
+  | "browserProfiles" | "browserStandalone" | "browserControllers" | "browserHandoffs" | "browserToolchain"
   | "brainStatus" | "brainStats" | "brainTags" | "brainJobStats" | "brainJobs" | "brainSources"
   | "procSchedules" | "procRuns" | "procStatus" | "hudTree" | "sourceStatus" | "sourceEndpoints" | "sourceWatches";
 
 /** Which reads each browse write can change; each is re-read afterwards, since a lost acknowledgement may still have acted. */
 function browseReads(name: string): ResourceKey[] {
   if (name.startsWith("browser_handoff_")) return ["browserHandoffs", "browserProfiles", "browserControllers"];
-  if (name.startsWith("browser_profile_")) return ["browserProfiles", "browserToolchain"];
+  if (name.startsWith("browser_profile_")) return ["browserProfiles", "browserStandalone", "browserToolchain"];
+  if (name.startsWith("browser_standalone_")) return ["browserStandalone", "browserProfiles", "browserControllers", "browserToolchain"];
   return ["browserToolchain"];
 }
 const inferPage = 20;
@@ -419,7 +422,7 @@ export class StackStore {
       scrapeStatus: { data: null, error: null, at: null }, scrapePresets: { data: null, error: null, at: null },
       scrapeCanaries: { data: null, error: null, at: null }, scrapeQueue: { data: null, error: null, at: null },
       scrapeChecks: { canary: null, replay: null }, scrapeCompose: null,
-      browserProfiles: { data: null, error: null, at: null }, browserControllers: { data: null, error: null, at: null },
+      browserProfiles: { data: null, error: null, at: null }, browserStandalone: { data: null, error: null, at: null }, browserControllers: { data: null, error: null, at: null },
       browserHandoffs: { data: null, error: null, at: null }, browserToolchain: { data: null, error: null, at: null },
       brainStatus: { data: null, error: null, at: null }, brainStats: { data: null, error: null, at: null }, brainTags: { data: null, error: null, at: null },
       brainJobStats: { data: null, error: null, at: null }, brainJobView: { view: "attention", run: null }, brainJobs: { data: null, error: null, at: null },
@@ -575,11 +578,14 @@ export class StackStore {
     // scrape_queue_changed is an invalidation notice only, so the queue is re-read after each.
     open("scrape", () => { this.refreshScrape(); this.refresh("scrapeQueue"); }, () => this.refresh("scrapeQueue"), ["scrape_queue_changed"]);
     // Browse notices are invalidations only. Legacy disposable reservations have no UI, so their topic is not subscribed.
+    // browser_standalone_changed accompanies every profile-ledger save, health observations included, so it stays out of
+    // the activity log beside the profiles notice that is already logged.
     open("browse", this.refreshBrowse, (topic) => {
       if (topic === "browser_handoffs_changed") this.refresh("browserHandoffs");
       if (topic === "browser_profiles_changed") { this.refresh("browserProfiles"); this.refresh("browserControllers"); }
+      if (topic === "browser_standalone_changed") this.refresh("browserStandalone");
       if (topic === "browser_system_changed") this.refresh("browserToolchain");
-    }, ["browser_handoffs_changed", "browser_profiles_changed", "browser_system_changed"]);
+    }, ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed"], { silent: ["browser_standalone_changed"] });
     // Brain's notices are invalidations only. Ledger notices follow every job transition while
     // ingestion runs, so they stay out of the activity log.
     open("brain", () => { this.refreshBrainLedger(); this.refresh("brainSources"); this.invalidateBrainIndex(); }, (topic) => {
@@ -791,7 +797,7 @@ export class StackStore {
 
   /** Re-read everything the Browse space shows. */
   refreshBrowse = (): void => {
-    for (const key of ["browserProfiles", "browserControllers", "browserHandoffs", "browserToolchain"] as const) this.refresh(key);
+    for (const key of ["browserProfiles", "browserStandalone", "browserControllers", "browserHandoffs", "browserToolchain"] as const) this.refresh(key);
   };
 
   /**
@@ -2164,6 +2170,7 @@ export class StackStore {
         .then((result) => result.presets.filter((item) => item.configured).map((item) => item.preset));
       case "scrapeQueue": return call<ScrapeQueue>("scrape", "scrape_queue_list", { limit: scrapeQueueLimit });
       case "browserProfiles": return call<{ profiles: BrowserProfile[] }>("browse", "browser_profile_list").then((result) => result.profiles);
+      case "browserStandalone": return call<{ browsers: BrowserProfile[] }>("browse", "browser_standalone_list").then((result) => result.browsers);
       case "browserControllers": return call<{ controllers: BrowserController[] }>("browse", "browser_controller_list").then((result) => result.controllers);
       case "browserHandoffs": return call<{ handoffs: BrowserHandoff[] }>("browse", "browser_handoff_list").then((result) => result.handoffs);
       case "browserToolchain": return Promise.all([

@@ -49,6 +49,7 @@ test("homeOf distinguishes spatial records from reference destinations", () => {
   assert.deepEqual(homeOf({ kind: "browser-handoff", id: "0fd9d71a-8b46-4c79-9e1a-3a05f1f2f5d2" }), { kind: "space", space: "browse", window: "browse-handoffs" });
   assert.deepEqual(homeOf({ kind: "browser-controller", id: "bot-1/abc/default" }), { kind: "space", space: "browse", window: "browse-controllers" });
   assert.deepEqual(homeOf({ kind: "browser-viewer", id: "browse-viewer-2" }), { kind: "space", space: "browse", window: "browse-viewer-2" });
+  assert.deepEqual(homeOf({ kind: "standalone-browser", id: "major-briggs" }), { kind: "space", space: "browse", window: "browse-browsers" });
   assert.deepEqual(homeOf({ kind: "research-document", id: "42" }), { kind: "space", space: "brain", window: "brain-reader" });
   assert.deepEqual(homeOf({ kind: "ingestion-job", id: "7" }), { kind: "space", space: "brain", window: "brain-jobs" });
   assert.deepEqual(homeOf({ kind: "research-source", id: "hn-front" }), { kind: "space", space: "brain", window: "brain-sources" });
@@ -151,6 +152,7 @@ test("parseNodeKey inverts nodeKey for every kind and rejects malformed keys", (
     { kind: "browser-handoff", id: "0fd9d71a-8b46-4c79-9e1a-3a05f1f2f5d2" },
     { kind: "browser-controller", id: "bot-1/inst:ance/named session" },
     { kind: "browser-viewer", id: "browse-viewer" },
+    { kind: "standalone-browser", id: "major-briggs" },
     { kind: "research-document", id: "42" },
     { kind: "ingestion-job", id: "7" },
     { kind: "research-source", id: "hn-front" },

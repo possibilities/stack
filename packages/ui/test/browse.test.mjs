@@ -6,12 +6,14 @@ import test from "node:test";
 registerHooks({ resolve(specifier, context, next) {
   return next(context.parentURL?.includes("/lib/stack/") && specifier.startsWith("./") && !extname(specifier) ? `${specifier}.ts` : specifier, context);
 } });
-const { botHandoff, browseCallError, browseLocalReason, controllerKey, deleteBlock, groupHandoffs, groupProfiles, heldBy, intentFor, loadIntent, saveIntent, siteDataOrigins, handoffContentSelection, volumeSelection } = await import("../lib/stack/browse.ts");
+const { botHandoff, browseCallError, browseLocalReason, controllerKey, deleteBlock, groupHandoffs, groupProfiles, heldBy, intentFor, loadIntent, saveIntent, siteDataOrigins, handoffContentSelection, volumeSelection,
+  isStandalone, sortStandalone, standaloneActions, standaloneConnect, standaloneCreateBlock, standaloneStatus } = await import("../lib/stack/browse.ts");
 const { ViewerWindowStore, primaryViewer } = await import("../lib/stack/browse-viewers.ts");
 
 const handoff = (patch = {}) => ({ id: "h1", profileId: "p1", botId: "bot-1", threadId: "t", instance: "i", requestId: "r", targetId: null, targetStatus: "unspecified", message: "Sign in to GitHub",
   state: "awaiting_human", outcome: null, note: null, revision: 3, createdAt: "2026-09-28T10:00:00Z", resolvedAt: null, issue: null, quiesced: true, ...patch });
 const profile = (patch = {}) => ({ id: "p1", botId: "bot-1", label: "default", default: true, createdAt: "2026-09-28T09:00:00Z", state: "ready", error: null, observedAt: null, cdpUrl: null, observation: null, ...patch });
+const named = (name, patch = {}) => profile({ id: `id-${name}`, botId: null, name, label: name, default: false, stopped: false, generation: 0, maintenanceRequestId: null, ...patch });
 const controller = (patch = {}) => ({ botId: "bot-1", instance: "i", session: "default", profileId: "p1", actualProfileId: "p1", targetId: null, cdpUrl: null, state: "connected", revision: 1, observedAt: null, error: null, ...patch });
 
 function memory() {
@@ -80,6 +82,58 @@ test("holds, Bot help and deletion blocks mirror the API's rules", () => {
 test("profiles group by Bot in numeric order, unassigned last, defaults first", () => {
   const groups = groupProfiles([profile({ id: "a", botId: null }), profile({ id: "b", botId: "bot-10", default: false }), profile({ id: "c", botId: "bot-2", default: false, createdAt: "2026-09-28T08:00:00Z" }), profile({ id: "d", botId: "bot-2" })]);
   assert.deepEqual(groups.map((group) => [group.botId, group.profiles.map((item) => item.id)]), [["bot-2", ["d", "c"]], ["bot-10", ["b"]], [null, ["a"]]]);
+});
+
+test("named browsers group by name between Bot and legacy unassigned profiles; a legacy profile is never named", () => {
+  const legacy = profile({ id: "legacy", botId: null, name: null, default: false });
+  const groups = groupProfiles([named("zeta"), legacy, profile({ id: "bot", name: null }), named("alpha")]);
+  assert.deepEqual(groups.map((group) => [group.botId, group.standalone, group.profiles.map((item) => item.id)]),
+    [["bot-1", false, ["bot"]], [null, true, ["id-alpha", "id-zeta"]], [null, false, ["legacy"]]]);
+  assert.deepEqual(groupProfiles([named("only")]).map((group) => group.standalone), [true], "no empty unassigned group is invented");
+  assert.equal(isStandalone(legacy), false);
+  assert.equal(isStandalone(profile({ name: null })), false);
+  assert.equal(isStandalone(named("research")), true);
+  assert.deepEqual(sortStandalone([named("b"), named("a-1"), named("a")]).map((item) => item.name), ["a", "a-1", "b"]);
+});
+
+test("creation checks the exact name rule without normalizing, and an existing name or a full owner is not offered", () => {
+  for (const name of ["research", "major-briggs", "-", "a", "9-lives-", "a".repeat(40)]) assert.equal(standaloneCreateBlock(name, "", [], 3), null, name);
+  for (const name of ["Research", "with space", " research", "research ", "a/b", "a_b", "é", "a".repeat(41)]) assert.match(standaloneCreateBlock(name, "", [], 3), /lowercase/, name);
+  assert.equal(standaloneCreateBlock("", "", [], 3), "Enter a name");
+  assert.match(standaloneCreateBlock("ok", "x".repeat(129), [], 3), /128/);
+  assert.equal(standaloneCreateBlock("ok", "x".repeat(128), [], 3), null);
+  assert.match(standaloneCreateBlock("research", "", [named("research")], 3), /already exists; creating it again changes nothing/);
+  assert.match(standaloneCreateBlock("new", "", [], 16), /All 16 browser profiles are in use, Bot profiles included/);
+  assert.equal(standaloneCreateBlock("new", "", null, null), null, "unknown counts never block; the API decides");
+});
+
+test("stop intent beside failure means an unconfirmed stop, not a startup failure", () => {
+  assert.equal(standaloneStatus({ state: "failed", stopped: true }).label, "Stop failed");
+  assert.match(standaloneStatus({ state: "failed", stopped: true }).hint, /VM may still be running/);
+  assert.equal(standaloneStatus({ state: "failed", stopped: false }).label, "Failed");
+  assert.match(standaloneStatus({ state: "starting", stopped: false }).hint, /not ready/);
+  for (const state of ["starting", "ready", "recovering", "failed", "stopping", "stopped", "deleting"]) assert.ok(standaloneStatus({ state, stopped: false }).label, state);
+});
+
+test("lifecycle actions follow state, and fences and handoffs block all of them", () => {
+  const actions = (patch, handoffs = []) => { const { start, stop, blocked } = standaloneActions(named("research", patch), handoffs); return [start, stop, blocked]; };
+  assert.deepEqual(actions({ state: "ready" }), [false, true, null]);
+  assert.deepEqual(actions({ state: "starting" }), [false, true, null]);
+  assert.deepEqual(actions({ state: "recovering" }), [false, true, null]);
+  assert.deepEqual(actions({ state: "stopped", stopped: true }), [true, false, null]);
+  assert.deepEqual(actions({ state: "failed", stopped: true }), [true, true, null], "an unconfirmed stop can be retried or reversed");
+  assert.deepEqual(actions({ state: "failed" }), [true, true, null]);
+  assert.deepEqual(actions({ state: "stopping", stopped: true }), [false, false, null]);
+  assert.deepEqual(actions({ state: "deleting", stopped: true }), [false, false, null]);
+  assert.deepEqual(actions({ state: "stopped", maintenanceRequestId: "req" }), [false, false, "Profile maintenance is fenced; inspect its receipt before release"]);
+  assert.deepEqual(actions({ state: "ready" }, [handoff({ profileId: "id-research" })]), [false, false, "A handoff holds this browser"]);
+  assert.deepEqual(actions({ state: "ready" }, [handoff({ profileId: "id-research", state: "resolved" })]), [false, true, null]);
+});
+
+test("connection commands name the exact browser and go through the provider, never a raw CDP port", () => {
+  const commands = standaloneConnect("major-briggs").map((item) => item.command);
+  assert.deepEqual(commands, ["stack browse drive major-briggs -- open https://example.com", "AGENT_BROWSER_STACK_BROWSER=major-briggs agent-browser --session major-briggs open https://example.com"]);
+  assert.ok(commands.every((command) => !/--cdp|127\.0\.0\.1/.test(command)));
 });
 
 test("an identical retry reuses the stored intent; a new decision mints a new request", () => {

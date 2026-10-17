@@ -35,7 +35,7 @@ import { AttentionItemDetail, AttentionMessageDetail, TraceViewer } from "./sign
 import { useShowWorker } from "./worker-windows";
 import { workerLabel } from "@/lib/stack/workers";
 import { maskActionEnv, ownerOf, runTitle, scheduleTitle } from "@/lib/stack/proc";
-import { controllerKey, handoffOutcomes, handoffStates, heldBy, profileName } from "@/lib/stack/browse";
+import { controllerKey, handoffOutcomes, handoffStates, heldBy, isStandalone, profileName, standaloneStatus } from "@/lib/stack/browse";
 import { HandoffWatch } from "./browse-handoffs";
 import { deliveryName, targetKinds } from "@/lib/stack/source";
 
@@ -493,10 +493,24 @@ function resolve(ref: NodeRef, state: StackState): View | null {
       const related: View["related"] = [];
       if (profile.botId && state.bots.data?.some((bot) => bot.id === profile.botId)) related.push({ ref: { kind: "bot", id: profile.botId }, label: `${profile.botId} · ${profile.default ? "default profile" : "owns it"}` });
       if (held) related.push({ ref: { kind: "browser-handoff", id: held.id }, label: `Handoff · ${handoffStates[held.state].label}` });
+      if (isStandalone(profile)) related.push({ ref: { kind: "standalone-browser", id: profile.name! }, label: `Named browser ${profile.name}` });
       return {
-        eyebrow: `Browser profile · ${profile.state}${profile.botId ? "" : " · unassigned"}`, accent: "browse", title: profileName(profile), record: profile,
+        eyebrow: `Browser profile · ${profile.state}${profile.botId ? "" : isStandalone(profile) ? " · named" : " · unassigned"}`, accent: "browse", title: profileName(profile), record: profile,
         fields: browseFields(catalog, "browser_profile_list", "profiles"), related,
         operations: { pkg: "browse", list: browseOperations(catalog, ["browser_profile_list", "browser_profile_create", "browser_profile_delete"]) },
+        events: state.events.filter((event) => event.pkg === "browse" && event.topic === "browser_profiles_changed"),
+      };
+    }
+    case "standalone-browser": {
+      const browser = state.browserStandalone.data?.find((item) => item.name === ref.id);
+      if (!browser) return null;
+      const held = heldBy(browser.id, state.browserHandoffs.data);
+      const related: View["related"] = [{ ref: { kind: "browser-profile", id: browser.id }, label: `Profile ${shortId(browser.id)} · this incarnation` }];
+      if (held) related.push({ ref: { kind: "browser-handoff", id: held.id }, label: `Handoff · ${handoffStates[held.state].label}` });
+      return {
+        eyebrow: `Named browser · ${standaloneStatus(browser).label}`, accent: "browse", title: browser.name ?? ref.id, record: browser,
+        fields: browseFields(catalog, "browser_standalone_list", "browsers"), related,
+        operations: { pkg: "browse", list: browseOperations(catalog, ["browser_standalone_list", "browser_standalone_get", "browser_standalone_create", "browser_standalone_start", "browser_standalone_stop", "browser_standalone_delete"]) },
         events: state.events.filter((event) => event.pkg === "browse" && event.topic === "browser_profiles_changed"),
       };
     }
@@ -913,7 +927,7 @@ function referencePackage(ref: NodeRef): string {
   if (ref.kind === "github-receiver" || ref.kind === "github-delivery" || ref.kind === "github-watch") return "source";
   if (ref.kind === "usage" || ref.kind === "usage-account") return "usage";
   if (ref.kind === "preset" || ref.kind === "scrape-job") return "scrape";
-  if (ref.kind === "browser-profile" || ref.kind === "browser-handoff" || ref.kind === "browser-controller" || ref.kind === "browser-viewer") return "browse";
+  if (ref.kind === "browser-profile" || ref.kind === "browser-handoff" || ref.kind === "browser-controller" || ref.kind === "browser-viewer" || ref.kind === "standalone-browser") return "browse";
   if (ref.kind === "research-document" || ref.kind === "ingestion-job" || ref.kind === "research-source") return "brain";
   if (ref.kind === "signal" || ref.kind === "attention-item" || ref.kind === "attention-message" || ref.kind === "attention-run") return "signal";
   return "auth";

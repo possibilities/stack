@@ -5,9 +5,10 @@ import type { ChatWindows } from "@/lib/stack/chat-windows";
 import type { WorkerWindows } from "@/lib/stack/worker-windows";
 import type { ViewerWindows } from "@/lib/stack/browse-viewers";
 import type { ProcRunWindows } from "@/lib/stack/proc-windows";
-import { CableIcon, DatabaseIcon, HardDriveIcon, LifeBuoyIcon, MonitorIcon, WrenchIcon } from "lucide-react";
+import { AppWindowIcon, CableIcon, DatabaseIcon, HardDriveIcon, LifeBuoyIcon, MonitorIcon, WrenchIcon } from "lucide-react";
 import { HandoffsWindow, ViewerWindow } from "./browse-handoffs";
 import { ControllersWindow, ProfilesWindow, ToolchainWindow } from "./browse-operator";
+import { BrowsersWindow } from "./browse-browsers";
 import { ArrowRightLeftIcon, FolderInputIcon, GlobeIcon, ListChecksIcon, RssIcon } from "lucide-react";
 import { ExtractWindow } from "./scrape-extract";
 import { ConvertWindow, FeedsWindow } from "./scrape-feeds";
@@ -225,6 +226,7 @@ export const spaceViews: Record<SpaceId, {
       { id: "browse-handoffs", title: "Handoffs", icon: LifeBuoyIcon, accent: "browse", element: <HandoffsWindow /> },
       ...viewers.map((viewer) => ({ id: viewer.id, title: "Viewer", icon: MonitorIcon, accent: "browse" as const,
         element: <ViewerWindow id={viewer.id} /> })),
+      { id: "browse-browsers", title: "Browsers", icon: AppWindowIcon, accent: "browse", element: <BrowsersWindow /> },
       { id: "browse-profiles", title: "Profiles", icon: HardDriveIcon, accent: "browse", element: <ProfilesWindow /> },
       { id: "browse-controllers", title: "Controllers", icon: CableIcon, accent: "browse", element: <ControllersWindow /> },
       { id: "browse-toolchain", title: "Toolchain", icon: WrenchIcon, accent: "browse", element: <ToolchainWindow /> },
@@ -276,7 +278,7 @@ const paneDescriptions: Record<string, string> = {
   "notify-inbox": "Notifications to read and answer", "notify-detail": "Selected Notification and response choices", "notify-compose": "Compose an operator Notification",
   signal: "Processing settings and health", attention: "What conversations ask of you", "attention-messages": "Captured conversation evidence", "attention-runs": "Interpretation runs and traces", "attention-changes": "Attention change history",
   "role-catalog": "Named Roles and launch defaults", "role-instructions": "Instruction Categories and Fragments", "role-editor": "Edit the selected Role resource", "role-preview": "Assembled instructions and launch preview", "role-skills": "Role skills and capability filters", "role-mcp-servers": "Role MCP servers and internal connections", "role-projects": "Trusted launch projects", "role-shims": "Local commands that launch Roles",
-  "browse-handoffs": "Requests for human browser help", "browse-viewer": "A profile's live observation or granted control", "browse-profiles": "Browser profiles and their state", "browse-controllers": "Connected browser controllers", "browse-toolchain": "Browser tools and owned volumes",
+  "browse-handoffs": "Requests for human browser help", "browse-viewer": "A profile's live observation or granted control", "browse-browsers": "Named browsers any agent can drive", "browse-profiles": "Browser profiles and their state", "browse-controllers": "Connected browser controllers", "browse-toolchain": "Browser tools and owned volumes",
   "content-documents": "Vault documents and selection", "content-library": "Collections and Content items", "content-editor": "Document drafts and editing", "content-preview": "Read the selected document or item", "content-artifacts": "Published Artifacts", "content-storage": "Content storage and retained history",
   "brain-search": "Find collected research", "brain-reader": "Read selected research and evidence", "brain-ingest": "Admit material for ingestion", "brain-jobs": "Ingestion jobs, Runs and recovery", "brain-sources": "Recurring Research sources",
   "scrape-extract": "Extract a specific source", "scrape-feeds": "Discover feed entries", "scrape-convert": "Convert document content", "scrape-presets": "Extraction presets", "scrape-status": "Extraction capability and health", "scrape-checks": "Local corpus checks", "scrape-queue": "Scrape-to-file jobs and receipts",

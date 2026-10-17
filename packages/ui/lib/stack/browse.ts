@@ -99,13 +99,20 @@ export function deleteBlock(profile: BrowserProfile, controllers: readonly Brows
   return null;
 }
 
-/** Profiles grouped by owning Bot (numeric order), then unassigned; defaults first within each. */
-export function groupProfiles(profiles: readonly BrowserProfile[]): Array<{ botId: string | null; profiles: BrowserProfile[] }> {
+/** Profiles grouped by owning Bot (numeric order), then named standalone browsers by name, then unassigned; defaults first within each. */
+export function groupProfiles(profiles: readonly BrowserProfile[]): Array<{ botId: string | null; standalone: boolean; profiles: BrowserProfile[] }> {
   const groups = new Map<string | null, BrowserProfile[]>();
-  for (const profile of profiles) groups.set(profile.botId, [...(groups.get(profile.botId) ?? []), profile]);
+  const named: BrowserProfile[] = [];
+  for (const profile of profiles) {
+    if (isStandalone(profile)) named.push(profile);
+    else groups.set(profile.botId, [...(groups.get(profile.botId) ?? []), profile]);
+  }
   const order = (profile: BrowserProfile) => (profile.default ? 0 : 1);
-  return [...groups].sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b, undefined, { numeric: true })))
-    .map(([botId, list]) => ({ botId, profiles: list.sort((x, y) => order(x) - order(y) || x.createdAt.localeCompare(y.createdAt)) }));
+  const owned = [...groups].sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b, undefined, { numeric: true })))
+    .map(([botId, list]) => ({ botId, standalone: false, profiles: list.sort((x, y) => order(x) - order(y) || x.createdAt.localeCompare(y.createdAt)) }));
+  const unassigned = owned.findIndex((group) => group.botId === null);
+  if (named.length) owned.splice(unassigned === -1 ? owned.length : unassigned, 0, { botId: null, standalone: true, profiles: sortStandalone(named) });
+  return owned;
 }
 
 export type HandoffArgs = { id: string; expectedRevision: number; requestId: string; outcome?: "completed" | "skipped"; note?: string };
@@ -164,4 +171,67 @@ export function browseAttention(handoffs: readonly BrowserHandoff[] | null, prof
   for (const profile of profiles ?? []) if (profile.state === "failed") reasons.push(`${profileName(profile)} browser failed`);
   if (toolchain && !toolchain.hypeman.some((item) => item.selected)) reasons.push("No local Hypeman selected");
   return reasons;
+}
+
+/** The API's exact name rule: no trimming, case folding or other normalization happens before it is sent. */
+export const standaloneNamePattern = /^[a-z0-9-]{1,40}$/;
+/** Durable profiles per Browse owner, Bot and legacy profiles included; standalone creation is refused at this count. */
+export const profileLimit = 16;
+
+/** A named standalone browser: a durable profile with a name and no Bot. Legacy unassigned profiles have no name. */
+export function isStandalone(profile: Pick<BrowserProfile, "botId" | "name">): boolean {
+  return profile.botId === null && typeof profile.name === "string";
+}
+
+/** Why a new browser can't be created with this name and label, or null. An existing name is a no-op, not an update. */
+export function standaloneCreateBlock(name: string, label: string, existing: readonly Pick<BrowserProfile, "name">[] | null, profiles: number | null): string | null {
+  if (!name) return "Enter a name";
+  if (!standaloneNamePattern.test(name)) return "Use 1–40 lowercase letters, digits and hyphens";
+  if (label.length > 128) return "Labels are at most 128 characters";
+  if (existing?.some((item) => item.name === name)) return `${name} already exists; creating it again changes nothing`;
+  if (profiles !== null && profiles >= profileLimit) return `All ${profileLimit} browser profiles are in use, Bot profiles included`;
+  return null;
+}
+
+/** Named browsers by name. */
+export function sortStandalone(browsers: readonly BrowserProfile[]): BrowserProfile[] {
+  return [...browsers].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+}
+
+/**
+ * What a standalone browser's state means to a person. `stopped` is persisted intent, not proof: beside `failed` it
+ * means a stop did not complete and the VM may still be running, which only an explicit start or another stop resolves.
+ */
+export function standaloneStatus(browser: Pick<BrowserProfile, "state" | "stopped">): { label: string; tone: "success" | "warning" | "destructive" | "muted"; hint: string } {
+  switch (browser.state) {
+    case "ready": return { label: "Ready", tone: "success", hint: "Running; agents can attach." };
+    case "starting": return { label: "Starting", tone: "muted", hint: "Starting in the background; not ready yet." };
+    case "recovering": return { label: "Recovering", tone: "warning", hint: "Supervision is restarting it after a failure or owner restart." };
+    case "stopping": return { label: "Stopping", tone: "warning", hint: "Draining automation, closing Chrome and stopping its VM." };
+    case "stopped": return { label: "Stopped", tone: "muted", hint: "Its VM is stopped; sign-ins and data are kept. Attaching an agent starts it." };
+    case "deleting": return { label: "Deleting", tone: "warning", hint: "Removing its VM, volume and profile." };
+    case "failed": return browser.stopped
+      ? { label: "Stop failed", tone: "destructive", hint: "The stop did not complete and the VM may still be running. Supervision won't restart it; stop again or start it." }
+      : { label: "Failed", tone: "destructive", hint: "Startup failed. Supervision retries; start it to try now." };
+  }
+}
+
+/** Which lifecycle actions apply to this browser now, or why none do. Fences and handoffs block every action, deletion included, as the API does. */
+export function standaloneActions(browser: BrowserProfile, handoffs: readonly BrowserHandoff[] | null): { start: boolean; stop: boolean; blocked: string | null } {
+  const blocked = browser.maintenanceRequestId ? "Profile maintenance is fenced; inspect its receipt before release"
+    : heldBy(browser.id, handoffs) ? "A handoff holds this browser" : null;
+  if (blocked) return { start: false, stop: false, blocked };
+  // A failed browser offers both: start clears stop intent; stop sets it, or retries one that did not complete.
+  const { state } = browser;
+  return { start: state === "stopped" || state === "failed", stop: state === "ready" || state === "starting" || state === "recovering" || state === "failed", blocked: null };
+}
+
+/** Ways to drive a named browser with agent-browser through Stack's provider; raw CDP bypasses managed admission. */
+export function standaloneConnect(name: string): Array<{ label: string; command: string; hint: string }> {
+  return [
+    { label: "Stack CLI", command: `stack browse drive ${name} -- open https://example.com`,
+      hint: `Runs agent-browser with a private provider config. Its session defaults to ${name}; pass --session to use another.` },
+    { label: "agent-browser", command: `AGENT_BROWSER_STACK_BROWSER=${name} agent-browser --session ${name} open https://example.com`,
+      hint: "Needs an agent-browser config whose provider is Stack's stack plugin. An already-running session keeps its browser; use a new session to switch." },
+  ];
 }

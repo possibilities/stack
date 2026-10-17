@@ -1178,6 +1178,8 @@ export type NodeRef =
   | { kind: "preset" | "scrape-job"; id: string }
   /** Browse records: a profile and a handoff by ID, a controller by `botId/instance/session`, and a viewer window by window ID. */
   | { kind: "browser-profile" | "browser-handoff" | "browser-controller" | "browser-viewer"; id: string }
+  /** A named standalone browser by its name, which follows the current incarnation; its profile node names the exact UUID. */
+  | { kind: "standalone-browser"; id: string }
   /** Brain records by their numeric document or job ID, and a Research source by its definition ID. */
   | { kind: "research-document" | "ingestion-job" | "research-source"; id: string }
   /** Proc records: a schedule, a scheduled execution and a process run, each by ID. */

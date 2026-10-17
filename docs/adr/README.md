@@ -183,6 +183,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0177 | [Retire Grok support without deleting stored data](0177-retire-grok-support.md) | Accepted |
 | 0178 | [Exact Browser provider maintenance](0178-exact-browser-provider-maintenance.md) | Accepted |
 | 0179 | [Headless Canvas maintenance and observation lifetimes](0179-canvas-maintenance-and-observation-lifetimes.md) | Accepted |
+| 0181 | [Named standalone browsers in the Browse space](0181-browse-named-browsers.md) | Accepted |
 
 ## Historical identifier corrections
 

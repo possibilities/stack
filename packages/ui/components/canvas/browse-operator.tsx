@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { CableIcon, EyeIcon, FolderSearchIcon, HardDriveIcon, MoreHorizontalIcon, PlusIcon, RefreshCwIcon, Trash2Icon, WrenchIcon } from "lucide-react";
+import { AppWindowIcon, CableIcon, EyeIcon, FolderSearchIcon, HardDriveIcon, MoreHorizontalIcon, PlusIcon, RefreshCwIcon, Trash2Icon, WrenchIcon } from "lucide-react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { browseCallError, browseLocalReason, controllerKey, deleteBlock, groupProfiles, heldBy, profileName, type BrowseCallError } from "@/lib/stack/browse";
+import { browseCallError, browseLocalReason, controllerKey, deleteBlock, groupProfiles, heldBy, isStandalone, profileName, type BrowseCallError } from "@/lib/stack/browse";
 import { shortId } from "@/lib/stack/derive";
 import type { BrowserController, BrowserProfile, HypemanInstallation } from "@/lib/stack/types";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ import { footerButton, Section, Window } from "./window";
 const badge = "rounded-md bg-muted px-1.5 py-px font-mono text-[0.64rem] text-muted-foreground";
 
 /** One browse write with its own pending and error state. What it changes is re-read either way. */
-function useBrowseWrite<T = unknown>(name: string) {
+export function useBrowseWrite<T = unknown>(name: string) {
   const store = useStore();
   const [since, setSince] = useState<number | null>(null);
   const [error, setError] = useState<BrowseCallError | null>(null);
@@ -43,7 +43,7 @@ function useBrowseWrite<T = unknown>(name: string) {
   return { run, pending: since !== null, since, error, clear: () => setError(null) };
 }
 
-function WriteError({ error }: { error: BrowseCallError | null }) {
+export function WriteError({ error }: { error: BrowseCallError | null }) {
   if (!error) return null;
   return (
     <p role="alert" className={cn("rounded-lg px-2.5 py-1.5 text-[0.72rem] text-pretty", error.uncertain ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive")}>
@@ -102,6 +102,7 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
           <StatusDot tone={profileTone[profile.state]} label={profile.state} pulse={profile.state === "starting" || profile.state === "recovering"} />
           <NodeTitle node={node} label={`profile ${name}`} className="min-w-0 truncate text-[0.78rem] font-medium">{name}</NodeTitle>
           {profile.default ? <span className={badge}>default</span> : null}
+          {isStandalone(profile) ? <NodeLink node={{ kind: "standalone-browser", id: profile.name! }} label={`named browser ${profile.name}`} className={badge}>{profile.name}</NodeLink> : null}
           {controllers.length ? <span className={badge} title={controllers.map((item) => `${item.session} (${item.state})`).join(", ")}>{controllers.length} controller{controllers.length === 1 ? "" : "s"}</span> : null}
           {held ? <NodeLink node={{ kind: "browser-handoff", id: held.id }} label="handoff holding this profile" className={cn(badge, "bg-warning/15 text-warning")}>held</NodeLink> : null}
           <span className="ml-auto flex shrink-0 items-center gap-0.5">
@@ -114,7 +115,9 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
                   <DropdownMenuItem onClick={() => goTo({ kind: "browser-viewer", id: viewers.open(profile.id) })}><EyeIcon />Open in a new viewer</DropdownMenuItem>
                   {localOperations(state, "browse", [browseMaintenanceOperations.reset.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("reset")}>Reset profile…</DropdownMenuItem> : null}
                   {localOperations(state, "browse", [browseMaintenanceOperations.site.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("site")}>Clear site data…</DropdownMenuItem> : null}
-                  <DropdownMenuItem variant="destructive" disabled={Boolean(block)} title={block ?? undefined} onClick={() => setDeleting(true)}><Trash2Icon />{block ?? "Delete profile…"}</DropdownMenuItem>
+                  {isStandalone(profile)
+                    ? <DropdownMenuItem onClick={() => goTo({ kind: "standalone-browser", id: profile.name! })}><AppWindowIcon />Start, stop or delete in Browsers</DropdownMenuItem>
+                    : <DropdownMenuItem variant="destructive" disabled={Boolean(block)} title={block ?? undefined} onClick={() => setDeleting(true)}><Trash2Icon />{block ?? "Delete profile…"}</DropdownMenuItem>}
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -135,8 +138,8 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
 }
 
 /**
- * Durable Browser profiles by owning Bot, then unassigned. Each has one supervised browser while
- * Stack runs; a new profile starts empty and never imports sign-ins.
+ * Durable Browser profiles by owning Bot, then named browsers, then unassigned. Each has one supervised browser while
+ * Stack runs unless a named browser was stopped; a new profile starts empty and never imports sign-ins.
  */
 export function ProfilesWindow() {
   const { status, endpoints, browserProfiles, browserControllers, bots, remote } = useStack();
@@ -186,8 +189,9 @@ export function ProfilesWindow() {
         : !browserProfiles.data ? <Empty icon={HardDriveIcon} title="Reading profiles…" />
         : !profiles.length ? (composing ? null : <Empty icon={HardDriveIcon} title="No profiles" />)
         : groupProfiles(profiles).map((group) => (
-          <Section key={group.botId ?? ""} title={group.botId ?? "Unassigned"}
+          <Section key={group.standalone ? ":named" : group.botId ?? ""} title={group.standalone ? "Named browsers" : group.botId ?? "Unassigned"}
             aside={group.botId ? <NodeLink node={{ kind: "bot", id: group.botId }} label={`bot ${group.botId}`} className="text-[0.65rem] text-muted-foreground">Bot</NodeLink>
+              : group.standalone ? <span className="text-[0.65rem] text-muted-foreground">Not tied to a Bot; managed in Browsers</span>
               : <span className="text-[0.65rem] text-muted-foreground">Kept after their Bot was deleted, or made unassigned</span>}>
             <ul className="flex flex-col gap-0.5">{group.profiles.map((profile) => <ProfileRow key={profile.id} profile={profile} controllers={byProfile(profile.id)} />)}</ul>
           </Section>
@@ -252,7 +256,7 @@ export function ControllersWindow() {
   );
 }
 
-function PendingLabel({ since, children }: { since: number | null; children: React.ReactNode }) {
+export function PendingLabel({ since, children }: { since: number | null; children: React.ReactNode }) {
   return since !== null ? <><Spinner data-icon="inline-start" /><Elapsed since={since} /></> : <>{children}</>;
 }
 

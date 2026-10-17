@@ -81,6 +81,9 @@ const state = {
 };
 const publish = (topic) => served.get("browse").publish(topic);
 const handoff = (id) => state.handoffs.find((item) => item.id === id);
+const namedBrowser = (name) => state.profiles.find((row) => row.botId === null && row.name === name);
+// The owner publishes both notices on every profile-ledger save.
+const publishProfiles = () => { publish("browser_profiles_changed"); publish("browser_standalone_changed"); };
 function act(kind, input) {
   const item = handoff(input.id);
   if (!item) throw new Error("unknown browser handoff");
@@ -132,6 +135,33 @@ const handlers = {
     assert.equal(input.confirm, "delete");
     state.profiles = state.profiles.filter((item) => item.id !== input.profileId); publish("browser_profiles_changed"); return { deleted: true };
   },
+  browser_standalone_list: () => ({ browsers: state.profiles.filter((row) => row.botId === null && row.name !== null) }),
+  browser_standalone_get: (input) => ({ browser: namedBrowser(input.name) ?? null }),
+  browser_standalone_create: (input) => {
+    const existing = state.profiles.find((row) => row.name === input.name);
+    if (existing) return existing;
+    const profile = { id: uuid(200 + state.profiles.length), botId: null, name: input.name, label: input.label ?? input.name, default: false, stopped: false, generation: 0, maintenanceRequestId: null,
+      createdAt: iso(), state: "starting", error: null, observedAt: null, cdpUrl: null, observation: null };
+    state.profiles.push(profile); publishProfiles(); return profile;
+  },
+  browser_standalone_start: (input) => {
+    const profile = namedBrowser(input.name);
+    if (!profile) throw new Error(`unknown standalone browser: ${input.name}`);
+    Object.assign(profile, { stopped: false, state: "ready", error: null, observedAt: iso(), cdpUrl: "http://127.0.0.1:49744", observation: { url: `${nekoBase}/observe/?readOnly=1`, udpPort: 1, follows: "visible-tab", verified: false } });
+    publishProfiles(); return profile;
+  },
+  browser_standalone_stop: (input) => {
+    const profile = namedBrowser(input.name);
+    if (!profile) throw new Error(`unknown standalone browser: ${input.name}`);
+    Object.assign(profile, { stopped: true, state: "stopped", error: null, observedAt: iso(), cdpUrl: null, observation: null });
+    publishProfiles(); return profile;
+  },
+  browser_standalone_delete: (input) => {
+    assert.equal(input.confirm, "delete");
+    state.profiles = state.profiles.filter((row) => row.name !== input.name); publishProfiles(); return { deleted: true };
+  },
+  browser_standalone_attach: () => { throw new Error("the UI must not attach agents"); },
+  browser_standalone_detach: () => { throw new Error("the UI must not detach agents"); },
   browser_profile_reset_plan: (input) => maintenancePlan("reset", input),
   browser_site_data_plan: (input) => { assert.ok(input.origins.length); assert.ok(input.categories.length); assert.ok(input.categories.every((category) => ["cookies", "storage", "cache"].includes(category))); return maintenancePlan("site", input); },
   browser_handoff_history_plan: (input) => maintenancePlan("handoff", input),
@@ -181,7 +211,13 @@ try {
     { id: uuid(2), botId: "bot-1", label: "research", default: false, createdAt: iso(-1_800_000), state: "failed", error: "CDP readiness exceeded 35s", observedAt: iso(-5_000), cdpUrl: null, observation: null },
     { id: uuid(3), botId: null, label: "retired", default: false, createdAt: iso(-86_400_000), state: "ready", error: null, observedAt: iso(-5_000), cdpUrl: null, observation: { url: `${nekoBase}/observe/?readOnly=1`, udpPort: 1, follows: "visible-tab", verified: false } },
   ];
-  state.profiles.forEach((row) => Object.assign(row, { generation: 0, maintenanceRequestId: null }));
+  state.profiles.push(
+    { id: uuid(4), botId: null, name: "major-briggs", label: "Major Briggs", default: false, stopped: false, createdAt: iso(-600_000), state: "ready", error: null, observedAt: iso(-5_000),
+      cdpUrl: "http://127.0.0.1:49744", observation: { url: `${nekoBase}/observe/?readOnly=1`, udpPort: 1, follows: "visible-tab", verified: false } },
+    { id: uuid(5), botId: null, name: "archive", label: "archive", default: false, stopped: true, createdAt: iso(-900_000), state: "stopped", error: null, observedAt: iso(-60_000), cdpUrl: null, observation: null },
+    { id: uuid(6), botId: null, name: "flaky", label: "flaky", default: false, stopped: true, createdAt: iso(-700_000), state: "failed", error: "Chrome close timed out; VM left running", observedAt: iso(-30_000), cdpUrl: null, observation: null },
+  );
+  state.profiles.forEach((row) => Object.assign(row, { name: null, stopped: false, ...row, generation: 0, maintenanceRequestId: null }));
   state.controllers = [
     { botId: "bot-1", instance: "launch-a", session: "default", profileId: uuid(1), actualProfileId: uuid(1), targetId: "T1", cdpUrl: null, state: "connected", revision: 2, observedAt: iso(-10_000), error: null },
     { botId: "bot-1", instance: "launch-a", session: "research", profileId: uuid(2), actualProfileId: uuid(1), targetId: null, cdpUrl: null, state: "unknown", revision: 3, observedAt: iso(-10_000), error: "reconnect result unknown" },
@@ -328,6 +364,8 @@ try {
     await arrange(controllers, "Move right of", "Viewer");
     await reveal("browse-toolchain");
     await arrange(toolchain, "Move right of", "Controllers");
+    // Profiles still shares its tab stack with Browsers; select it for the profile checks below.
+    await page.getByRole("tab", { name: "Profiles", exact: true }).click();
     await retained();
     await page.screenshot({ path: join(evidence, "browse-pane-draft.png"), animations: "disabled" });
     await heldNote.dispose();
@@ -635,6 +673,87 @@ try {
   await handoffs.getByRole("button", { name: "Show 2" }).click();
   assert.equal(await handoffs.locator("details").count(), 0);
   assert.equal(await toolchain.locator("details").count(), 0);
+
+  // Named browsers: reached from their profile, listed by name with state, CDP and errors. Lifecycle is explicit.
+  const named = page.locator('[data-window="browse-browsers"]');
+  const row = (name) => named.locator(`[data-node="standalone-browser:${name}"]`);
+  await profiles.getByText("Named browsers").waitFor();
+  await profiles.getByRole("link", { name: "major-briggs" }).click();
+  await row("major-briggs").getByText("http://127.0.0.1:49744").waitFor();
+  await row("major-briggs").getByText("Major Briggs").waitFor();
+  await row("archive").getByRole("button", { name: "Start" }).waitFor();
+  await row("flaky").getByText("Stop failed").first().waitFor();
+  await row("flaky").getByText("Chrome close timed out; VM left running").waitFor();
+  await row("flaky").getByText(/VM may still be running/).waitFor();
+  await row("flaky").getByRole("button", { name: "Stop again" }).waitFor();
+  await row("flaky").getByRole("button", { name: "Start" }).waitFor();
+  assert.equal(await row("archive").getByRole("button", { name: "View" }).isDisabled(), true);
+
+  // How to connect an agent names this exact browser and goes through the provider.
+  await row("major-briggs").getByRole("button", { name: "Connect" }).click();
+  const connect = row("major-briggs").getByRole("group", { name: "Connect an agent to major-briggs" });
+  await connect.getByText("AGENT_BROWSER_STACK_BROWSER=major-briggs agent-browser --session major-briggs open https://example.com").waitFor();
+  await connect.getByText("stack browse drive major-briggs -- open https://example.com").waitFor();
+  await page.screenshot({ path: join(evidence, "browse-browsers-light.png"), animations: "disabled" });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.screenshot({ path: join(evidence, "browse-browsers-dark.png"), animations: "disabled" });
+  await page.emulateMedia({ colorScheme: "light" });
+
+  await row("major-briggs").getByRole("button", { name: "Stop" }).click();
+  await row("major-briggs").getByRole("button", { name: "Start" }).waitFor();
+  assert.deepEqual(calls.filter((call) => call.name === "browser_standalone_stop").map((call) => call.input), [{ name: "major-briggs" }]);
+  await row("archive").getByRole("button", { name: "Start" }).click();
+  await row("archive").getByText("http://127.0.0.1:49744").waitFor();
+  assert.deepEqual(calls.filter((call) => call.name === "browser_standalone_start").map((call) => call.input), [{ name: "archive" }]);
+
+  // Creation validates the exact name without normalizing it; an existing name is a no-op and is not offered.
+  await named.getByRole("button", { name: "New browser…" }).click();
+  const nameInput = named.getByLabel("Name");
+  const create = named.getByRole("button", { name: "Create", exact: true });
+  await nameInput.fill("Bad Name");
+  await named.getByText("Use 1–40 lowercase letters, digits and hyphens").waitFor();
+  assert.equal(await create.isDisabled(), true);
+  await nameInput.fill("archive");
+  await named.getByText("archive already exists; creating it again changes nothing").waitFor();
+  assert.equal(await create.isDisabled(), true);
+  await nameInput.fill("scratch");
+  await create.click();
+  await row("scratch").getByText("Starting").first().waitFor();
+  assert.deepEqual(calls.filter((call) => call.name === "browser_standalone_create").map((call) => call.input), [{ name: "scratch" }]);
+
+  // Deletion types the name and re-reads the incarnation: a name reused since the page looked is never deleted.
+  await row("scratch").getByRole("button", { name: "More for scratch" }).click();
+  await page.getByRole("menuitem", { name: "Delete browser…" }).click();
+  const confirmBrowser = page.getByRole("alertdialog");
+  const deleteBrowser = confirmBrowser.getByRole("button", { name: "Delete browser" });
+  assert.equal(await deleteBrowser.isDisabled(), true);
+  await confirmBrowser.getByLabel("Browser name").fill("scratch");
+  const original = namedBrowser("scratch").id;
+  namedBrowser("scratch").id = uuid(299);
+  await deleteBrowser.click();
+  await confirmBrowser.getByText(/scratch now names a different browser/).waitFor();
+  assert.equal(calls.some((call) => call.name === "browser_standalone_delete"), false);
+  await confirmBrowser.getByRole("button", { name: "Cancel" }).click();
+  await confirmBrowser.waitFor({ state: "hidden" });
+  namedBrowser("scratch").id = original;
+  publishProfiles();
+  await row("scratch").getByRole("button", { name: "More for scratch" }).click();
+  await page.getByRole("menuitem", { name: "Delete browser…" }).click();
+  await confirmBrowser.getByLabel("Browser name").fill("scratch");
+  await deleteBrowser.click();
+  await confirmBrowser.waitFor({ state: "hidden" });
+  await row("scratch").waitFor({ state: "detached" });
+  assert.deepEqual(calls.filter((call) => call.name === "browser_standalone_delete").map((call) => call.input), [{ name: "scratch", confirm: "delete" }]);
+
+  // Inspection shows the record and links to the exact profile incarnation.
+  await named.getByRole("button", { name: "Inspect browser major-briggs" }).click();
+  await inspector.getByText("Named browser · Stopped").waitFor();
+  await inspector.getByText(/this incarnation/).waitFor();
+  await page.setViewportSize({ width: 430, height: 900 });
+  await page.screenshot({ path: join(evidence, "browse-browsers-narrow.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 2400, height: 1300 });
+  await inspector.getByRole("button", { name: "Close inspector" }).click();
+  assert.equal(calls.some((call) => call.name === "browser_standalone_attach" || call.name === "browser_standalone_detach"), false);
 
   assert.deepEqual(errors, []);
   console.log(`browse rendered check passed; evidence in ${evidence}`);

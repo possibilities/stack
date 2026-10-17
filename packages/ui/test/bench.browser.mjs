@@ -424,7 +424,7 @@ try {
     Content: ["content-artifacts", "content-documents", "content-editor", "content-library", "content-preview", "content-storage"],
     Workers: ["worker", "worker-runtimes", "workers"],
     Scrape: ["scrape-checks", "scrape-convert", "scrape-extract", "scrape-feeds", "scrape-presets", "scrape-queue", "scrape-status"],
-    Browse: ["browse-controllers", "browse-handoffs", "browse-profiles", "browse-toolchain", "browse-viewer"],
+    Browse: ["browse-browsers", "browse-controllers", "browse-handoffs", "browse-profiles", "browse-toolchain", "browse-viewer"],
     Brain: ["brain-ingest", "brain-jobs", "brain-reader", "brain-search", "brain-sources"],
     Proc: ["proc-run", "proc-runs", "proc-schedule", "proc-schedules", "proc-timeline"],
     Source: ["source-catalog", "source-deliveries", "source-delivery", "source-receivers", "source-watches"],

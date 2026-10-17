@@ -54,9 +54,10 @@ export const panePresets: Record<SpaceId, PanePreset[]> = {
     preset("review", "Review", row(["role-instructions", 0.36], ["role-preview", 0.64])),
   ],
   browse: [
-    preset("handoff", "Handoff", row([column(["browse-handoffs", 0.38], [tabs("browse-profiles", "browse-controllers", "browse-toolchain"), 0.62]), 0.27], ["browse-viewer", 0.73])),
+    preset("handoff", "Handoff", row([column(["browse-handoffs", 0.38], [tabs("browse-profiles", "browse-browsers", "browse-controllers", "browse-toolchain"), 0.62]), 0.27], ["browse-viewer", 0.73])),
     preset("watch", "Watch", (ids) => compare("browse-handoffs", "browse-viewer", ids)),
-    preset("manage", "Manage", row([column(["browse-handoffs", 0.5], ["browse-controllers", 0.5]), 0.33], ["browse-profiles", 0.33], ["browse-toolchain", 0.34])),
+    preset("browsers", "Browsers", row([column(["browse-browsers", 0.68], ["browse-toolchain", 0.32]), 0.34], ["browse-viewer", 0.66])),
+    preset("manage", "Manage", row([column(["browse-handoffs", 0.5], ["browse-controllers", 0.5]), 0.33], [column(["browse-browsers", 0.5], ["browse-profiles", 0.5]), 0.33], ["browse-toolchain", 0.34])),
   ],
   content: [
     preset("write", "Write", row([tabs("content-documents", "content-library", "content-artifacts", "content-storage"), 0.26], ["content-editor", 0.4], ["content-preview", 0.34])),

@@ -129,7 +129,8 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
 
 The Browse space's check serves fixture browse, Bots and server sockets with the real browse schemas and a
 loopback stand-in for the Neko viewer, so no profile, Hypeman or live server is touched. It covers the Fleet
-link, take, reload and Reopen, finish, profile creation and deletion, and the toolchain. It uses `next dev`
+link, take, reload and Reopen, finish, profile creation and deletion, named browsers (state, connection
+commands, start, stop, creation and incarnation-checked deletion), and the toolchain. It uses `next dev`
 unless `BROWSE_NEXT=start`, and keeps screenshots when `BROWSE_EVIDENCE_DIR` is set:
 
 ```sh
