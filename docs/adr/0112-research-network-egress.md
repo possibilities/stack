@@ -2,6 +2,11 @@
 
 Status: accepted, 2026-09-28. Implements approved hardening-review proposal 2.
 
+The original guest-runtime capability assumptions below are amended by
+[ADR 0182](0182-research-browser-runtime-capabilities.md). The research
+authority, grants, disposable-profile boundary and failure policy remain in
+force.
+
 ## Decision
 
 Brain submissions, device shares, source discovery and discovered children default to public-only egress. Admission grants no private-network authority. Brain owns durable grants and attempt evidence; Scrape owns network enforcement and extraction; Browse owns the isolated browser runtime. No existing source, profile, credential or external research store is adopted.

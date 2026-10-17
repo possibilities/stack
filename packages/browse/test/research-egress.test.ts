@@ -6,15 +6,22 @@ import { join } from "node:path";
 import test from "node:test";
 import { researchFirewall } from "../src/research-egress.js";
 
-test("a failed IPv6 firewall installation aborts before any browser can start", () => {
+test("browser startup requires either an installed IPv6 policy or proof that IPv6 is unavailable", () => {
   const root = mkdtempSync(join(tmpdir(), "as-firewall-"));
   try {
     writeFileSync(join(root, "iptables"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
     writeFileSync(join(root, "ip6tables"), "#!/bin/sh\nexit 42\n", { mode: 0o700 });
-    const marker = join(root, "browser-started");
-    const result = spawnSync("/bin/sh", ["-ec", `${researchFirewall({ privateDestinations: [] })}; printf started > '${marker}'`], { env: { PATH: root }, encoding: "utf8" });
-    assert.equal(result.status, 42);
-    assert.equal(existsSync(marker), false);
+    for (const [name, probe, expected] of [
+      ["available but unprotected", "printf 1", 42],
+      ["unsupported address family", "printf 0", 0],
+      ["unverifiable capability", "exit 43", 43],
+    ] as const) {
+      writeFileSync(join(root, "python3"), `#!/bin/sh\n${probe}\n`, { mode: 0o700 });
+      const marker = join(root, name);
+      const result = spawnSync("/bin/sh", ["-ec", `${researchFirewall({ privateDestinations: [] })}; printf started > '${marker}'`], { env: { PATH: root }, encoding: "utf8" });
+      assert.equal(result.status, expected, name);
+      assert.equal(existsSync(marker), expected === 0, name);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

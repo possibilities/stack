@@ -115,7 +115,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0109 | [A Brain space, and Brain change notices on the local WebSocket](0109-brain-space.md) | Accepted |
 | 0110 | [Proc schedules retain durable caller authority](0110-proc-durable-caller-authority.md) | Accepted |
 | 0111 | [A Proc space for schedules, runs and their output](0111-proc-space.md) | Accepted |
-| 0112 | [Enforce research network authority at execution and connection boundaries](0112-research-network-egress.md) | Accepted |
+| 0112 | [Enforce research network authority at execution and connection boundaries](0112-research-network-egress.md) | Accepted; guest runtime amended by [0182](0182-research-browser-runtime-capabilities.md) |
 | 0113 | [Authenticate ordinary loopback control clients](0113-authenticated-local-control.md) | Accepted |
 | 0114 | [Select Worker-visible reads explicitly](0114-explicit-worker-disclosure.md) | Accepted |
 | 0115 | [Name the process package Serve and the canvas package UI](0115-serve-and-ui-names.md) | Accepted |
@@ -184,6 +184,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0178 | [Exact Browser provider maintenance](0178-exact-browser-provider-maintenance.md) | Accepted |
 | 0179 | [Headless Canvas maintenance and observation lifetimes](0179-canvas-maintenance-and-observation-lifetimes.md) | Accepted |
 | 0181 | [Named standalone browsers in the Browse space](0181-browse-named-browsers.md) | Accepted |
+| 0182 | [Verify research browser capabilities in the shipped guest](0182-research-browser-runtime-capabilities.md) | Accepted |
 
 ## Historical identifier corrections
 

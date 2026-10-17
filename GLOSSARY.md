@@ -424,7 +424,7 @@ _Avoid_: Worker turn, task, source
 
 ## Ingestion worker
 
-Brain's owned execution loop that leases ingestion jobs, delegates URL extraction to Agentscrape, and commits fenced outcomes. It is distinct from an account-bound ACP Worker.
+Brain's owned execution loop that leases ingestion jobs, delegates URL extraction to Scrape, and commits fenced outcomes. It is distinct from an account-bound ACP Worker.
 
 _Avoid_: Worker, Bot, source
 

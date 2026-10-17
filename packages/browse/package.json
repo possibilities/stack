@@ -8,7 +8,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-dist.mjs && tsc",
+    "build": "node ../../scripts/clean-dist.mjs && tsc && node scripts/copy-assets.mjs",
     "test": "node --test dist/test/*.test.js"
   },
   "engines": { "node": ">=24" },

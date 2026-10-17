@@ -8,6 +8,7 @@ import { z } from "zod";
 import { BrowserSystem } from "./system.js";
 import { egressPolicy, type EgressPolicy } from "@stack/scrape/network";
 import { researchFirewall, researchPolicyId } from "./research-egress.js";
+import { prepareResearchRuntime, RESEARCH_IMAGE } from "./research-runtime.js";
 import { stateHash, type StateOutcome } from "@stack/api";
 import type { BrowserResetSnapshot } from "./factory-reset.js";
 
@@ -349,17 +350,18 @@ export class Backend {
     const slot = typeof slotValue === "string" && /^(0|[1-9][0-9]{0,2})$/.test(slotValue) ? Number(slotValue) : receipt.native?.slot ?? this.firstFreeSlot(instances);
     let instance = existing;
     if (!instance) {
-      const image = row(await this.request("GET", `/images/${encodeURIComponent(IMAGE)}`));
-      if (image.status !== "ready") throw new Error("pinned Kernel image is not installed on local Hypeman");
+      const imageName = receipt.egress ? RESEARCH_IMAGE : IMAGE;
+      const image = await this.request("GET", `/images/${encodeURIComponent(imageName)}`);
+      if (!image || row(image).status !== "ready") throw new Error(`pinned ${receipt.egress ? "research " : ""}Kernel image is not installed on local Hypeman: ${imageName}`);
       await this.request("POST", "/instances", {
-        name: instanceName, image: IMAGE, platform: "linux/amd64", size: "3G", vcpus: 2,
+        name: instanceName, image: imageName, platform: "linux/amd64", size: "3G", vcpus: 2,
         tags: { ...tags(session, lease, "browser"), "dev.stack.slot": String(slot),
           ...(receipt.egress ? { "dev.stack.egress": researchPolicyId(receipt.egress) } : {}) },
         env: { DISPLAY_NUM: "1", HEIGHT: "1080", WIDTH: "1920", RUN_AS_ROOT: "false", CHROMIUM_FLAGS: `--start-fullscreen --disable-infobars${receipt.egress ? " --disable-quic --force-webrtc-ip-handling-policy=disable_non_proxied_udp" : ""}`,
           ENABLE_WEBRTC: receipt.egress ? "false" : "true", NEKO_WEBRTC_UDPMUX: String(56000 + slot) },
         volumes: [{ volume_id: volume.id, mount_path: "/home/kernel", readonly: false }],
         entrypoint: ["/bin/sh", "-c"],
-        cmd: [`set -e; ${receipt.egress ? `${researchFirewall(receipt.egress)}; printf 'nameserver 1.1.1.1\\n' > /etc/resolv.conf; ( sleep 300; iptables -F OUTPUT; ip6tables -F OUTPUT ) >/dev/null 2>&1 & ` : ""}mkdir -p /home/kernel/user-data; chown kernel:kernel /home/kernel/user-data; rm -f /var/run/supervisor.sock /var/run/supervisord.pid /run/dbus/system_bus_socket /tmp/pulse/native; chown 0:0 /usr/bin/mount /opt/chrome-for-testing/chrome_sandbox; chmod 4755 /opt/chrome-for-testing/chrome_sandbox; ln -sfn chrome_sandbox /opt/chrome-for-testing/chrome-sandbox; export CHROME_DEVEL_SANDBOX=/opt/chrome-for-testing/chrome_sandbox; export NEKO_WEBRTC_NAT1TO1=$(hostname -I | awk '{print $1}'); mountpoint -q /dev/shm || mount -t tmpfs -o mode=1777 tmpfs /dev/shm; exec /wrapper`],
+        cmd: [`set -e; ${receipt.egress ? `${prepareResearchRuntime()}; ${researchFirewall(receipt.egress)}; printf 'nameserver 1.1.1.1\\n' > /etc/resolv.conf; ( sleep 300; iptables -F OUTPUT; research_ip6tables -F OUTPUT ) >/dev/null 2>&1 & ` : ""}mkdir -p /home/kernel/user-data; chown kernel:kernel /home/kernel/user-data; rm -f /var/run/supervisor.sock /var/run/supervisord.pid /run/dbus/system_bus_socket /tmp/pulse/native; chown 0:0 /usr/bin/mount /opt/chrome-for-testing/chrome_sandbox; chmod 4755 /opt/chrome-for-testing/chrome_sandbox; ln -sfn chrome_sandbox /opt/chrome-for-testing/chrome-sandbox; export CHROME_DEVEL_SANDBOX=/opt/chrome-for-testing/chrome_sandbox; export NEKO_WEBRTC_NAT1TO1=$(hostname -I | awk '{print $1}'); mountpoint -q /dev/shm || mount -t tmpfs -o mode=1777 tmpfs /dev/shm; exec /wrapper`],
         skip_kernel_headers: true,
       });
       instance = row(await this.request("GET", `/instances/${encodeURIComponent(instanceName)}`));
