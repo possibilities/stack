@@ -2,6 +2,11 @@
 
 Status: investigation, 2026-10-16. Author: Grok Bot for Mike Bannister. Tested on greybird (macOS arm64; `stack serve` running since Tue; Hypeman via the `vz` hypervisor).
 
+## Product delta
+
+- **Today:** every Bot automatically gets one browser. Anything else (a browser for Major Briggs or a script) is only possible through low-level operator calls, with unnamed profiles, a CDP port that changes after restarts, and no start/stop.
+- **After:** any agent that can run `stack` or call the browse API/MCP can create a browser with a name (`major-briggs`), list, start, stop and remove it, and drive it with `stack browse drive major-briggs -- <agent-browser command>`. Logins and cookies persist in that browser's own profile. Bot browsers keep working as they do now.
+
 ## How it works today (verified)
 
 - "@serve/bot / @serve/browse" are the `bots` and `browse` Package APIs in this repo (`packages/bots`, `packages/browse`), supervised by `node packages/cli/dist/src/main.js serve`.
@@ -43,43 +48,49 @@ I set a cookie (httpbin `mbtest=persist1`), then sent CDP `Browser.close`. Kerne
 
 `browser_profile_create {botId:null}` already creates a **retained unassigned profile** with its own VM, volume and CDP relay, supervised and health-checked like Bot profiles. What's missing for first-class status:
 
-1. **Agent access is Bot-gated.** The MCP `browser_*` ops require a verified live Bot launch (`profiles.ts` ~L527–536, "profile is not exclusively assigned to this Bot"). Only the operator socket/WebSocket can see unassigned profiles. A non-Bot agent (Major Briggs) has no sanctioned identity.
+1. **Agent access is Bot-gated.** The MCP `browser_*` ops require a verified live Bot launch (`profiles.ts` ~L527–536, "profile is not exclusively assigned to this Bot"). Only the operator socket/WebSocket can see unassigned profiles, so non-Bot agents (e.g. Major Briggs) have no MCP path today.
 2. **CDP relay URLs are not stable:** they change on restart ("old relay URLs are not durable identities"). Callers must re-read `browser_profile_list`.
 3. **No name/lookup:** profiles are UUIDs with a free label. No `get-by-name`, no start/stop (profiles are always running), no CLI.
 4. **Docs say attaching a separate CDP client is outside the managed controller contract** (no handoff draining or ref invalidation for it).
 5. **Coupling sites:** `profiles.ts tick()` (~L400–410) auto-creates a `Default` profile per Bot and un-assigns on Bot deletion; `create/select/delete` ownership checks (~L520–540); `bots/src/supervisor.ts` ~L479 injects `AGENT_BROWSER_*` only into Bot launches; the MCP identity in `api/src/bot-mcp-identity.ts` / `mcp-authority.ts`.
 
-## Proposed design: first-class "standalone browsers"
+## Proposed design: first-class named standalone browsers
 
-**Model:** a `Browser` = a durable profile with `owner: {kind:"bot", botId} | {kind:"standalone", name}`. `name` is a unique slug (e.g. `major-briggs`). Same VM/volume machinery, no new runtime.
+**Model:** a durable profile gets an owner: `{kind:"bot", botId}` or `{kind:"standalone", name}`. `name` is a unique slug (`[a-z0-9-]{1,40}`, e.g. `major-briggs`). It reuses the existing VM/volume/CDP-relay/supervision machinery; no new runtime.
 
-**Package API (browse socket/WebSocket/MCP), new ops:**
-- `browser_standalone_create {name, label?}` / `_list` / `_get {name}` → `{id, name, state, cdpUrl, wsUrl, observation}`
-- `browser_standalone_stop {name}` / `_start {name}` (clean Chrome flush then VM stop; today profiles are always on)
-- `browser_standalone_delete {name, confirm:"delete"}`
-- `browser_standalone_extensions_set {name, extensions:[{id, path|crx}]}` (see below)
-- Optional page facade for agents without agent-browser: `browser_page_open/snapshot/act {name, session, …}`, implemented by spawning the private agent-browser toolchain (`browser/toolchain`) against the profile's CDP. That reuses agent-browser rather than re-implementing snapshots.
+**Access model:** no formal permission step. Any agent that can call the stack CLI, the browse socket/WebSocket, or the browse MCP server can create its own named browser and use it. Standalone ops are added to the browse MCP exposure for all MCP callers (Bot, Worker and other MCP clients). Bot-default-profile ownership rules stay as they are for Bot profiles. The trust boundary is the existing local one (same user on greybird).
 
-**MCP server:** expose the above via the existing MCP transport (`api.yaml` `mcp.operations`) under a new authority: a **standalone grant**, i.e. an operator-issued token bound to one browser name (`stack browse grant major-briggs`), checked in `mcp-authority.ts`. That's the piece that makes non-Bot agents first-class without operator-wide access.
+**Package API ops (socket, WebSocket and MCP):**
+- `browser_standalone_create {name, label?}` returns `{id, name, state, cdpUrl, observation}` (idempotent by name)
+- `browser_standalone_list {}` / `browser_standalone_get {name}`
+- `browser_standalone_start {name}` / `browser_standalone_stop {name}` (clean Chrome shutdown, then VM stop; profile kept)
+- `browser_standalone_delete {name, confirm:"delete"}` (discards VM and volume)
+- Event topic `browser_standalone_changed` for state changes
 
-**CLI (`packages/browse/cli.ts`):** `stack browse ls | create NAME | start NAME | stop NAME | rm NAME | cdp NAME | ab NAME -- <agent-browser args>`. The last one resolves the current relay, writes a per-name agent-browser config (`browser/controllers/standalone-NAME.json`, `--cdp` plus `--session NAME`) and execs the private toolchain, which avoids stale ports.
+**CLI (`packages/browse/cli.ts`):** `stack browse ls | create NAME | start NAME | stop NAME | rm NAME | cdp NAME | drive NAME -- <agent-browser args>`.
 
-**agent-browser:** direct CDP via `stack browse ab NAME …` (fast, full agent-browser feature set). Register it as a managed controller (reuse `browser_controller_launch` internals with a standalone principal) so handoffs and ref invalidation keep working.
+`stack browse drive NAME -- …` wraps agent-browser. On **every call** it reads the browser's current CDP address from the browse API (relay ports change on restart), starts the browser if it's stopped, then execs the private agent-browser toolchain with `--cdp <port> --session NAME` and a per-name config (`browser/controllers/standalone-NAME.json`). Example: `stack browse drive major-briggs -- open https://example.com`, then `… -- snapshot -i`, then `… -- click @e1`. Agents never handle raw ports.
 
-**Password manager (Bitwarden, free):** the image runs headful Chrome for Testing, which still honors `--load-extension` (branded Chrome dropped it). Plan: keep an unpacked Bitwarden build in the profile volume (`/home/kernel/extensions/bitwarden`) and append `--load-extension=…` to `CHROMIUM_FLAGS` in `backend.ts` (~L358) when the profile has extensions configured. Vault login happens once per profile, by a human via the Neko viewer/handoff (`browser_handoff_*` already exists). After that the extension state persists in user-data. Agents then trigger autofill through the extension UI or a keyboard shortcut. Alternatives: Bitwarden CLI (`bw`) on the host feeding `fill` commands (no extension; secrets transit the agent, so it's worse), or self-hosted Vaultwarden.
+**Controller integration:** `drive` registers as a managed controller (reusing `browser_controller_launch` internals with a standalone principal), so the existing handoff draining and ref invalidation apply.
 
-**Rough size:** owner model, ledger migration and tick changes ~150 LOC; API ops plus schemas ~250; MCP standalone grant ~150; CLI ~150; extension flag plus volume provisioning ~80; tests ~300. About 1–1.5k LOC, 2–3 days.
+**Deliverable: UI handoff doc.** When the build is done, the builder writes `docs/standalone-browsers-ui-handoff.md` for the UI team. It covers the data model (fields and types), every API/MCP/CLI operation with inputs and outputs, states and lifecycle (`starting/ready/stopping/stopped/failed/deleting`) with the events emitted, error codes/messages and their meaning, and limits (name rules, 16-reservation cap, disk requirement, relay URLs are not durable). It's information to design and build a UI from, not a UI design.
+
+**Rough size:** owner model, ledger migration and tick changes ~150 LOC; API ops, schemas and event ~250; MCP exposure ~40; CLI incl. `drive` ~180; start/stop lifecycle in the backend ~120; tests ~300; UI handoff doc. About 1–1.1k LOC, roughly 2 days.
+
+## Future / separate feature: browse extension support
+
+A follow-up plan, useful beyond password managers (ad/cookie-banner blockers, automation helpers). Sketch: per-profile extension list stored in the ledger; unpacked extensions on the profile volume (`/home/kernel/extensions/...`); `--load-extension=` appended to `CHROMIUM_FLAGS` in `backend.ts` (~L358; the image runs Chrome for Testing, which still honors the flag, untested); API op such as `browser_extensions_set`. The first use case is a free password manager (Bitwarden) unlocked once by a human through the existing handoff/Neko viewer. Risks: flag behaviour in the Kernel image, vault lock timeouts. Est. ~0.5–1 day.
 
 ## Where we get / might get stuck
 
 | Risk | Fix |
 |---|---|
-| Non-Bot agents can't use MCP browser ops | standalone grant authority (above) |
-| CDP port changes after restart | `stack browse cdp/ab NAME` resolves on each call |
-| Separate CDP clients bypass handoff draining | register standalone controllers via controller internals |
-| Extension loading untested in the Kernel image | prototype: one profile with the `--load-extension` flag; check `chrome://extensions` via CDP target list |
-| Vault unlock needs a human; the session may time out | set the Bitwarden vault timeout to "never"/on-restart lock, plus a handoff for re-unlock |
-| VM is linux/amd64 on arm64 (emulated/vz), so it's slowish | acceptable; check vcpus/size |
-| Max 16 native reservations; ≥12 GB free disk per new profile | keep profile count small |
-| Stale failed profile `f3a9e7b8` ("browser target changed") | operator recovery or delete via `browser_profile_delete` after review |
-| `mbtest` test profile `160eba7e` (label apply-test) left running | delete when done: `browser_profile_delete {profileId, confirm:"delete"}` |
+| Non-Bot agents can't use MCP browser ops today | expose standalone ops to all MCP callers (no grant) |
+| CDP port changes after restart | `stack browse drive` resolves it on every call |
+| Separate CDP clients bypass handoff draining | `drive` registers as a managed controller |
+| Profiles are always on today | add start/stop with a clean Chrome flush before VM stop |
+| Name collisions / cleanup of abandoned browsers | names are unique; `ls` shows last use; manual `rm` |
+| VM is linux/amd64 on arm64 (vz), so it's slowish | acceptable; tune vcpus/size |
+| Max 16 native reservations; ≥12 GB free disk per new profile | surface in errors and limits; keep counts small |
+| Stale failed profile `f3a9e7b8` ("browser target changed") | operator review, then `browser_profile_delete` |
+| Test profile `160eba7e` (label apply-test) left running | delete when done |
