@@ -12,10 +12,15 @@ import { BrowserGate, type ManagedGate } from "./gate.js";
 import { handoffSchema, handoffWatch, actionReceiptSchema, type Handoff, type HandoffRequest, type HandoffAction } from "./handoff.js";
 
 const execFile = promisify(execFileCallback);
+export const standaloneName = z.string().regex(/^[a-z0-9-]{1,40}$/, "name must be 1-40 lowercase letters, digits or hyphens");
 export const profileSchema = z.strictObject({
   generation: z.number().int().nonnegative().default(0), maintenanceRequestId: z.uuid().nullable().default(null),
   id: z.uuid(), botId: z.string().nullable(), label: z.string(), default: z.boolean(), createdAt: z.string(),
-  state: z.enum(["starting", "ready", "recovering", "failed"]), error: z.string().nullable(),
+  /** Standalone (non-Bot) browser name; null for Bot and legacy unassigned profiles. */
+  name: standaloneName.nullable().default(null),
+  /** Operator/agent requested stop; supervision does not restart a stopped standalone browser. */
+  stopped: z.boolean().default(false),
+  state: z.enum(["starting", "ready", "recovering", "failed", "stopping", "stopped", "deleting"]), error: z.string().nullable(),
   observedAt: z.string().nullable(), cdpUrl: z.string().nullable(),
   observation: z.strictObject({ url: z.string(), udpPort: z.number(), follows: z.literal("visible-tab"), verified: z.literal(false) }).nullable(),
 });
@@ -29,13 +34,17 @@ export const bindingSchema = z.strictObject({
 type Binding = z.infer<typeof bindingSchema>;
 export type BrowserCaller = { botId: string; instance: string };
 type Bot = { id: string; url: string | null; state: string; recoveryIssue: string | null; mainThreadId?: string | null };
-const ledgerSchema = z.strictObject({ version: z.literal(1), profiles: z.array(profileSchema), bindings: z.array(bindingSchema), handoffs: z.array(handoffSchema).default([]), actions: z.array(actionReceiptSchema).default([]) });
+const standaloneBindingSchema = z.strictObject({
+  controller: z.string(), profileId: z.uuid(), session: z.string().min(1).max(128),
+  revision: z.number().int().nonnegative(), state: z.enum(["unknown", "disconnected"]), observedAt: z.string(),
+});
+const ledgerSchema = z.strictObject({ version: z.literal(1), profiles: z.array(profileSchema), bindings: z.array(bindingSchema), standaloneBindings: z.array(standaloneBindingSchema).default([]), handoffs: z.array(handoffSchema).default([]), actions: z.array(actionReceiptSchema).default([]) });
 type Ledger = z.infer<typeof ledgerSchema>;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** Durable ownership is independent of the ephemeral agent-browser controller. */
 export class Profiles {
-  private ledger: Ledger = { version: 1, profiles: [], bindings: [], handoffs: [], actions: [] };
+  private ledger: Ledger = { version: 1, profiles: [], bindings: [], standaloneBindings: [], handoffs: [], actions: [] };
   private readonly gates = new Map<string, { source: string; gate: ManagedGate }>();
   private readonly humanUrls = new Map<string, string>();
   private readonly path: string;
@@ -57,7 +66,16 @@ export class Profiles {
   async start(supervise = true): Promise<void> {
     try { this.ledger = ledgerSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    for (const profile of this.ledger.profiles) { profile.state = "recovering"; profile.cdpUrl = null; profile.observation = null; }
+    for (const profile of this.ledger.profiles) {
+      if (profile.stopped) {
+        if (profile.state !== "stopped") { profile.state = "failed"; profile.error ??= "Owner restarted before stop was confirmed; inspect or explicitly stop/start again"; }
+      } else profile.state = "recovering";
+      profile.cdpUrl = null; profile.observation = null;
+    }
+    for (const binding of this.ledger.standaloneBindings) {
+      const profile = this.ledger.profiles.find(item => item.id === binding.profileId);
+      binding.state = profile?.stopped && profile.state === "stopped" ? "disconnected" : "unknown"; binding.revision++;
+    }
     for (const binding of this.ledger.bindings) { binding.state = "unknown"; binding.actualProfileId = null; binding.targetId = null; binding.cdpUrl = null; }
     for (const handoff of this.ledger.handoffs) if (handoff.state !== "resolved") {
       handoff.issue = "Owner restarted while held; input grants revoked on runtime recovery. Explicit recovery is required before return.";
@@ -65,7 +83,7 @@ export class Profiles {
     }
     this.backend.onRecover = async (session) => {
       const profile = this.ledger.profiles.find((item) => backendSession(this.resource(item.id)) === session);
-      if (profile && profile.state !== "recovering") { profile.state = "recovering"; profile.cdpUrl = null; profile.observation = null; await this.save(); }
+      if (profile && !profile.stopped && profile.state !== "recovering") { profile.state = "recovering"; profile.cdpUrl = null; profile.observation = null; await this.save(); }
     };
     if (supervise) {
       this.timer = setInterval(() => { void this.tick(); }, 5000); this.timer.unref();
@@ -125,12 +143,13 @@ export class Profiles {
   async stateObservation(id: string) {
     const profile = this.ledger.profiles.find(row => row.id === id); if (!profile) throw new Error("Unknown Browser profile");
     const bindings = this.ledger.bindings.filter(row => row.profileId === id || row.actualProfileId === id || row.botId === profile.botId && ["connecting", "unknown"].includes(row.state));
+    const standaloneBindings = this.ledger.standaloneBindings.filter(row => row.profileId === id && row.state !== "disconnected");
     const handoffs = this.ledger.handoffs.filter(row => row.profileId === id && row.state !== "resolved");
     let bot: Bot | null = null, unavailable = false;
     if (profile.botId) try { bot = (await this.bots()).find(row => row.id === profile.botId) ?? null; if (!bot) unavailable = true; } catch { unavailable = true; }
     const { observedAt: _at, cdpUrl: _url, observation: _view, error: _error, ...identity } = profile;
-    return { profile: structuredClone(profile), bot, revision: stateHash([identity, bindings, handoffs, bot && [bot.id, bot.state, bot.url, bot.recoveryIssue]]), blockedBy: [
-      ...(bindings.length ? ["Close all selected/uncertain controllers before profile maintenance"] : []),
+    return { profile: structuredClone(profile), bot, revision: stateHash([identity, bindings, standaloneBindings, handoffs, bot && [bot.id, bot.state, bot.url, bot.recoveryIssue]]), blockedBy: [
+      ...(bindings.length || standaloneBindings.length ? ["Close all selected/uncertain controllers before profile maintenance"] : []),
       ...(handoffs.length ? ["Resolve open handoffs before profile maintenance"] : []),
       ...(unavailable ? ["Assigned Bot lifecycle proof unavailable"] : []),
       ...(bot && (bot.state !== "stopped" || bot.url || bot.recoveryIssue) ? ["Stop and verify the assigned Bot before profile maintenance"] : []),
@@ -146,7 +165,7 @@ export class Profiles {
   }
   async stateResetMark(id: string) {
     const profile = this.ledger.profiles.find(row => row.id === id)!;
-    profile.generation++; profile.state = "recovering"; profile.cdpUrl = null; profile.observation = null; profile.error = null;
+    profile.generation++; profile.state = profile.stopped ? "stopped" : "recovering"; profile.cdpUrl = null; profile.observation = null; profile.error = null;
     await this.gates.get(id)?.gate.close(); this.gates.delete(id); await this.save();
   }
   async stateRelease(id: string, requestId: string, generation: number) {
@@ -349,7 +368,7 @@ export class Profiles {
         const existing = this.ledger.profiles.find((profile) => profile.botId === botId && profile.default);
         if (existing) return structuredClone(existing);
       }
-      const profile: Profile = { id: randomUUID(), botId, label, default: isDefault, createdAt: new Date().toISOString(), generation: 0, maintenanceRequestId: null,
+      const profile: Profile = { id: randomUUID(), botId, label, default: isDefault, name: null, stopped: false, createdAt: new Date().toISOString(), generation: 0, maintenanceRequestId: null,
         state: "starting", error: null, observedAt: null, cdpUrl: null, observation: null };
       this.ledger.profiles.push(profile); await this.save();
       // Admission is durable; health is reported separately, never guessed.
@@ -362,39 +381,43 @@ export class Profiles {
 
   async ensure(id: string): Promise<Profile> {
     const pending = this.launches.get(id); if (pending) return pending;
-    const task = this.serial(`handoff:${id}`, () => this.serial(`profile:${id}`, async () => {
-      if (this.closing) throw new Error("browser is shutting down");
-      const profile = this.ledger.profiles.find((item) => item.id === id);
-      if (!profile) throw new Error("unknown browser profile");
-      if (profile.maintenanceRequestId) throw new Error("Profile maintenance remains fenced");
-      if (profile.state === "failed") { profile.state = "recovering"; await this.save(); }
-      try {
-        const launched = await this.backend.launch(this.resource(id), true);
-        const observation = await this.backend.observation(this.resource(id));
-        if (!observation) throw new Error("browser observation endpoint unavailable");
-        let managed = this.gates.get(id);
-        if (managed?.source !== launched.cdpUrl) {
-          for (const h of this.ledger.handoffs.filter((h) => h.profileId === id && h.state !== "resolved")) this.humanUrls.delete(h.id);
-          await managed?.gate.revokeHuman();
-          await managed?.gate.close();
-          this.gates.delete(id);
-          const gate = this.makeGate(launched.cdpUrl, new URL(observation.url).origin, `stack:${id}`);
-          try { await gate.start(); } catch (error) { await gate.close(); throw error; }
-          managed = { source: launched.cdpUrl, gate }; this.gates.set(id, managed);
-          if (this.ledger.handoffs.some((h) => h.profileId === id && h.state !== "resolved" && !h.quiesced)) gate.unknownDrain();
-          if (!this.held(id)) gate.resume();
-        }
-        profile.state = "ready"; profile.error = null; profile.cdpUrl = managed.gate.cdpUrl;
-        profile.observation = { ...observation, url: managed.gate.observationUrl, follows: "visible-tab", verified: false };
-      } catch (error) {
-        profile.state = "failed"; profile.error = message(error); profile.cdpUrl = null; profile.observation = null;
-      }
-      profile.observedAt = new Date().toISOString(); await this.save();
-      return structuredClone(profile);
-    }));
+    const task = this.serial(`handoff:${id}`, () => this.serial(`profile:${id}`, () => this.ensureLocked(id)));
     this.launches.set(id, task);
     void task.finally(() => { this.launches.delete(id); }).catch(() => undefined);
     return task;
+  }
+
+  /** Caller holds the profile lifecycle locks. Bot launch behavior stays unchanged. */
+  private async ensureLocked(id: string): Promise<Profile> {
+    if (this.closing) throw new Error("browser is shutting down");
+    const profile = this.ledger.profiles.find((item) => item.id === id);
+    if (!profile) throw new Error("unknown browser profile");
+    if (profile.maintenanceRequestId) throw new Error("Profile maintenance remains fenced");
+    if (profile.stopped) return structuredClone(profile);
+    if (profile.state === "failed") { profile.state = "recovering"; await this.save(); }
+    try {
+      const launched = await this.backend.launch(this.resource(id), true);
+      const observation = await this.backend.observation(this.resource(id));
+      if (!observation) throw new Error("browser observation endpoint unavailable");
+      let managed = this.gates.get(id);
+      if (managed?.source !== launched.cdpUrl) {
+        for (const h of this.ledger.handoffs.filter((h) => h.profileId === id && h.state !== "resolved")) this.humanUrls.delete(h.id);
+        await managed?.gate.revokeHuman();
+        await managed?.gate.close();
+        this.gates.delete(id);
+        const gate = this.makeGate(launched.cdpUrl, new URL(observation.url).origin, `stack:${id}`);
+        try { await gate.start(); } catch (error) { await gate.close(); throw error; }
+        managed = { source: launched.cdpUrl, gate }; this.gates.set(id, managed);
+        if (this.ledger.handoffs.some((h) => h.profileId === id && h.state !== "resolved" && !h.quiesced)) gate.unknownDrain();
+        if (!this.held(id)) gate.resume();
+      }
+      profile.state = "ready"; profile.error = null; profile.cdpUrl = managed.gate.cdpUrl;
+      profile.observation = { ...observation, url: managed.gate.observationUrl, follows: "visible-tab", verified: false };
+    } catch (error) {
+      profile.state = "failed"; profile.error = message(error); profile.cdpUrl = null; profile.observation = null;
+    }
+    profile.observedAt = new Date().toISOString(); await this.save();
+    return structuredClone(profile);
   }
 
   async tick(): Promise<void> {
@@ -418,7 +441,7 @@ export class Profiles {
         }
         await this.save();
       } catch { /* Unavailable Bot inventory is not evidence of deletion. */ }
-      await Promise.all(this.ledger.profiles.map((profile) => this.ensure(profile.id).catch(() => undefined)));
+      await Promise.all(this.ledger.profiles.filter((profile) => !profile.stopped).map((profile) => this.ensure(profile.id).catch(() => undefined)));
     })().finally(() => { this.cycle = null; });
     return this.cycle;
   }
@@ -434,6 +457,23 @@ export class Profiles {
       if (profile.default && profile.botId) throw new Error("cannot delete a Bot's default profile");
       if (this.ledger.bindings.some((binding) => binding.botId === profile.botId && ["connecting", "unknown"].includes(binding.state))) throw new Error("a Bot controller has an uncertain binding; resolve it before deleting a profile");
       if (this.ledger.bindings.some((binding) => binding.profileId === id || binding.actualProfileId === id)) throw new Error("profile is selected by a controller; select another profile first");
+      if (profile.name !== null) {
+        if (this.closing) throw new Error("browser is shutting down");
+        profile.stopped = true; profile.state = "deleting"; profile.cdpUrl = null; profile.observation = null;
+        await this.save();
+        try {
+          const gate = this.gates.get(id)?.gate; gate?.hold(); await gate?.drain();
+          const receipt = await this.backend.get(this.resource(id));
+          if (receipt?.target) await this.backend.close({ session: receipt.session, lease: receipt.lease, browserProfile: receipt.profile, browserTarget: receipt.target.name, backend: "local" });
+          else if (receipt) await this.backend.reconcile(receipt.session, receipt.lease);
+          await gate?.close(); this.gates.delete(id);
+          this.ledger.profiles = this.ledger.profiles.filter(item => item.id !== id);
+          this.ledger.standaloneBindings = this.ledger.standaloneBindings.filter(item => item.profileId !== id);
+          await this.save(); return { deleted: true };
+        } catch (error) {
+          profile.state = "failed"; profile.error = message(error); profile.observedAt = new Date().toISOString(); await this.save(); throw error;
+        }
+      }
       const receipt = await this.backend.get(this.resource(id));
       if (receipt?.target) await this.backend.close({ session: receipt.session, lease: receipt.lease, browserProfile: receipt.profile, browserTarget: receipt.target.name, backend: "local" });
       else if (receipt) await this.backend.reconcile(receipt.session, receipt.lease);
@@ -569,6 +609,109 @@ export class Profiles {
     });
   }
 
+  // ---- Standalone (non-Bot) named browsers ----------------------------------
+  // Any caller that can reach the browse socket/WebSocket/MCP may manage them;
+  // there is no Bot identity or grant. Bot profiles are never addressed here.
+  private named(name: string): Profile {
+    const profile = this.ledger.profiles.find((item) => item.name === name && item.botId === null);
+    if (!profile) throw new OperationRejected(`unknown standalone browser: ${name}`);
+    return profile;
+  }
+  standaloneList(): Profile[] { return structuredClone(this.ledger.profiles.filter((item) => item.name !== null && item.botId === null)); }
+  standaloneGet(name: string): Profile | null { const row = this.ledger.profiles.find((item) => item.name === name && item.botId === null); return row ? structuredClone(row) : null; }
+
+  async standaloneCreate(name: string, label?: string): Promise<Profile> {
+    if (this.closing) throw new Error("browser is shutting down");
+    standaloneName.parse(name);
+    return this.serial("inventory", async () => {
+      const existing = this.ledger.profiles.find((item) => item.name === name);
+      if (existing) return structuredClone(existing);
+      if (this.ledger.profiles.length >= 16) throw new OperationRejected("browser profile limit reached (16)");
+      const profile: Profile = { id: randomUUID(), botId: null, label: label ?? name, default: false, name, stopped: false, createdAt: new Date().toISOString(),
+        generation: 0, maintenanceRequestId: null, state: "starting", error: null, observedAt: null, cdpUrl: null, observation: null };
+      this.ledger.profiles.push(profile); await this.save();
+      void this.ensure(profile.id).catch(() => undefined);
+      return structuredClone(profile);
+    });
+  }
+
+  private async standaloneStartLocked(id: string): Promise<Profile> {
+    const profile = this.ledger.profiles.find(item => item.id === id && item.name !== null && item.botId === null);
+    if (!profile) throw new OperationRejected("standalone browser was deleted");
+    if (profile.maintenanceRequestId) throw new OperationRejected("Profile maintenance remains fenced");
+    if (this.held(id)) throw new OperationRejected("browser has an unresolved handoff");
+    if (profile.stopped) { profile.stopped = false; profile.state = "starting"; profile.error = null; await this.save(); }
+    const ready = await this.ensureLocked(id);
+    if (ready.state === "ready") this.gates.get(id)?.gate.resume();
+    return ready;
+  }
+
+  async standaloneStart(name: string): Promise<Profile> {
+    const { id } = this.named(name);
+    return this.maintain(id, () => this.standaloneStartLocked(id));
+  }
+
+  async standaloneStop(name: string): Promise<Profile> {
+    const { id } = this.named(name);
+    return this.maintain(id, async () => {
+      const profile = this.named(name);
+      if (profile.id !== id) throw new OperationRejected("standalone browser was replaced");
+      if (this.held(id)) throw new OperationRejected("browser has an unresolved handoff");
+      if (profile.maintenanceRequestId) throw new OperationRejected("Profile maintenance remains fenced");
+      if (profile.stopped && profile.state === "stopped") return structuredClone(profile);
+      // Persist intent before effects. An uncertain stop never enables supervision.
+      profile.stopped = true; profile.state = "stopping"; profile.error = null;
+      profile.cdpUrl = null; profile.observation = null; await this.save();
+      const managed = this.gates.get(id);
+      try {
+        managed?.gate.hold(); await managed?.gate.drain();
+        await this.backend.suspend(this.resource(id), true);
+        await managed?.gate.close(); this.gates.delete(id);
+        for (const binding of this.ledger.standaloneBindings.filter(item => item.profileId === id)) {
+          binding.state = "disconnected"; binding.revision++; binding.observedAt = new Date().toISOString();
+        }
+        profile.state = "stopped";
+      } catch (error) {
+        profile.state = "failed"; profile.error = message(error);
+      }
+      profile.observedAt = new Date().toISOString(); await this.save();
+      if (profile.state === "failed") throw new Error(profile.error ?? "browser could not be stopped");
+      return structuredClone(profile);
+    });
+  }
+
+  async standaloneDelete(name: string): Promise<{ deleted: true }> {
+    if (this.closing) throw new Error("browser is shutting down");
+    const profile = this.standaloneGet(name); if (!profile) return { deleted: true };
+    return this.remove(profile.id);
+  }
+
+  /** Admission and its controller receipt share the same lock as stop/delete. */
+  async standaloneAttach(name: string, session: string): Promise<{ cdpUrl: string; cleanup: { controller: string; revision: number } }> {
+    z.string().min(1).max(128).parse(session);
+    const { id } = this.named(name);
+    return this.maintain(id, async () => {
+      const profile = await this.standaloneStartLocked(id);
+      if (profile.state !== "ready" || !profile.cdpUrl) throw new Error(profile.error ?? "standalone browser is not ready");
+      let binding = this.ledger.standaloneBindings.find(item => item.profileId === id && item.session === session);
+      if (!binding) {
+        binding = { controller: `standalone:${randomUUID()}`, profileId: id, session, revision: 0, state: "unknown", observedAt: new Date().toISOString() };
+        this.ledger.standaloneBindings.push(binding);
+      }
+      binding.revision++; binding.state = "unknown"; binding.observedAt = new Date().toISOString();
+      await this.save();
+      return { cdpUrl: profile.cdpUrl, cleanup: { controller: binding.controller, revision: binding.revision } };
+    });
+  }
+
+  async standaloneDetach(controller: string, revision: number): Promise<{ closed: true }> {
+    const binding = this.ledger.standaloneBindings.find(item => item.controller === controller);
+    if (binding) await this.serial(`profile:${binding.profileId}`, async () => {
+      if (binding.revision === revision) { binding.state = "disconnected"; binding.observedAt = new Date().toISOString(); await this.save(); }
+    });
+    return { closed: true };
+  }
+
   prepareClose(): void {
     this.closing = true;
     for (const { gate } of this.gates.values()) gate.hold();
@@ -581,7 +724,7 @@ export class Profiles {
     await this.cycle;
     await Promise.allSettled([...this.queues.values(), ...this.launches.values()]);
     await Promise.all(this.ledger.bindings.map((binding) => this.disconnect(binding)));
-    const results = await Promise.allSettled(this.ledger.profiles.map((profile) => this.backend.suspend(this.resource(profile.id))));
+    const results = await Promise.allSettled(this.ledger.profiles.filter((profile) => !profile.stopped).map((profile) => this.backend.suspend(this.resource(profile.id))));
     await this.writes;
     await Promise.all([...this.gates.values()].map(({ gate }) => gate.close()));
     const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);

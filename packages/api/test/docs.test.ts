@@ -55,7 +55,7 @@ test("the api package serves structured documents for every workspace package", 
     }
     const snapshot = (await socketCall(served.socketPath, "tools/call", { name: "docs_snapshot", arguments: {} })) as { packages: PackageDoc[] };
     const mcpByPackage = new Map([...found].map(([name, doc]) => [name, doc.transports.find(entry => entry.type === "mcp" && entry.supported)?.operations ?? []]));
-    assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 287);
+    assert.equal([...mcpByPackage.values()].reduce((total, names) => total + names.length, 0), 295);
     for (const role of ["manager", "worker"] as const) {
       const selected = roleGrants[role] as Record<string, readonly string[]>;
       assert.equal(Object.values(selected).reduce((total, names) => total + names.length, 0), role === "manager" ? 144 : 48);
@@ -111,8 +111,9 @@ test("the api package serves structured documents for every workspace package", 
         assert.equal(doc.operations.find(op => op.name === name)?.annotations.readOnlyHint, true);
       }
     }
-    for (const pkg of ["auth", "bots", "browse", "hud", "notify", "serve", "proc", "scrape", "usage", "xcom"])
+    for (const pkg of ["auth", "bots", "hud", "notify", "serve", "proc", "scrape", "usage", "xcom"])
       assert.deepEqual(found.get(pkg)!.transports.find(t => t.type === "mcp")!.workerOperations, []);
+    assert.deepEqual(found.get("browse")!.transports.find(t => t.type === "mcp")!.workerOperations, ["browser_standalone_list", "browser_standalone_get"]);
     assert.deepEqual(found.get("api")!.transports.find(t => t.type === "mcp")!.workerOperations, ["docs_list", "docs_get", "docs_snapshot"]);
     assert.deepEqual(found.get("roles")!.transports.find(t => t.type === "mcp")!.workerOperations, ["roles_snapshot", "role_internal_mcp_list", "role_snapshot", "role_preview"]);
     assert.deepEqual(found.get("brain")!.transports.find(t => t.type === "mcp")!.workerOperations.sort(), ["context", "get", "search", "stats", "tags"]);
@@ -222,17 +223,19 @@ test("the api package serves structured documents for every workspace package", 
     const contentHttp = found.get("content")!.transports.find((transport) => transport.type === "http")!;
     assert.ok(contentHttp.routes.some((route) => route.surface === "artifacts" && route.path === "/a/*" && route.operation === null && route.format === "artifact media type" && route.authentication === "none" && route.outputSchema === null));
     const browser = found.get("browse") as PackageDoc;
+    const standalone = ["create", "list", "get", "start", "stop", "delete", "attach", "detach"].map(name => `browser_standalone_${name}`);
     assert.deepEqual(browser.transports.map((transport) => transport.type), ["socket", "mcp", "websocket"]);
+    for (const transport of browser.transports) assert.ok(standalone.every(name => transport.operations.includes(name)));
     assert.deepEqual(browser.transports.find((transport) => transport.type === "mcp")!.operations.sort(),
-      ["browser_profile_list", "browser_profile_create", "browser_profile_delete", "browser_controller_list", "browser_controller_select", "browser_handoff_request", "browser_handoff_get", "browser_handoff_list", "browser_handoff_completion", "browser_handoff_cancel"].sort());
+      [...standalone, "browser_profile_list", "browser_profile_create", "browser_profile_delete", "browser_controller_list", "browser_controller_select", "browser_handoff_request", "browser_handoff_get", "browser_handoff_list", "browser_handoff_completion", "browser_handoff_cancel"].sort());
     assert.deepEqual(browser.operations.map((operation) => operation.name).filter(name => !stateOperation(name)).sort(),
-      ["browser_status", "browser_session_get", "browser_session_list", "browser_session_close", "browser_session_reconcile", "browser_research_acquire",
+      [...standalone, "browser_status", "browser_session_get", "browser_session_list", "browser_session_close", "browser_session_reconcile", "browser_research_acquire",
         "browser_profile_list", "browser_profile_create", "browser_profile_delete", "browser_controller_list", "browser_controller_select", "browser_controller_launch", "browser_controller_close", "browser_bot_release",
         "browser_handoff_request", "browser_handoff_get", "browser_handoff_list", "browser_handoff_completion", "browser_handoff_cancel", "browser_handoff_take", "browser_handoff_finish",
         "agent_browser_status", "agent_browser_detect", "agent_browser_check_updates", "agent_browser_update_policy_set",
         "agent_browser_install", "agent_browser_update_accept", "agent_browser_uninstall",
         "hypeman_detect", "hypeman_location_set", "hypeman_enable", "hypeman_install", "hypeman_uninstall"].sort());
-    assert.deepEqual(Object.keys(browser.events), ["browser_handoffs_changed", "browser_profiles_changed", "browser_system_changed", "browser_sessions_changed"]);
+    assert.deepEqual(Object.keys(browser.events), ["browser_handoffs_changed", "browser_standalone_changed", "browser_profiles_changed", "browser_system_changed", "browser_sessions_changed"]);
     assert.deepEqual(Object.keys(browser.operations.find((operation) => operation.name === "browser_controller_launch")?.inputSchema.properties ?? {}), ["identity", "session"]);
     const scrape = found.get("scrape") as PackageDoc;
     assert.deepEqual(scrape.transports.map((transport) => transport.type), ["socket", "mcp", "websocket"]);

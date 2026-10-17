@@ -217,7 +217,7 @@ test("inject launches each native boundary with the selected bytes, private cred
   try {
     const roleId = await populate(f);
     const bridges = (await configuredMcpServers(workspaceRoot(import.meta.dirname))).filter(item => item.kind === "codex").map(item => item.name);
-    const names = [...bridges, "external", "stdio"].sort();
+    const names = ["browse", ...bridges, "external", "stdio"].sort();
     const snapshot = await f.call("role_snapshot", { roleId });
     await f.call("fragment_update", { roleId, expectedRevision: snapshot.revision, id: snapshot.categories[0].fragments[0].id,
       conditions: { model: "render-only-model", harness: "render-only-harness" } });
@@ -249,8 +249,7 @@ test("inject launches each native boundary with the selected bytes, private cred
       const binding = harness === "claude" ? report.config.mcpServers.chrome.env.STACK_MCP_INJECT_BINDING
         : harness === "opencode" ? report.config.mcp.servers.chrome.environment.STACK_MCP_INJECT_BINDING
           : /"STACK_MCP_INJECT_BINDING" = "([^"]+)"/.exec(report.config)?.[1];
-      if (harness === "codex") assert.equal(binding, undefined, "unavailable internal bridges are omitted before Codex starts");
-      else assert.equal(JSON.parse(Buffer.from(binding, "base64url").toString()).role, "unassigned", "a custom Role keeps its capabilities without acquiring canonical grants");
+      assert.equal(JSON.parse(Buffer.from(binding, "base64url").toString()).role, "unassigned", "a custom Role receives standalone Browse without acquiring canonical grants");
       assert.deepEqual(harness === "opencode" ? [report.argv[0], ...report.argv.slice(3)] : report.argv.slice(-native.length), native);
       assert.equal(report.input, "piped input\n");
       assert.deepEqual(Object.keys(report.skills).sort(), [`only-${harness}/SKILL.md`, "role-skill/SKILL.md", "role-skill/assets/bytes.txt"]);
@@ -284,7 +283,7 @@ test("inject launches each native boundary with the selected bytes, private cred
           assert.match(report.config, /Be a thoughtful, warm and capable collaborator/);
           assert.match(report.config, /private-fixture-token/);
           assert.match(report.config, /private-fixture-env/);
-          assert.doesNotMatch(report.config, /STACK_MCP_AUTHORITY/, "unavailable internal bridges have no Codex launch config");
+          assert.match(report.config, /"STACK_MCP_AUTHORITY" = "inject"/, "standalone Browse retains the injected Role authority");
           assert.doesNotMatch(report.config, /STACK_MCP_OPERATOR[^\n]*Bearer/);
           assert.doesNotMatch(report.config, /disabled-mcp|notify|ambient/);
           assert.deepEqual([...report.config.matchAll(/\[mcp_servers\."([^"]+)"\]/g)].map(match => match[1]).sort(), selectedNames);

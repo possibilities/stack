@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadPackageApi } from "../src/catalog.js";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -607,5 +609,59 @@ test("MCP port configuration rejects invalid values", () => {
   assert.equal(mcpPort({ STACK_MCP_PORT: "0" }), 0);
   for (const value of ["", "-1", "65536", "123.5", "abc"]) {
     assert.throws(() => mcpPort({ STACK_MCP_PORT: value }), /STACK_MCP_PORT/);
+  }
+});
+
+test("named browser MCP operations reach the owner for operators, Workers and unassigned Bots without exposing Bot management", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stack-mcp-standalone-"));
+  const env = { ...process.env, STACK_STATE_DIR: root, STACK_MCP_PORT: "0" };
+  const dir = join(root, "packages", "browse"); await mkdir(dir, { recursive: true });
+  const { readFile } = await import("node:fs/promises");
+  await writeFile(join(dir, "api.yaml"), await readFile(new URL("../../../browse/api.yaml", import.meta.url), "utf8"));
+  // Use the actual manifest so read-only worker disclosure and independent
+  // operations/events selections are validated along with ingress authority.
+  const api = await loadPackageApi(fileURLToPath(new URL("../../../browse/", import.meta.url)));
+  const names = api.operations.map(op => op.name);
+  const standalone = names.filter(name => name.startsWith("browser_standalone_"));
+  const workerId = randomUUID(), accountId = randomUUID(); let instance = randomUUID();
+  const endpoint = "unix:///test-bot"; const seen: Array<InvocationContext | undefined> = [];
+  const owner = await serveSocket({ info: { name: "browse", description: "Browse", transportDescription: "Socket", path: socketPath("browse", env) }, context: {},
+    operations: api.operations.map(op => operation({ name: op.name, description: op.description, input: z.strictObject({}), output: z.object({ ok: z.boolean() }), annotations: op.annotations,
+      async call(_ctx, _input, invocation) { seen.push(invocation); return { ok: true }; } })), events: { topics: api.events!.topics } });
+  const workers = await serveSocket({ info: { name: "worker", description: "Worker", transportDescription: "Socket", path: socketPath("worker", env) }, context: {}, operations: [
+    operation({ name: "worker_status", description: "Status", input: z.any(), output: z.any(), async call() { return { worker: { accountId, phase: "running", runtimeInstance: instance } }; } }),
+    operation({ name: "worker_runtime_list", description: "Runtimes", input: z.any(), output: z.any(), async call() { return { runtimes: [{ id: accountId, state: "running", instance }] }; } }),
+  ] });
+  const bots = await serveSocket({ info: { name: "bots", description: "Bots", transportDescription: "Socket", path: socketPath("bots", env) }, context: {}, operations: [
+    operation({ name: "bot_list", description: "Bots", input: z.any(), output: z.any(), async call() { return { bots: [{ id: "bot", state: "running", url: endpoint, roleId: null, recoveryIssue: null }] }; } }),
+  ] });
+  const roles = await serveSocket({ info: { name: "roles", description: "Roles", transportDescription: "Socket", path: socketPath("roles", env) }, context: {}, operations: [
+    operation({ name: "role_access_ids", description: "Roles", input: z.any(), output: z.any(), async call() { return { managerRoleId: "manager", adminRoleId: "admin" }; } }),
+  ] });
+  const served = await serveMcp({ root, env });
+  try {
+    for (const kind of ["operator", "worker", "bot"] as const) {
+      const base = served.urls.browse!;
+      const url = kind === "worker" ? workerMcpUrl(base, workerId, instance, env) : kind === "bot" ? botMcpUrl(base, "bot", endpoint, env) : base;
+      const client = new Client({ name: kind, version: "1" });
+      try {
+        await client.connect(new StreamableHTTPClientTransport(new URL(url), kind === "operator" ? { requestInit: { headers: operatorHeaders(env) } } : {}));
+        const listed = (await client.listTools()).tools.map(tool => tool.name);
+        assert.ok(standalone.every(name => listed.includes(name)));
+        for (const name of standalone) assert.deepEqual((await client.callTool({ name, arguments: {}, ...(kind === "bot" ? { _meta: { threadId: "main" } } : {}) })).structuredContent, { ok: true });
+        if (kind !== "operator") {
+          assert.ok(!listed.includes("browser_profile_create"));
+          assert.equal((await client.callTool({ name: "browser_profile_create", arguments: {}, _meta: { threadId: "main" } })).isError, true);
+        }
+        if (kind === "worker") {
+          assert.equal(seen.at(-1)?.workerId, workerId);
+          instance = randomUUID();
+          await assert.rejects(client.callTool({ name: "browser_standalone_list", arguments: {} }), /401|Unauthorized/);
+        }
+      } finally { await client.close(); }
+    }
+    assert.equal(seen.length, standalone.length * 3);
+  } finally {
+    await served.close(); await owner.close(); await workers.close(); await bots.close(); await roles.close(); await rm(root, { recursive: true, force: true });
   }
 });

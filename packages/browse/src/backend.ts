@@ -506,9 +506,10 @@ export class Backend {
   }
 
   /** Planned shutdown preserves volumes and stops only exact, owned instances. */
-  async suspend(session: string): Promise<void> {
+  async suspend(session: string, confirmStopped = false): Promise<void> {
     await this.queue;
       const current = (await this.read()).find((item) => item.session === backendSession(session));
+      if (confirmStopped && current && !current.native) throw new Error("browser provisioning is incomplete; stop cannot confirm native absence");
       if (!current?.native || !current.persistent) return;
       const native = current.native;
       const instance = row(await this.request("GET", `/instances/${encodeURIComponent(native.instanceName)}`));
@@ -538,6 +539,16 @@ export class Backend {
       // processes time to drain before asking Hypeman to stop the guest.
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await this.request("POST", `/instances/${encodeURIComponent(native.instanceId)}/stop`, {});
+      if (confirmStopped) {
+        const deadline = Date.now() + 30_000;
+        for (;;) {
+          const observed = row(await this.request("GET", `/instances/${encodeURIComponent(native.instanceName)}`));
+          if (observed.id !== native.instanceId || !owned(observed, current.session, current.lease, "browser")) throw new Error("browser target changed during stop");
+          if (observed.state === "Stopped") break;
+          if (Date.now() >= deadline) throw new Error("browser VM stop was not confirmed");
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
       await this.stopRelay(current.session);
   }
 

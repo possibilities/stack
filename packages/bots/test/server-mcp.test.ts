@@ -48,9 +48,9 @@ test("the real owner catalog gives Bots a signed browser management connection",
     assert.deepEqual(parseMcpBinding(launches.browse.env.STACK_MCP_BINDING!, env), { botId: "bot-1", instance: botInstance(endpoint) });
     const sharedBridges = ["codex-computer-use", "chrome", "messages", "computer-history", "openai-developer-docs"];
     for (const [role, packages] of [
-      ["manager", ["brain", "content", "hud", "notify", "proc", "scrape", "source", "usage", "worker", "xcom"]],
-      ["worker", ["brain", "content", "scrape", "xcom"]],
-      ["unassigned", []],
+      ["manager", ["brain", "browse", "content", "hud", "notify", "proc", "scrape", "source", "usage", "worker", "xcom"]],
+      ["worker", ["brain", "browse", "content", "scrape", "xcom"]],
+      ["unassigned", ["browse"]],
     ] as const) {
       const selected = await serverMcpLaunches(workspaceRoot(import.meta.dirname), 43123, "bot-1", endpoint, role, env);
       assert.deepEqual(Object.keys(selected), [...packages, ...sharedBridges], `${role} launch omits zero-tool Package servers`);

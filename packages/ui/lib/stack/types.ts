@@ -857,7 +857,8 @@ export type ScrapeReplay = { passed: number; failed: number; lines: string[] };
 export type BrowserProfile = {
   generation: number; maintenanceRequestId: string | null;
   id: string; botId: string | null; label: string; default: boolean; createdAt: string;
-  state: "starting" | "ready" | "recovering" | "failed"; error: string | null; observedAt: string | null; cdpUrl: string | null;
+  name: string | null; stopped: boolean;
+  state: "starting" | "ready" | "recovering" | "failed" | "stopping" | "stopped" | "deleting"; error: string | null; observedAt: string | null; cdpUrl: string | null;
   observation: { url: string; udpPort: number; follows: "visible-tab"; verified: false } | null;
 };
 /** A controller's selection and last confirmed binding. `connected` is a timestamped observation, never liveness; `unknown` never asserts attachment. */

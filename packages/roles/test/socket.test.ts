@@ -18,7 +18,7 @@ test("Role launch preview includes only Package connections granted to its canon
   try {
     const catalog = await socketCall(served.socketPath!, "tools/call", { name: "roles_snapshot", arguments: {} }) as
       { managerRoleId: string; workerDefaultRoleId: string; adminRoleId: string };
-    for (const [roleId, expected] of [[catalog.managerRoleId, 10], [catalog.workerDefaultRoleId, 4], [catalog.adminRoleId, 16]] as const) {
+    for (const [roleId, expected] of [[catalog.managerRoleId, 11], [catalog.workerDefaultRoleId, 5], [catalog.adminRoleId, 16]] as const) {
       const preview = await socketCall(served.socketPath!, "tools/call", { name: "role_launch_preview", arguments: { roleId, harness: "codex" } }) as any;
       assert.equal(preview.internalMcpServers.filter((server: any) => server.kind === "package" && server.included).length, expected);
       assert.equal(preview.internalMcpServers.filter((server: any) => server.kind === "codex" && server.included).length, 5);

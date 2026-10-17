@@ -2,7 +2,7 @@ import { z } from "zod";
 import { operation, stateDependencies, stateDependencyInput, stateHash, requireStateOperator, completionIdentityInput, browseCompletionLink, type PackageApi } from "@stack/api";
 import { Backend, cleanupSchema } from "./src/backend.js";
 import { BrowserSystem } from "./src/system.js";
-import { Profiles, profileSchema, bindingSchema } from "./src/profiles.js";
+import { Profiles, profileSchema, bindingSchema, standaloneName } from "./src/profiles.js";
 import { handoffSchema, handoffRequestSchema, handoffRequestResult, handoffCompletionSchema, handoffWatch, handoffActionSchema, completionInput } from "./src/handoff.js";
 import { egressPolicy } from "@stack/scrape/network";
 import { withStateInventory } from "@stack/api";
@@ -197,6 +197,40 @@ export const browserBotRelease = operation({
   input: z.strictObject({ botId: z.string() }), output: z.strictObject({ released: z.literal(true) }),
   async call(ctx: BrowserContext, input) { return ctx.profiles.releaseBot(input.botId); },
 });
+const standaloneInput = z.strictObject({ name: standaloneName });
+export const browserStandaloneCreate = operation({
+  name: "browser_standalone_create", description: "Create (or return the existing) named standalone browser: a durable profile not tied to any Bot, with its own VM, volume and CDP relay. Idempotent by name. No Bot identity or grant required. Startup is asynchronous; read state for readiness. Connect with agent-browser using AGENT_BROWSER_STACK_BROWSER=<name> and the stack provider.",
+  input: standaloneInput.extend({ label: z.string().min(1).max(128).optional() }), output: profileSchema, annotations: { title: "Create standalone browser", idempotentHint: true },
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneCreate(input.name, input.label); } });
+export const browserStandaloneList = operation({
+  name: "browser_standalone_list", description: "List named standalone browsers with state, current CDP relay URL (not durable across restarts) and observation viewer.",
+  input: z.strictObject({}), output: z.strictObject({ browsers: z.array(profileSchema) }), annotations: { title: "List standalone browsers", readOnlyHint: true },
+  async call(ctx: BrowserContext) { return { browsers: ctx.profiles.standaloneList() }; } });
+export const browserStandaloneGet = operation({
+  name: "browser_standalone_get", description: "Read one named standalone browser, or null if it does not exist.",
+  input: standaloneInput, output: z.strictObject({ browser: profileSchema.nullable() }), annotations: { title: "Read standalone browser", readOnlyHint: true },
+  async call(ctx: BrowserContext, input) { return { browser: ctx.profiles.standaloneGet(input.name) }; } });
+export const browserStandaloneStart = operation({
+  name: "browser_standalone_start", description: "Start a stopped standalone browser (or re-check a running one) and wait for readiness. Profile data is preserved.",
+  input: standaloneInput, output: profileSchema, annotations: { title: "Start standalone browser", idempotentHint: true },
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneStart(input.name); } });
+export const browserStandaloneStop = operation({
+  name: "browser_standalone_stop", description: "Cleanly close Chrome (flushing the profile) and stop the browser's VM. Profile data is kept; supervision will not restart it until start or attach. Refused while a handoff is unresolved.",
+  input: standaloneInput, output: profileSchema, annotations: { title: "Stop standalone browser", idempotentHint: true },
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneStop(input.name); } });
+export const browserStandaloneDelete = operation({
+  name: "browser_standalone_delete", description: "Permanently delete a named standalone browser, its VM and its volume, discarding sign-ins and stored data.",
+  input: standaloneInput.extend({ confirm: z.literal("delete") }), output: z.strictObject({ deleted: z.literal(true) }), annotations: { title: "Delete standalone browser", destructiveHint: true },
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneDelete(input.name); } });
+export const browserStandaloneAttach = operation({
+  name: "browser_standalone_attach", description: "Provider admission for a named standalone browser (used by the agent-browser stack provider). Starts it if stopped and returns the current managed CDP URL. Admission is not proof of connection.",
+  input: standaloneInput.extend({ session: sessionInput.shape.session }), output: z.strictObject({ cdpUrl: z.string(), cleanup: z.strictObject({ controller: z.string(), revision: z.number().int() }) }),
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneAttach(input.name, input.session); } });
+export const browserStandaloneDetach = operation({
+  name: "browser_standalone_detach", description: "Provider disconnect notice for a standalone controller. Never stops or deletes the browser.",
+  input: z.strictObject({ controller: z.string(), revision: z.number().int() }), output: z.strictObject({ closed: z.literal(true) }),
+  async call(ctx: BrowserContext, input) { return ctx.profiles.standaloneDetach(input.controller, input.revision); } });
+const standaloneOperations = [browserStandaloneCreate, browserStandaloneList, browserStandaloneGet, browserStandaloneStart, browserStandaloneStop, browserStandaloneDelete, browserStandaloneAttach, browserStandaloneDetach];
 const browserToolOutput = z.strictObject({
   installed: z.boolean(), version: z.string().nullable(), location: z.string().nullable(),
   latest: z.string().nullable(), pending: z.string().nullable(), checkedAt: z.string().nullable(),
@@ -285,6 +319,7 @@ export const hypemanUninstall = operation({
 });
 export const topics = {
   browser_handoffs_changed: "A browser handoff changed. For Chat wakeups subscribe with browser_handoff_completion and the originating botId, threadId and requestId; its stable pending value suppresses intermediate turns.",
+  browser_standalone_changed: "A named standalone browser was created, started, stopped, deleted or changed health. Re-read browser_standalone_list.",
   browser_profiles_changed: "Durable browser profiles, health observations or controller bindings changed. Re-read browser_profile_list and browser_controller_list.",
   browser_system_changed: "Installation, update observation, update policy or selected local Hypeman root changed. Re-read agent_browser_status and hypeman_detect.",
   browser_sessions_changed: "A disposable browser reservation changed. Re-read browser_session_list; this does not prove a daemon is still driving it.",
@@ -294,11 +329,11 @@ const packageApi: PackageApi<BrowserContext, keyof typeof topics> = {
     browserHandoffRequest, browserHandoffGet, browserHandoffList, browserHandoffCompletion, browserCompletionIdentity, browserHandoffTake, browserHandoffFinish, browserHandoffCancel,
     browserSessionGet, browserSessionList, browserSessionClose, browserSessionReconcile, browserResearchAcquire,
     browserToolStatus, browserToolDetect, browserToolCheck, browserToolPolicy, browserToolInstall, browserToolAccept, browserToolUninstall,
-    hypemanDetect, hypemanLocationSet, hypemanEnable, hypemanInstall, hypemanUninstall],
+    hypemanDetect, hypemanLocationSet, hypemanEnable, hypemanInstall, hypemanUninstall, ...standaloneOperations],
   events: { topics, start(ctx, publish) {
     ctx.system.onChange = () => publish("browser_system_changed");
     ctx.backend.onChange = () => publish("browser_sessions_changed");
-    ctx.profiles.onChange = () => publish("browser_profiles_changed");
+    ctx.profiles.onChange = () => { publish("browser_profiles_changed"); publish("browser_standalone_changed"); };
     ctx.profiles.onHandoffChange = () => publish("browser_handoffs_changed");
     return () => { ctx.system.onChange = undefined; ctx.backend.onChange = undefined; ctx.profiles.onChange = undefined; ctx.profiles.onHandoffChange = undefined; };
   } },

@@ -374,7 +374,7 @@ test("durable ACP workers dispatch, follow up, answer permissions, and load afte
     assert.equal(chunk.data.includes("Check your work"), true);
     assert.ok(scopedChanges.includes(id));
     const fleet = (await configuredMcpServers(workspaceRoot(import.meta.dirname)))
-      .filter(item => item.kind === "codex" || ["brain", "content", "scrape", "xcom"].includes(item.name)).map(item => item.name);
+      .filter(item => item.kind === "codex" || ["brain", "browse", "content", "scrape", "xcom"].includes(item.name)).map(item => item.name);
     const selectedNames = [...fleet.filter(name => name !== "codex-computer-use"), "fixture-mcp"];
     assert.deepEqual(JSON.parse(await readFile(join(started.worker.cwd!, "mcp-names.json"), "utf8")), selectedNames);
     assert.deepEqual(await readdir(join(started.worker.cwd!, ".opencode", "skills")), ["review"]);

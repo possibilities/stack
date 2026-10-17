@@ -8,6 +8,10 @@ const shared = {
   xcom: ["xcom_articles_pending", "xcom_search", "xcom_context", "xcom_list", "xcom_get", "xcom_users", "xcom_user_get", "xcom_status"],
 } as const;
 const eventTools = ["events_catalog", "events_subscribe", "events_status", "events_unsubscribe"] as const;
+// Named browsers use the existing local MCP trust boundary, independently of
+// Role grants. Keep this positive list separate from Bot browser authority.
+const standaloneBrowserTools = ["browser_standalone_create", "browser_standalone_list", "browser_standalone_get",
+  "browser_standalone_start", "browser_standalone_stop", "browser_standalone_delete", "browser_standalone_attach", "browser_standalone_detach"];
 
 export const roleGrants = {
   manager: {
@@ -25,10 +29,11 @@ const managerCompletion = { brain: ["submit"], worker: ["worker_start", "worker_
 /** Stable digest of the static grant rules; live bridge and installed Admin catalogs are separate observations. */
 export const rolePolicyVersion = createHash("sha256").update(JSON.stringify({
   admin: "all installed package and generated event tools", bridges: "five shared connections",
-  roleGrants, managerCompletion,
+  roleGrants, managerCompletion, standaloneBrowserTools,
 })).digest("hex");
 export type PackageRole = "admin" | "manager" | "worker" | "unassigned";
 export function packageToolAllowed(role: PackageRole, pkg: string, operation: string): boolean {
+  if (pkg === "browse" && standaloneBrowserTools.includes(operation)) return true;
   if (role === "admin") return true;
   if (role === "unassigned") return false;
   const selected = roleGrants[role] as Record<string, readonly string[]>;
@@ -36,7 +41,7 @@ export function packageToolAllowed(role: PackageRole, pkg: string, operation: st
 }
 
 export function packageServerAllowed(role: PackageRole, pkg: string): boolean {
-  return role === "admin" || role !== "unassigned" && Object.hasOwn(roleGrants[role], pkg);
+  return pkg === "browse" || role === "admin" || role !== "unassigned" && Object.hasOwn(roleGrants[role], pkg);
 }
 
 /** Completion coordination is independent of generated event-tool grants. */

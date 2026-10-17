@@ -4,6 +4,14 @@ import { socketCall, socketPath } from "@stack/api";
 const protocol = "agent-browser.plugin.v1";
 type Request = { protocol: string; type: string; capability: string; request: Record<string, unknown> };
 
+/** A plugin arg `browser=<name>` wins; otherwise AGENT_BROWSER_STACK_BROWSER. Bot identity URLs are never names. */
+export function standaloneTarget(arg: string | undefined, env: NodeJS.ProcessEnv): string | null {
+  if (arg?.startsWith("browser=")) return arg.slice("browser=".length) || null;
+  if (arg) return null; // Signed Bot identity: Bot behaviour unchanged.
+  const name = env.AGENT_BROWSER_STACK_BROWSER?.trim();
+  return name ? name : null;
+}
+
 export async function handleProvider(source: string, env: NodeJS.ProcessEnv = process.env,
   call: typeof socketCall = socketCall, identity?: string): Promise<Record<string, unknown>> {
   try {
@@ -12,14 +20,17 @@ export async function handleProvider(source: string, env: NodeJS.ProcessEnv = pr
     if (!input || input.protocol !== protocol || input.capability !== (input.type === "plugin.manifest" ? "plugin.manifest" : "browser.provider") ||
         !input.request || typeof input.request !== "object" || Array.isArray(input.request)) throw new Error("invalid provider request");
     if (input.type === "plugin.manifest") return { protocol, success: true,
-      manifest: { name: "stack", capabilities: ["browser.provider"], description: "Stack durable Bot browsers" } };
+      manifest: { name: "stack", capabilities: ["browser.provider"], description: "Stack durable Bot and named standalone browsers" } };
     const socket = socketPath("browse", env);
     if (input.type === "browser.close") {
       // Disconnect belongs to agent-browser, not to an available owner socket.
       // This is only a last-observation notice: no browser or profile is released.
       // In particular planned owner drain must not strand the native daemon when
       // public ingress has already closed.
-      await call(socket, "tools/call", { name: "browser_controller_close", arguments: input.request }, { timeoutMs: 3000 }).catch(() => undefined);
+      const controller = (input.request as { controller?: unknown }).controller;
+      if (typeof controller === "string" && controller.startsWith("standalone:"))
+        await call(socket, "tools/call", { name: "browser_standalone_detach", arguments: input.request }, { timeoutMs: 3000 }).catch(() => undefined);
+      else await call(socket, "tools/call", { name: "browser_controller_close", arguments: input.request }, { timeoutMs: 3000 }).catch(() => undefined);
       return { protocol, success: true, data: { closed: true } };
     }
     // A running owner can retain the previous AgentBrowse-backed socket across
@@ -30,7 +41,13 @@ export async function handleProvider(source: string, env: NodeJS.ProcessEnv = pr
     if (input.type === "browser.launch") {
       const session = input.request.session;
       if (typeof session !== "string" || !session || session.length > 128) throw new Error("invalid session");
-      if (!identity) throw new Error("browser provider requires a private Bot launch configuration; session is not Bot identity");
+      // Standalone named browser: plugin arg `browser=<name>` or AGENT_BROWSER_STACK_BROWSER.
+      const name = standaloneTarget(identity, env);
+      if (name) {
+        const launch = await call(socket, "tools/call", { name: "browser_standalone_attach", arguments: { name, session } }, { timeoutMs: 55_000 }) as { cdpUrl: string; cleanup: unknown };
+        return { protocol, success: true, browser: { cdpUrl: launch.cdpUrl, directPage: false, cleanup: launch.cleanup } };
+      }
+      if (!identity) throw new Error("browser provider requires a private Bot launch configuration or a standalone browser name (AGENT_BROWSER_STACK_BROWSER); session is not Bot identity");
       const launch = await call(socket, "tools/call", { name: "browser_controller_launch", arguments: { identity, session } }, { timeoutMs: 55_000 }) as { cdpUrl: string; cleanup: unknown };
       return { protocol, success: true, browser: { cdpUrl: launch.cdpUrl, directPage: false, cleanup: launch.cleanup } };
     }

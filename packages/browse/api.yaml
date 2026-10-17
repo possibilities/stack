@@ -1,11 +1,11 @@
 name: browse
-description: Durable Bot browser profiles, supervised Kernel runtimes, controller binding and local toolchain management. Page actions remain in agent-browser.
+description: Durable Bot and named standalone browser profiles, supervised Kernel runtimes, controller binding and local toolchain management. Page actions remain in agent-browser.
 socket:
   description: Owner-local provider lifecycle, constrained disposable research browsers and system management, including exact parent-fenced installation-reset inspection/callbacks; not an agent-facing browser transport.
 mcp:
-  workerOperations: []
-  events: [browser_handoffs_changed]
-  description: Verified live Bots manage only their own profiles and current-launch controllers. Page actions remain in agent-browser.
+  workerOperations: [browser_standalone_list, browser_standalone_get]
+  events: [browser_handoffs_changed, browser_standalone_changed]
+  description: Verified live Bots manage only their own profiles and current-launch controllers. Any MCP caller may manage named standalone browsers (browser_standalone_*). Page actions remain in agent-browser.
   operations:
     - browser_profile_list
     - browser_profile_create
@@ -17,6 +17,14 @@ mcp:
     - browser_handoff_list
     - browser_handoff_completion
     - browser_handoff_cancel
+    - browser_standalone_create
+    - browser_standalone_list
+    - browser_standalone_get
+    - browser_standalone_start
+    - browser_standalone_stop
+    - browser_standalone_delete
+    - browser_standalone_attach
+    - browser_standalone_detach
 websocket:
   events: all
   description: Loopback management operations and change notices for future operator clients.
@@ -56,3 +64,11 @@ websocket:
     - hypeman_enable
     - hypeman_install
     - hypeman_uninstall
+    - browser_standalone_create
+    - browser_standalone_list
+    - browser_standalone_get
+    - browser_standalone_start
+    - browser_standalone_stop
+    - browser_standalone_delete
+    - browser_standalone_attach
+    - browser_standalone_detach

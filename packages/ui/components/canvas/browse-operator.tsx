@@ -52,7 +52,7 @@ function WriteError({ error }: { error: BrowseCallError | null }) {
   );
 }
 
-const profileTone: Record<BrowserProfile["state"], Tone> = { starting: "muted", ready: "success", recovering: "warning", failed: "destructive" };
+const profileTone: Record<BrowserProfile["state"], Tone> = { starting: "muted", ready: "success", recovering: "warning", failed: "destructive", stopping: "warning", stopped: "muted", deleting: "warning" };
 
 /** Type the profile's name to delete it; its sign-ins and browser data are discarded. */
 function DeleteProfileDialog({ profile, open, onOpenChange }: { profile: BrowserProfile; open: boolean; onOpenChange(open: boolean): void }) {

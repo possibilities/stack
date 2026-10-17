@@ -13,6 +13,7 @@ import { Backend, backendSession } from "../src/backend.js";
 import { handleProvider } from "../src/provider.js";
 import { prepareBrowserConfig } from "../src/config.js";
 import { Profiles } from "../src/profiles.js";
+import { standaloneConfig } from "../cli.js";
 import { BrowseState } from "../src/state.js";
 import type { ManagedGate } from "../src/gate.js";
 const fakeGate = (cdp: string, neko: string): ManagedGate => ({
@@ -226,7 +227,7 @@ test("research runtime binds policy to its receipt and never attaches to an unre
     await backend.close(acquired.cleanup);
   } finally { await backend.closeContext(); await s.close(); }
 });
-async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete?: boolean } = {}) {
+async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete?: boolean; failStop?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "stack-browser-") );
   const root = join(dir, "local-hypeman");
   await mkdir(join(root, "bin"), { recursive: true, mode: 0o700 });
@@ -253,6 +254,10 @@ async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete
       } else if (req.method === "POST" && path === "/instances") {
         if (options.failInstanceCreate) { res.writeHead(503).end(); return; }
         instances.push({ id: `instance-${++instanceSeq}`, ...value, state: "Running", network: { ip: "192.168.64.2" } }); output = instances.at(-1);
+      } else if (req.method === "POST" && path.endsWith("/stop")) {
+        if (options.failStop) { res.writeHead(503).end(); return; }
+        const item = instances.find(item => path === `/instances/${String(item.id)}/stop`)!;
+        item.state = "Stopped"; output = item;
       } else if (req.method === "POST" && path.endsWith("/start")) {
         assert.equal(body, "{}");
         const item = instances.find((item) => path === `/instances/${String(item.id)}/start`)!;
@@ -816,4 +821,163 @@ test("completion identity resolves the exact Chat-bound handoff for the local op
     profiles.prepareClose();
     await backend.closeContext(); await server.close(); await s.close(); maintenance.journal.close();
   }
+});
+
+async function standaloneFixture(options: { failStop?: boolean; botId?: string } = {}) {
+  const s = await fixture(options);
+  const backend = new Backend(s.system, async () => undefined);
+  let closes = 0;
+  const cdp = createServer((_req, res) => res.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${(cdp.address() as { port: number }).port}/devtools/browser/fixture` })));
+  const ws = new WebSocketServer({ server: cdp });
+  ws.on("connection", peer => peer.on("message", raw => {
+    const request = JSON.parse(String(raw)); assert.equal(request.method, "Browser.close"); closes++;
+    peer.send(JSON.stringify({ id: request.id, result: {} }));
+  }));
+  await new Promise<void>(resolve => cdp.listen(0, "127.0.0.1", resolve));
+  // Replace only the host-to-guest relay. Exercise real ownership checks, CDP
+  // shutdown, VM stop/start, retained volumes and the durable owner ledgers.
+  const relay = backend as unknown as { relay(session: string, ip: string): Promise<number>; stopRelay(session: string): Promise<void> };
+  relay.relay = async () => (cdp.address() as { port: number }).port;
+  relay.stopRelay = async () => {};
+  const profiles = new Profiles(backend, s.system, s.env, async () => options.botId ? [{ id: options.botId, url: "unix:///bot", state: "running", recoveryIssue: null }] : [], fakeGate);
+  await s.system.setHypemanLocation(s.root); await s.system.enableHypeman(s.root); await profiles.start(false);
+  return { ...s, backend, profiles, closes: () => closes,
+    async close() {
+      profiles.prepareClose(); await backend.closeContext();
+      for (const peer of ws.clients) peer.terminate();
+      await new Promise<void>(resolve => ws.close(() => resolve()));
+      await new Promise<void>(resolve => cdp.close(() => resolve()));
+      await s.close();
+    } };
+}
+
+test("standalone names are validated, concurrent create is idempotent, and list/get exclude Bot and unnamed profiles", async () => {
+  const s = await standaloneFixture({ botId: "bot" });
+  try {
+    for (const name of ["", "CAPS", "has space", "../escape", "a".repeat(41)]) await assert.rejects(s.profiles.standaloneCreate(name));
+    const [a, b] = await Promise.all([s.profiles.standaloneCreate("major-briggs", "Major Briggs"), s.profiles.standaloneCreate("major-briggs", "Ignored")]);
+    assert.equal(a.id, b.id); assert.equal(b.label, "Major Briggs");
+    await s.profiles.ensure(a.id);
+    const bot = await s.profiles.create("bot", "Default", true); await s.profiles.ensure(bot.id);
+    const legacy = await s.profiles.create(null, "Retained"); await s.profiles.ensure(legacy.id);
+    assert.deepEqual(s.profiles.standaloneList().map(row => row.id), [a.id]);
+    assert.equal(s.profiles.standaloneGet("missing"), null);
+    assert.equal(s.profiles.standaloneGet("major-briggs")?.state, "ready");
+    const copy = s.profiles.standaloneGet("major-briggs")!; copy.name = "changed";
+    assert.equal(s.profiles.standaloneGet("major-briggs")?.name, "major-briggs");
+    assert.equal(s.profiles.list().find(row => row.id === bot.id)?.name, null);
+    assert.equal(s.profiles.list().find(row => row.id === bot.id)?.stopped, false);
+    // The approved name grammar permits boundary hyphens as well as digits.
+    const hyphen = await s.profiles.standaloneCreate("-1-"); await s.profiles.ensure(hyphen.id);
+    assert.equal(hyphen.name, "-1-");
+  } finally { await s.close(); }
+});
+
+test("standalone stop flushes Chrome, retains its volume, survives owner reconstruction and suppresses supervision; start and attach relaunch", async () => {
+  const s = await standaloneFixture();
+  try {
+    const row = await s.profiles.standaloneCreate("persistent"); await s.profiles.ensure(row.id);
+    const original = structuredClone(s.instances()[0]); const volume = structuredClone(s.volumes()[0]);
+    await s.profiles.standaloneAttach("persistent", "before-stop");
+    let changes = 0; s.profiles.onChange = () => { changes++; };
+    const stopped = await s.profiles.standaloneStop("persistent");
+    assert.equal(stopped.state, "stopped"); assert.equal(stopped.stopped, true); assert.equal(stopped.cdpUrl, null); assert.equal(stopped.observation, null);
+    assert.equal(s.closes(), 1); assert.equal(s.instances()[0]?.state, "Stopped");
+    await s.profiles.tick(); await s.profiles.ensure(row.id); await s.profiles.standaloneCreate("persistent");
+    assert.equal(s.instances()[0]?.state, "Stopped"); assert.ok(changes >= 2);
+    const restored = new Profiles(s.backend, s.system, s.env, async () => [], fakeGate); await restored.start(false); await restored.tick();
+    assert.equal(restored.standaloneGet("persistent")?.state, "stopped"); assert.equal(s.instances()[0]?.state, "Stopped");
+    assert.deepEqual((await restored.stateObservation(row.id)).blockedBy, [], "confirmed stopped controllers cannot become unknown maintenance blockers on restart");
+    const started = await restored.standaloneStart("persistent");
+    assert.equal(started.state, "ready"); assert.equal(started.stopped, false); assert.equal(s.instances()[0]?.state, "Running");
+    assert.equal(s.instances()[0]?.id, original?.id); assert.deepEqual(s.volumes()[0], volume);
+    await restored.standaloneStop("persistent");
+    const admitted = await restored.standaloneAttach("persistent", "session-a");
+    assert.ok(admitted.cdpUrl); assert.match(admitted.cleanup.controller, /^standalone:/); assert.equal(s.instances()[0]?.state, "Running");
+    const newer = await restored.standaloneAttach("persistent", "session-a");
+    await restored.standaloneDetach(admitted.cleanup.controller, admitted.cleanup.revision);
+    let ledger = JSON.parse(await readFile(join(s.system.root, "profiles.json"), "utf8"));
+    assert.equal(ledger.standaloneBindings.find((item: { session: string }) => item.session === "session-a").state, "unknown", "stale disconnect cannot close a newer admission");
+    await restored.standaloneDetach(newer.cleanup.controller, newer.cleanup.revision);
+    ledger = JSON.parse(await readFile(join(s.system.root, "profiles.json"), "utf8"));
+    assert.equal(ledger.standaloneBindings.find((item: { session: string }) => item.session === "session-a").state, "disconnected"); assert.equal(s.instances()[0]?.state, "Running");
+    await restored.standaloneDelete("persistent");
+    assert.deepEqual(s.counts(), { instances: 0, volumes: 0 }); assert.equal(restored.standaloneGet("persistent"), null);
+    assert.deepEqual(await restored.standaloneDelete("persistent"), { deleted: true });
+    await assert.rejects(restored.standaloneAttach("persistent", "gone"), /unknown standalone/);
+    restored.prepareClose();
+  } finally { await s.close(); }
+});
+
+test("failed standalone stop remains stopped intent across tick/restart and a concurrent start waits for stop", async () => {
+  const options = { failStop: true }; const s = await standaloneFixture(options);
+  try {
+    const row = await s.profiles.standaloneCreate("failure"); await s.profiles.ensure(row.id);
+    await assert.rejects(s.profiles.standaloneStop("failure"));
+    assert.equal(s.profiles.standaloneGet("failure")?.stopped, true);
+    assert.equal(s.profiles.standaloneGet("failure")?.state, "failed");
+    const closes = s.closes(); await s.profiles.tick(); assert.equal(s.closes(), closes);
+    const restored = new Profiles(s.backend, s.system, s.env, async () => [], fakeGate); await restored.start(false); await restored.tick();
+    assert.equal(restored.standaloneGet("failure")?.state, "failed", "restart cannot claim an unconfirmed stop succeeded");
+    options.failStop = false;
+    const stopping = restored.standaloneStop("failure"), starting = restored.standaloneStart("failure");
+    assert.equal((await stopping).state, "stopped"); assert.equal((await starting).state, "ready");
+    assert.equal(s.instances()[0]?.state, "Running");
+    await restored.standaloneDelete("failure"); restored.prepareClose();
+  } finally { await s.close(); }
+});
+
+test("standalone lifecycle respects maintenance fences and deletion races", async () => {
+  const s = await standaloneFixture();
+  try {
+    const row = await s.profiles.standaloneCreate("fenced"); await s.profiles.ensure(row.id);
+    await s.profiles.standaloneStop("fenced"); const request = randomUUID();
+    await s.profiles.stateFence(row.id, request);
+    for (const action of [() => s.profiles.standaloneStart("fenced"), () => s.profiles.standaloneAttach("fenced", "s"), () => s.profiles.standaloneStop("fenced"), () => s.profiles.standaloneDelete("fenced")]) await assert.rejects(action(), /maintenance/);
+    assert.equal(s.profiles.standaloneGet("fenced")?.stopped, true);
+    await s.profiles.stateRelease(row.id, request, 0);
+    const removing = s.profiles.standaloneDelete("fenced");
+    const attaching = assert.rejects(s.profiles.standaloneAttach("fenced", "too-late"), /deleted/);
+    await removing; await attaching; assert.deepEqual(s.counts(), { instances: 0, volumes: 0 });
+  } finally { await s.close(); }
+});
+
+test("standalone provider routes explicit names and environment, closes by receipt, and preserves Bot identity precedence", async () => {
+  const s = await fixture();
+  try {
+    const calls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+    const call = (async (_path: string, _method: string, input: { name: string; arguments: Record<string, unknown> }) => {
+      calls.push(input);
+      if (input.name === "browser_status") return { provider: "hypeman" };
+      return { cdpUrl: "http://127.0.0.1:9999", cleanup: { controller: input.name === "browser_standalone_attach" ? "standalone:receipt" : "bot-receipt", revision: 1 } };
+    }) as typeof socketCall;
+    const request = (type: string, request: unknown) => JSON.stringify({ protocol: "agent-browser.plugin.v1", type, capability: "browser.provider", request });
+    const env = { ...s.env, AGENT_BROWSER_STACK_BROWSER: "environment" };
+    const opened = await handleProvider(request("browser.launch", { session: "t" }), env, call, "browser=explicit");
+    assert.equal(opened.success, true); assert.deepEqual(calls.at(-1), { name: "browser_standalone_attach", arguments: { name: "explicit", session: "t" } });
+    await handleProvider(request("browser.launch", { session: "env" }), env, call);
+    assert.deepEqual(calls.at(-1), { name: "browser_standalone_attach", arguments: { name: "environment", session: "env" } });
+    await handleProvider(request("browser.launch", { session: "bot" }), env, call, "private-bot-proof");
+    assert.deepEqual(calls.at(-1), { name: "browser_controller_launch", arguments: { identity: "private-bot-proof", session: "bot" } });
+    const cleanup = (opened.browser as { cleanup: unknown }).cleanup;
+    await handleProvider(request("browser.close", cleanup), env, call);
+    assert.equal(calls.at(-1)?.name, "browser_standalone_detach");
+    assert.equal((await handleProvider(request("browser.close", cleanup), env, (async () => { throw new Error("owner unavailable"); }) as typeof socketCall)).success, true);
+  } finally { await s.close(); }
+});
+
+
+test("standalone drive configs isolate session namespaces by owner and name and reject path-like names", async () => {
+  const s = await fixture();
+  try {
+    const read = async (name: string, env = s.env) => JSON.parse(await readFile(await standaloneConfig(name, env), "utf8"));
+    const a = await read("a"), b = await read("b"), elsewhere = await read("a", { ...s.env, STACK_STATE_DIR: join(s.dir, "other") });
+    assert.notEqual(a.namespace, b.namespace); assert.notEqual(a.namespace, elsewhere.namespace);
+    assert.deepEqual(await read("a"), a);
+    assert.equal(a.idleTimeout, "0"); assert.equal(a.provider, "stack");
+    assert.equal(a.plugins[0].command, process.execPath);
+    assert.match(a.plugins[0].args[0], /packages\/browse\/dist\/src\/provider\.js$/);
+    assert.equal(a.plugins[0].args[1], "browser=a");
+    await assert.rejects(standaloneConfig("../escape", s.env));
+  } finally { await s.close(); }
 });

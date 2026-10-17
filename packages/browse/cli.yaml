@@ -1,0 +1,7 @@
+description: Manage named standalone (non-Bot) browsers and drive them with agent-browser through Stack's provider.
+usage: |-
+  usage: stack browse ls
+         stack browse create NAME [--label LABEL]
+         stack browse start NAME | stop NAME | rm NAME
+         stack browse cdp NAME
+         stack browse drive NAME -- <agent-browser args...>
