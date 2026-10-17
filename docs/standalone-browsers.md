@@ -1,6 +1,16 @@
 # Standalone (non-Bot) browsers: findings and design
 
-Status: investigation, 2026-10-16. Author: Grok Bot for Mike Bannister. Tested on greybird (macOS arm64; `stack serve` running since Tue; Hypeman via the `vz` hypervisor).
+Status: implemented on feat/standalone-browsers. The implementation contract and verification limits are in [standalone-browsers-ui-handoff.md](standalone-browsers-ui-handoff.md).
+
+## Implementation notes and deviations
+
+- Ownership is represented additively by `name` plus the existing `botId`, rather than an owner union; old ledgers default to unnamed, running-intent profiles.
+- Start/stop/delete and provider attach/detach are implemented with lifecycle serialization, durable stop intent, exact native ownership checks and separate standalone controller receipts. Stop failure never authorizes supervision to restart the browser.
+- All eight standalone operations are exposed on socket, MCP and WebSocket. Exact shared MCP role-policy exceptions allow every authorized caller; the legacy read-only Worker disclosure remains list/get only.
+- Existing UI record types and state rendering are maintained. New standalone controls are left to the UI team. Health observations are not a last-used audit; CLI list reports state/URL/error, not last page activity.
+- The real isolated-owner page/cookie e2e was deferred to the supervisor at the human's instruction after host guest-network restrictions. The temporary owner and its exact VM/volume were cleaned up; live `stack-qa` readiness and CDP were checked read-only. No extension support was added.
+
+The findings and proposed design below are retained as the approved scope and investigation record.
 
 ## Product delta
 

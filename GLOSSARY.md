@@ -91,11 +91,11 @@ A one-use, one-minute secret for opening one document, Content item or immutable
 
 ## Browser profile
 
-A durable, empty-at-creation Chrome user-data volume with one server-supervised Kernel/Hypeman browser while Stack runs. Each Bot has an exclusive default; additional profiles may belong exclusively to that Bot or remain unassigned. Deleting a Bot retains its profiles unassigned. Only explicit profile deletion discards their data. Planned server shutdown closes Chrome before stopping the exact VM; restart retains the volume and refreshes its guest address and CDP relay. _Avoid_: disposable task, shared account profile, sleeping browser
+A durable, empty-at-creation Chrome user-data volume with one server-supervised Kernel/Hypeman browser while Stack runs. Each Bot has an exclusive default; additional profiles may belong exclusively to that Bot, remain unassigned, or be named standalone browsers independent of Bots. A standalone browser has a unique local name and explicit start/stop intent; stopping retains its volume and suppresses supervision until start or provider attach. Deleting a Bot retains its profiles unassigned. Only explicit profile deletion discards their data. Planned server shutdown closes Chrome before stopping the exact VM; restart retains the volume and refreshes its guest address and CDP relay. _Avoid_: disposable task, shared account profile, sleeping browser
 
 ## Browser controller
 
-An agent-browser session in a private Bot-launch namespace, bound to one Browser profile at a time. The private signed launch configuration establishes Bot identity; an arbitrary session name does not. Management selects the profile and queues native reconnect with that controller's commands, invalidating prior refs. Page and tab operations remain in agent-browser. Closing a controller disconnects it without deleting or stopping its profile. Other Bot and controller sessions remain independent. _Avoid_: browser ownership by session name, human handoff, global interaction lock
+An agent-browser session in a private Bot-launch namespace, bound to one Browser profile at a time. The private signed launch configuration establishes Bot identity; an arbitrary session name does not. Management selects the profile and queues native reconnect with that controller's commands, invalidating prior refs. Page and tab operations remain in agent-browser. Closing a controller disconnects it without deleting or stopping its profile. Named standalone browsers use the same provider with a browser name and separate controller admission/close receipts, without a Bot identity. Other Bot and controller sessions remain independent. _Avoid_: browser ownership by session name, human handoff, global interaction lock
 
 ## Browser handoff
 
