@@ -20,6 +20,10 @@ export const forwardTimeouts = new Map<string, number>([
   ["browse/browser_handoff_take", 60_000],
   ["browse/browser_handoff_finish", 180_000],
   ["browse/browser_profile_delete", 60_000],
+  // Named browser start waits for its VM (30s) and CDP readiness (35s); stop drains, closes Chrome and confirms the VM stopped.
+  ["browse/browser_standalone_start", 120_000],
+  ["browse/browser_standalone_attach", 120_000],
+  ["browse/browser_standalone_stop", 120_000],
   // npm install is bounded at 180s; a policy check may install.
   ["browse/agent_browser_check_updates", 200_000],
   ["browse/agent_browser_install", 200_000],
