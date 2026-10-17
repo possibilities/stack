@@ -5,7 +5,7 @@ Status: investigation, 2026-10-16. Author: Grok Bot for Mike Bannister. Tested o
 ## Product delta
 
 - **Today:** every Bot automatically gets one browser. Anything else (a browser for Major Briggs or a script) is only possible through low-level operator calls, with unnamed profiles, a CDP port that changes after restarts, and no start/stop.
-- **After:** any agent that can run `stack` or call the browse API/MCP can create a browser with a name (`major-briggs`), list, start, stop and remove it, and drive it with `stack browse drive major-briggs -- <agent-browser command>`. Logins and cookies persist in that browser's own profile. Bot browsers keep working as they do now.
+- **After:** any agent that can run `stack` or call the browse API/MCP can create a browser with a name (`major-briggs`), list, start, stop and remove it, and drive it with plain agent-browser through Stack's existing provider (`AGENT_BROWSER_STACK_BROWSER=major-briggs agent-browser …`), just as Bots already do. Logins and cookies persist in that browser's own profile. Bot browsers keep working as they do now.
 
 ## How it works today (verified)
 
@@ -67,27 +67,29 @@ I set a cookie (httpbin `mbtest=persist1`), then sent CDP `Browser.close`. Kerne
 - `browser_standalone_delete {name, confirm:"delete"}` (discards VM and volume)
 - Event topic `browser_standalone_changed` for state changes
 
-**CLI (`packages/browse/cli.ts`):** `stack browse ls | create NAME | start NAME | stop NAME | rm NAME | cdp NAME | drive NAME -- <agent-browser args>`.
+**Existing agent-browser provider (verified 2026-10-16).** Stack already ships an agent-browser provider plugin: `packages/browse/src/provider.ts` (50 LOC), registered as plugin `stack` with capability `browser.provider`. Each Bot launch gets a private config in `browser/controllers/<namespace>.json` (`provider: "stack"`, `namespace`, `idleTimeout: 0`, plugin args = a signed `browser-identity?bot=…&instance=…&proof=…` URL) through `AGENT_BROWSER_CONFIG`/`AGENT_BROWSER_NAMESPACE`. On launch the plugin calls `browser_controller_launch {identity, session}` on `browse.sock` and returns that controller's CDP URL. Profile choice is **by Bot identity plus `--session`**: the Bot's default profile, or whatever `browser_controller_select` set for that session. So for a Bot, connecting is just `agent-browser --session work open URL`, with no ports. Without a Bot identity it refuses ("browser provider requires a private Bot launch configuration"). I confirmed this: the global `browser/agent-browser.json` and `--provider stack` both fail with `Plugin 'stack' returned success=false`. My earlier test used `--cdp` with an empty config, which bypassed the provider entirely.
 
-`stack browse drive NAME -- …` wraps agent-browser. On **every call** it reads the browser's current CDP address from the browse API (relay ports change on restart), starts the browser if it's stopped, then execs the private agent-browser toolchain with `--cdp <port> --session NAME` and a per-name config (`browser/controllers/standalone-NAME.json`). Example: `stack browse drive major-briggs -- open https://example.com`, then `… -- snapshot -i`, then `… -- click @e1`. Agents never handle raw ports.
-
-**Controller integration:** `drive` registers as a managed controller (reusing `browser_controller_launch` internals with a standalone principal), so the existing handoff draining and ref invalidation apply.
+**#4 (revised): connect by extending the existing provider.** Teach the `stack` provider to target a named standalone browser:
+- `provider.ts`: accept a standalone target as well as Bot identity, read from `AGENT_BROWSER_STACK_BROWSER=<name>` (or a plugin arg `browser=<name>`). For a standalone target, call a new socket op `browser_standalone_attach {name, session}`, which starts the browser if it's stopped, registers a managed controller and returns the current `cdpUrl`. Bot behaviour is unchanged.
+- `browse` ops: `browser_standalone_attach` (reusing `browser_controller_launch` internals with a standalone principal) and `browser_standalone_detach` (the close notice).
+- Usage for any agent: `AGENT_BROWSER_CONFIG=~/.local/state/stack/browser/agent-browser.json AGENT_BROWSER_STACK_BROWSER=major-briggs agent-browser --session mb open https://example.com`, then `snapshot -i`, `click @e1`. That's no ports and no ceremony, and it works the same from the agent-browser MCP server. Optionally make the global config the user default so `--provider stack` alone works.
+- **CLI:** `stack browse ls | create NAME | start NAME | stop NAME | rm NAME | cdp NAME`. `stack browse drive NAME -- <args>` becomes **optional thin sugar** that just sets the two env vars and execs agent-browser. There's no separate port resolution, because the provider does that on every launch.
 
 **Deliverable: UI handoff doc.** When the build is done, the builder writes `docs/standalone-browsers-ui-handoff.md` for the UI team. It covers the data model (fields and types), every API/MCP/CLI operation with inputs and outputs, states and lifecycle (`starting/ready/stopping/stopped/failed/deleting`) with the events emitted, error codes/messages and their meaning, and limits (name rules, 16-reservation cap, disk requirement, relay URLs are not durable). It's information to design and build a UI from, not a UI design.
 
-**Rough size:** owner model, ledger migration and tick changes ~150 LOC; API ops, schemas and event ~250; MCP exposure ~40; CLI incl. `drive` ~180; start/stop lifecycle in the backend ~120; tests ~300; UI handoff doc. About 1–1.1k LOC, roughly 2 days.
+**Rough size:** owner model, ledger migration and tick changes ~150 LOC; API ops, schemas and event ~250; MCP exposure ~40; provider + attach/detach ~100; CLI (incl. thin `drive` sugar) ~120; start/stop lifecycle in the backend ~120; tests ~300; UI handoff doc. About 1k LOC, roughly 2 days (slightly less than before, since the provider already handles connect).
 
 ## Future / separate feature: browse extension support
 
-A follow-up plan, useful beyond password managers (ad/cookie-banner blockers, automation helpers). Sketch: per-profile extension list stored in the ledger; unpacked extensions on the profile volume (`/home/kernel/extensions/...`); `--load-extension=` appended to `CHROMIUM_FLAGS` in `backend.ts` (~L358; the image runs Chrome for Testing, which still honors the flag, untested); API op such as `browser_extensions_set`. The first use case is a free password manager (Bitwarden) unlocked once by a human through the existing handoff/Neko viewer. Risks: flag behaviour in the Kernel image, vault lock timeouts. Est. ~0.5–1 day.
+A follow-up plan, useful beyond password managers (ad/cookie-banner blockers, automation helpers). Note: agent-browser also has `auth login --credential-provider <plugin>`, a credential-plugin hook worth evaluating for a Bitwarden CLI bridge. Sketch: per-profile extension list stored in the ledger; unpacked extensions on the profile volume (`/home/kernel/extensions/...`); `--load-extension=` appended to `CHROMIUM_FLAGS` in `backend.ts` (~L358; the image runs Chrome for Testing, which still honors the flag, untested); API op such as `browser_extensions_set`. The first use case is a free password manager (Bitwarden) unlocked once by a human through the existing handoff/Neko viewer. Risks: flag behaviour in the Kernel image, vault lock timeouts. Est. ~0.5–1 day.
 
 ## Where we get / might get stuck
 
 | Risk | Fix |
 |---|---|
 | Non-Bot agents can't use MCP browser ops today | expose standalone ops to all MCP callers (no grant) |
-| CDP port changes after restart | `stack browse drive` resolves it on every call |
-| Separate CDP clients bypass handoff draining | `drive` registers as a managed controller |
+| CDP port changes after restart | the provider resolves it on every launch (already true for Bots) |
+| Separate CDP clients bypass handoff draining | standalone attach registers a managed controller; don't use raw `--cdp` |
 | Profiles are always on today | add start/stop with a clean Chrome flush before VM stop |
 | Name collisions / cleanup of abandoned browsers | names are unique; `ls` shows last use; manual `rm` |
 | VM is linux/amd64 on arm64 (vz), so it's slowish | acceptable; tune vcpus/size |
