@@ -29,8 +29,8 @@ export const releaseSchema = z.strictObject({
 });
 export type Release = z.infer<typeof releaseSchema>;
 export const bundleSchema = z.strictObject({ version: releaseSchema.shape.version, platform: releaseSchema.shape.platform,
-  architecture: releaseSchema.shape.architecture, codexnk: z.strictObject({ tag: z.literal("codexnk-v0.1.9"),
-    sha: z.literal("f90eede076ea40885897c5f2e165b4d48f0fb28f") }) });
+  architecture: releaseSchema.shape.architecture, codexnk: z.strictObject({ tag: z.literal("codexnk-v0.1.10"),
+    sha: z.literal("f67a31decdcdaaae67a73094e936ffc4baf9603d") }) });
 
 /** These are client-host operations, NOT remotely exposed platform Package APIs. */
 export const clientInputs = {

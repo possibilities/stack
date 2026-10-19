@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SettingEvidence, SettingsBackend, SettingValues } from "./schema.js";
 
-export const CODEX_REVISION = "f90eede076ea40885897c5f2e165b4d48f0fb28f";
+export const CODEX_REVISION = "f67a31decdcdaaae67a73094e936ffc4baf9603d";
 const text = z.string().min(1).max(1_024);
 const prompt = z.string().max(262_144);
 const tokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
