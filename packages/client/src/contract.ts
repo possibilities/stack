@@ -30,7 +30,7 @@ export const releaseSchema = z.strictObject({
 export type Release = z.infer<typeof releaseSchema>;
 export const bundleSchema = z.strictObject({ version: releaseSchema.shape.version, platform: releaseSchema.shape.platform,
   architecture: releaseSchema.shape.architecture, codexnk: z.strictObject({ tag: z.literal("codexnk-v0.1.10"),
-    sha: z.literal("f67a31decdcdaaae67a73094e936ffc4baf9603d") }) });
+    sha: z.literal("c62cdc0ba564e5f0cddce91716c4ea3ee42bceaf") }) });
 
 /** These are client-host operations, NOT remotely exposed platform Package APIs. */
 export const clientInputs = {
