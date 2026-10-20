@@ -82,7 +82,7 @@ function WorkerMaintenanceFlow({ worker, kind }: { worker: WorkerSession; kind: 
       <ul aria-label="Native purge preconditions" className="flex flex-col gap-1 text-xs">
         {conditions.map((condition) => <li key={condition.label}>{condition.state}: {condition.label}</li>)}
         <li>Owner plan must verify runtime, catalog and teardown drained</li>
-        <li>macOS offline guard; OpenCode 2.0.16, Devin 3000.11.3 or Claude SDK 0.3.283 only</li>
+        <li>macOS offline guard; native command and storage compatibility checked when preparing and applying; a changed installation requires a fresh plan</li>
         <li>Exact private profile, native ID and directory; no unsafe, absent or ambiguous scope or sibling Worker identities</li>
         <li>Quiesce untracked external native processes separately; local observations do not prove this</li>
       </ul>
