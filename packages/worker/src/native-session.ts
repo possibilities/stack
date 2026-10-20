@@ -17,7 +17,16 @@ async function privatePath(root: string, path: string) {
     if (current === root) break;
   }
 }
-async function native(root: string, worker: WorkerRecord, source: NodeJS.ProcessEnv, args: string[], claude = false) {
+function nativeBinary(worker: WorkerRecord, source: NodeJS.ProcessEnv) {
+  const home = source.HOME ?? homedir();
+  return worker.provider === "claude" ? process.execPath : worker.provider === "codex" ? source.STACK_OPENCODE_BIN ?? join(home, ".local", "bin", "opencode") : source.STACK_DEVIN_BIN ?? join(home, ".local", "share", "devin", "cli", "_versions", "current", "bin", "devin");
+}
+async function binaryIdentity(binary: string) {
+  const info = await lstat(binary);
+  if (!info.isFile()) throw new Error("Native maintenance executable is not a regular file");
+  return stateHash([binary, info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs]);
+}
+async function native(root: string, worker: WorkerRecord, source: NodeJS.ProcessEnv, args: string[], binary = nativeBinary(worker, source)) {
   if (process.platform !== "darwin") throw new Error("Offline native-session guard is not available on this host");
   const account: WorkerAccount = { id: worker.accountId, provider: worker.provider, enabled: false, ready: true, removing: false };
   const env = accountEnvironment(root, account, source);
@@ -26,9 +35,21 @@ async function native(root: string, worker: WorkerRecord, source: NodeJS.Process
   env.HOME = accountRoot(root, account.id);
   for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
   for (const key of Object.keys(env)) if (/^(OPENCODE_|DEVIN_|CLAUDE_)/.test(key) && !["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "CLAUDE_CONFIG_DIR"].includes(key)) delete env[key];
-  const home = source.HOME ?? homedir();
-  const binary = claude ? process.execPath : worker.provider === "codex" ? source.STACK_OPENCODE_BIN ?? join(home, ".local", "bin", "opencode") : source.STACK_DEVIN_BIN ?? join(home, ".local", "share", "devin", "cli", "_versions", "current", "bin", "devin");
   return (await promisify(execFile)("/usr/bin/sandbox-exec", ["-p", sandbox, binary, ...args], { env, cwd: worker.provider === "devin" ? worker.cwd! : accountRoot(root, account.id), timeout: 30_000, maxBuffer: 2_000_000 })).stdout.trim();
+}
+async function nativeCommand(root: string, worker: WorkerRecord, env: NodeJS.ProcessEnv) {
+  const binary = await realpath(nativeBinary(worker, env)), identity = await binaryIdentity(binary);
+  const version = worker.provider === "claude" ? "0.3.283" : await native(root, worker, env, ["--version"], binary);
+  if (worker.provider !== "claude") {
+    const codex = worker.provider === "codex";
+    const help = await native(root, worker, env, codex ? ["session", "delete", "--help"] : ["rm", "--help"], binary);
+    if (codex ? !/\bopencode session delete\b/.test(help) || !/\bsessionID\b/.test(help) || !/--standalone\b/.test(help)
+      : !/\bdevin rm\b/.test(help) || !/<TARGET>/.test(help) || !/--force\b/.test(help)) {
+      throw new Error("Native session purge command is incompatible with exact offline deletion");
+    }
+  }
+  if (await binaryIdentity(binary) !== identity) throw new Error("Native maintenance executable changed during inspection");
+  return { binary, identity, version };
 }
 const quote = (id: string) => `"${id.replaceAll('"', '""')}"`;
 type Store = { nativeIds: string[]; selected: string; siblings: string; credentials: string; blockedBy: string[] };
@@ -40,6 +61,12 @@ async function sqliteStore(root: string, worker: WorkerRecord): Promise<Store> {
   try {
     db.exec("PRAGMA busy_timeout=5000; BEGIN");
     const sessionsTable = codex ? "session_v2" : "sessions";
+    const required: Record<string, string[]> = codex ? { session_v2: ["id", "directory", "parent_id", "time_compacting", "time_suspended"], credential: ["id"] }
+      : { sessions: ["id", "working_directory"], prompt_history: ["session_id"] };
+    for (const [table, columns] of Object.entries(required)) {
+      const present = db.prepare(`PRAGMA table_info(${quote(table)})`).all().map(row => row.name);
+      if (columns.some(column => !present.includes(column))) throw new Error("Native session store schema is incompatible with exact scope verification");
+    }
     const sessions = db.prepare(`SELECT * FROM ${sessionsTable} ORDER BY id LIMIT 20001`).all();
     if (sessions.length > 20000) throw new Error("Native session inventory exceeds bounded scope verification");
     const exact = sessions.find(row => row.id === worker.sessionId);
@@ -92,20 +119,20 @@ export async function observeNativeSession(root: string, worker: WorkerRecord, e
     if (Object.keys(config).some(key => !["$schema", "update", "experimental"].includes(key)) || config.update !== "disable"
       || (config.experimental && (typeof config.experimental !== "object" || Object.keys(config.experimental).some(key => key !== "policies")))) throw new Error("Native OpenCode configuration has unverified extensions; maintenance refuses to launch them");
   }
-  const version = worker.provider === "claude" ? "0.3.283" : await native(root, worker, env, ["--version"]);
-  if ((worker.provider === "codex" && !/^(?:opencode v)?2\.0\.16$/.test(version)) || (worker.provider === "devin" && !/^devin 3000\.11\.(?:3|92)(?: \([a-f0-9]+\))?$/.test(version))) throw new Error("Native session purge version has not been scope-verified");
+  const command = await nativeCommand(root, worker, env);
   const store = await (worker.provider === "claude" ? claudeStore(root, worker) : sqliteStore(root, worker));
-  return { ...store, revision: stateHash([worker, version, store]) };
+  return { ...store, command, revision: stateHash([worker, command, store]) };
 }
 export async function purgeNativeSession(root: string, worker: WorkerRecord, env: NodeJS.ProcessEnv, expectedRevision: string) {
   const before = await observeNativeSession(root, worker, env);
   if (before.revision !== expectedRevision || before.blockedBy.length) throw new Error("Native session changed or blocked");
+  if (await binaryIdentity(before.command.binary) !== before.command.identity) throw new Error("Native maintenance executable changed before deletion");
   if (worker.provider === "claude") {
     // Compiled src lives at dist/src: module resolution, not path guessing,
     // selects the package's pinned SDK in this private subprocess.
     const resolved = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
-    await native(root, worker, env, ["--input-type=module", "-e", `const {deleteSession}=await import(${JSON.stringify(resolved)}); await deleteSession(${JSON.stringify(worker.sessionId)},{dir:${JSON.stringify(worker.cwd)}});`], true);
-  } else await native(root, worker, env, worker.provider === "codex" ? ["session", "delete", worker.sessionId!, "--standalone"] : ["rm", worker.sessionId!, "--force"]);
+    await native(root, worker, env, ["--input-type=module", "-e", `const {deleteSession}=await import(${JSON.stringify(resolved)}); await deleteSession(${JSON.stringify(worker.sessionId)},{dir:${JSON.stringify(worker.cwd)}});`], before.command.binary);
+  } else await native(root, worker, env, worker.provider === "codex" ? ["session", "delete", worker.sessionId!, "--standalone"] : ["rm", worker.sessionId!, "--force"], before.command.binary);
   const after = await (worker.provider === "claude" ? claudeStore(root, worker) : sqliteStore(root, worker));
   if (after.nativeIds.length || after.credentials !== before.credentials || after.siblings !== before.siblings) throw new Error("Native absence/sibling/credential preservation could not be verified");
   return before.nativeIds;

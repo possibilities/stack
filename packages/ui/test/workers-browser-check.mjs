@@ -119,7 +119,7 @@ const planWorker = ({ ids, kind, allowUnmerged = [] }) => {
   maintenanceCalls.push(["plan", { ids, kind, allowUnmerged }]);
   const blockedBy = kind === "branch" && ids.some((id) => !allowUnmerged.includes(id)) ? ["Unmerged into the recorded base commit; per-branch unmerged deletion must be explicitly selected"]
     : kind === "git_reset" && resetBlocked ? ["An earlier retained tip exists; preserve/reconcile it explicitly before another reset"]
-    : kind === "native_session" && nativeBlocked ? ["Native session purge version has not been scope-verified"] : [];
+    : kind === "native_session" && nativeBlocked ? ["Native session purge command is incompatible with exact offline deletion"] : [];
   return journal.plan({ subject: null, action: `worker_${kind}`, revision: JSON.stringify([kind, ids, allowUnmerged, branchRevision, transcriptRevision]), resources: ids, blockedBy,
     retained: ["Worker/turn identity, admission digests, outcomes including unknown, usage, settings and captured Work context remain",
       "Native credentials/profiles, Signal/Infer/HUD copies, source checkout, remotes and backups remain independent", "Frozen Role resources and minimal maintenance receipts remain; no Worker is reopened or started implicitly",
@@ -616,7 +616,7 @@ try {
   await native.getByText("Met: No active account runtime observed", { exact: true }).waitFor();
   nativeBlocked = true;
   await press(native.getByRole("button", { name: "Prepare purge native session" }));
-  await native.getByText("Native session purge version has not been scope-verified", { exact: true }).waitFor();
+  await native.getByText("Native session purge command is incompatible with exact offline deletion", { exact: true }).waitFor();
   assert.equal(await native.getByRole("button", { name: "Purge native session", exact: true }).isDisabled(), true);
   await shot("worker-native-blocked-dark");
   nativeBlocked = false;

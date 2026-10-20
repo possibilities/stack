@@ -55,7 +55,7 @@ export class WorkerState {
         // owner-authored scope refusals are suitable for a content-safe plan.
         const message = error instanceof Error ? error.message : "";
         const safe = /^(Native |Exact |Offline |No exact owner-issued|Account native|Native session maintenance requires)/.test(message) && !message.includes("\n") && message.length < 200;
-        blockedBy.push(safe ? message : "Native scope/lifecycle proof unavailable: disable account, drain runtime, retain exact session/cwd and supported private profile/version");
+        blockedBy.push(safe ? message : "Native scope/lifecycle proof unavailable: disable account, drain runtime, retain exact session/cwd and compatible native command/store");
       }
       if (native && ledger.workers().some(sibling => sibling.id !== id && sibling.accountId === worker.accountId && sibling.sessionId && native!.nativeIds.includes(sibling.sessionId))) blockedBy.push("Native descendant selection includes another Worker identity");
       return { id, revision: stateHash([worker, native]), blockedBy: [...blockedBy, ...(native?.blockedBy ?? [])], native, worker };
@@ -119,7 +119,7 @@ export class WorkerState {
 export const workerStateOperations = [
   operation({ name: "worker_state_native_effect", description: "Internal single-use owner-issued callback held under Auth's disabled-account/sign-in mutex and Worker's drained-runtime fence. It cannot execute without an active exact Worker owner callback. Not a standalone cleanup control. Local operator only.", input: z.strictObject({ id: z.uuid(), workerId: z.uuid(), token: z.uuid(), provider: z.enum(["codex", "devin", "claude"]) }), output: z.record(z.string(), z.unknown()),
     async call(ctx: WorkersContext, input, invocation) { requireStateOperator(invocation); return ctx.manager.state.nativeEffect(input); } }),
-  operation({ name: "worker_state_plan", description: "Preview exact Worker Git reset, transcript redaction, branch collection, native-session purge or shared catalog clear. Closed-only except catalog. Reset keeps old tip. Branches require recorded, unreferenced, unchecked-out scope and merged base or exact override. Native purge requires disabled/drained account and verified scope/version. Local operator only.", input: workerStateSelection, output: statePlan,
+  operation({ name: "worker_state_plan", description: "Preview exact Worker Git reset, transcript redaction, branch collection, native-session purge or shared catalog clear. Closed-only except catalog. Reset keeps old tip. Branches require recorded, unreferenced, unchecked-out scope and merged base or exact override. Native purge checks command/store compatibility and exact scope on demand under a disabled/drained account. Local operator only.", input: workerStateSelection, output: statePlan,
     async call(ctx: WorkersContext, input, invocation) { requireStateOperator(invocation); return ctx.manager.state.plan(input); } }),
   operation({ name: "worker_state_clear", description: "Apply an exact Worker plan under lifecycle/revision fences. Transcript retirement commits atomically with its receipt. Git/native/file effects persist admission first and report partial/unknown without rerun. No implicit Worker resume, turn admission or credential/profile removal. Local operator only.", input: stateApplyInput, output: stateReceipt, annotations: { destructiveHint: true, idempotentHint: true },
     async call(ctx: WorkersContext, input, invocation) { requireStateOperator(invocation); return ctx.manager.state.clear(input); } }),

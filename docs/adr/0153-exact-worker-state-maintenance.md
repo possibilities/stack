@@ -5,6 +5,9 @@
 Accepted. Extends [0135](0135-owner-state-maintenance.md),
 [0149](0149-settings-receipt-retirement.md) and
 [0150](0150-auth-pure-cache-allow-list.md).
+The native release allowlist is superseded by
+[0185](0185-on-demand-native-purge-compatibility.md); the original reasoning and
+verification record below are retained.
 
 ## Context
 

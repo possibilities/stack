@@ -21,8 +21,10 @@ const sandbox = '(version 1) (allow default) (deny network-outbound (require-not
 const request = (plan: StatePlan) => ({ planId: plan.id, expectedRevision: plan.revision, requestId: randomUUID() });
 
 test("verified offline native primitives delete exact sessions/descendants but retain sibling transcripts, credentials and Stack unknown admissions", {
-  skip: process.platform !== "darwin" || !existsSync(opencode) || !existsSync(devin), timeout: 120_000,
+  skip: process.env.STACK_NATIVE_STATE_PROBE !== "1", timeout: 120_000,
 }, async () => {
+  assert.equal(process.platform, "darwin", "native maintenance requires the macOS offline guard");
+  assert.ok(existsSync(opencode) && existsSync(devin), "install both native harnesses before requesting this probe");
   const root = await realpath(await mkdtemp(join(tmpdir(), "stack-native-state-"))), env = { ...process.env, STACK_STATE_DIR: root, STACK_OPENCODE_BIN: opencode, STACK_DEVIN_BIN: devin };
   const auth = await authApi.createContext(env), supervisor = new WorkerSupervisor(root, env), manager = new WorkerManager(root, supervisor, env);
   const authServer = await serveSocket({ info: { name: "auth", description: "Auth", transportDescription: "Socket", path: socketPath("auth", env) }, context: auth, operations: authApi.operations });
@@ -77,22 +79,15 @@ test("verified offline native primitives delete exact sessions/descendants but r
     ddb.close(); await writeFile(join(d.profile, "data", "devin", "credentials.toml"), "fake credential sentinel");
     manager.ledger.setSession(d.reserved.worker.id, ids[0]!); manager.ledger.setSession(d.sibling.worker.id, ids[1]!);
     manager.ledger.setWorkerPhase(d.reserved.worker.id, "closed"); manager.ledger.setWorkerPhase(d.sibling.worker.id, "closed");
-    // An unverified native release must stay blocked even when its private store
-    // looks compatible. This exercises the public plan/apply boundary before
-    // proving the actual installed release below.
-    const unsupported = join(root, "unverified-devin");
-    await writeFile(unsupported, '#!/bin/sh\nif [ "$1" = --version ]; then echo "devin 9999.0.0"; else exit 99; fi\n', { mode: 0o700 });
-    env.STACK_DEVIN_BIN = unsupported;
+    // Keep the real deletion behavior but report a future version: compatibility
+    // belongs to the command/store contract, not a release-number allowlist.
+    const future = join(root, "future-devin");
+    await writeFile(future, `#!/bin/sh\nif [ "$1" = --version ]; then echo "devin 9999.0.0"; else exec '${devin.replaceAll("'", "'\\''")}' "$@"; fi\n`, { mode: 0o700 });
+    env.STACK_DEVIN_BIN = future;
     try {
-      const refused = await call("worker_state_plan", { kind: "native_session", ids: [d.reserved.worker.id] });
-      assert.ok(refused.blockedBy.includes("Native session purge version has not been scope-verified"));
-      await assert.rejects(call("worker_state_clear", request(refused)), /Native session purge version has not been scope-verified/);
-      const untouched = new DatabaseSync(dpath, { readOnly: true });
-      assert.equal(untouched.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id IN (?,?)").get(...ids)!.n, 2);
-      untouched.close();
+      const dp = await call("worker_state_plan", { kind: "native_session", ids: [d.reserved.worker.id] }); assert.deepEqual(dp.blockedBy, []);
+      const dr = await call("worker_state_clear", request(dp)); assert.equal(dr.status, "completed");
     } finally { env.STACK_DEVIN_BIN = devin; }
-    const dp = await call("worker_state_plan", { kind: "native_session", ids: [d.reserved.worker.id] }); assert.deepEqual(dp.blockedBy, []);
-    const dr = await call("worker_state_clear", request(dp)); assert.equal(dr.status, "completed");
     const dv = new DatabaseSync(dpath, { readOnly: true }); assert.equal(dv.prepare("SELECT id FROM sessions WHERE id=?").get(ids[0]!), undefined); assert.equal(dv.prepare("SELECT content FROM prompt_history WHERE session_id=?").get(ids[0]!), undefined); assert.equal(dv.prepare("SELECT content FROM prompt_history WHERE session_id=?").get(ids[1]!)!.content, "native private prompt"); dv.close();
     assert.equal(await readFile(join(d.profile, "data", "devin", "credentials.toml"), "utf8"), "fake credential sentinel");
 

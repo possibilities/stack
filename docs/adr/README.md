@@ -156,7 +156,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0150 | [Auth cache cleanup selects proven pure-cache bytes only](0150-auth-pure-cache-allow-list.md) | Accepted |
 | 0151 | [Access retirement is exact expired metadata, not identity revocation](0151-exact-expired-access-history.md) | Accepted |
 | 0152 | [Independent client bootstrap and scoped desktop UI handoffs](0152-independent-client-bootstrap-and-ui-handoffs.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
-| 0153 | [Exact closed-Worker state maintenance](0153-exact-worker-state-maintenance.md) | Accepted |
+| 0153 | [Exact closed-Worker state maintenance](0153-exact-worker-state-maintenance.md) | Accepted; release allowlist superseded by [0185](0185-on-demand-native-purge-compatibility.md) |
 | 0154 | [Coordinate Notification sends and one-shot dismissal watches in the Server](0154-notification-send-and-watch.md) | Accepted |
 | 0155 | [Correlate asynchronous admissions with exact completion and attention reads](0155-correlated-admission-watches.md) | Accepted |
 | 0156 | [Content retention disclosure and publication maintenance](0156-content-retention-and-publication-maintenance.md) | Accepted |
@@ -187,6 +187,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0182 | [Verify research browser capabilities in the shipped guest](0182-research-browser-runtime-capabilities.md) | Accepted |
 | 0183 | [Use official Codex packages and persistent native Bot homes](0183-official-codex-native-homes.md) | Accepted |
 | 0184 | [Fleet History reads retained Bot conversations](0184-fleet-history-pane.md) | Accepted |
+| 0185 | [Check native purge compatibility only when requested](0185-on-demand-native-purge-compatibility.md) | Accepted |
 
 ## Historical identifier corrections
 
