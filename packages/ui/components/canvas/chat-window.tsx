@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronsUpDownIcon, CopyPlusIcon, SquareTerminalIcon } from "lucide-react";
+import { ChevronsUpDownIcon, CopyPlusIcon, HistoryIcon, SquareTerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -104,6 +104,21 @@ function Placeholder({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+/** Live Chat follows a running Bot; retained history stays readable in History without starting it. */
+function Stopped({ botId }: { botId: string }) {
+  const store = useStore();
+  const { goTo } = useWorkbench();
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-8 text-center font-mono text-xs">
+      <p className="text-foreground/80">{botId} is stopped</p>
+      <p className="text-pretty text-muted-foreground">Live Chat follows a running Bot’s main thread. Its retained history is readable without starting it.</p>
+      <Button type="button" size="xs" variant="outline" className="mt-1" onClick={() => { store.requestBotHistory(botId); goTo({ kind: "bot-history", id: botId }); }}>
+        <HistoryIcon data-icon="inline-start" />Read history
+      </Button>
+    </div>
+  );
+}
+
 /** Pixels from the end that still count as reading the latest output. */
 const endSlack = 4;
 
@@ -129,7 +144,7 @@ function Transcript({ botId, view, loadOlder }: { botId: string; view: MainChatV
   if (view.entries.length) return <Scrollback botId={botId} view={view} loadOlder={loadOlder} following={following} measure={measure} />;
   switch (view.status) {
     case "missing": return <Placeholder title={`${botId} no longer exists`} />;
-    case "stopped": return <Placeholder title={`${botId} is stopped`} hint="Start it to read its main thread." />;
+    case "stopped": return <Stopped botId={botId} />;
     case "no-thread": return <Placeholder {...noMainThread(botId, bots.data?.find((bot) => bot.id === botId)?.orientation)} />;
     case "error": return <Placeholder title="Could not read the main thread" hint={view.error ?? undefined} />;
     default: return <Placeholder title="No messages yet" />;

@@ -75,6 +75,8 @@ export function homeOf(ref: NodeRef): NodeHome {
       return { kind: "space", space: "fleet", window: "bots" };
     case "bot-state":
       return { kind: "space", space: "fleet", window: "bot-state" };
+    case "bot-history":
+      return { kind: "space", space: "fleet", window: "bot-history" };
     case "worker":
       return { kind: "space", space: "workers", window: "workers" };
     case "worker-window":
@@ -266,7 +268,7 @@ export function parseNodeKey(key: string): NodeRef | null {
   if (kind === "document" || kind === "collection" || kind === "item" || kind === "artifact") return { kind, id: rest };
   if (kind === "worker" || kind === "worker-runtime" || kind === "worker-window") return { kind, id: rest };
   if (kind === "preset" || kind === "scrape-job") return { kind, id: rest };
-  if (kind === "codex-tool" || kind === "state-entry" || kind === "subscription" || kind === "bot-state") return { kind, id: rest };
+  if (kind === "codex-tool" || kind === "state-entry" || kind === "subscription" || kind === "bot-state" || kind === "bot-history") return { kind, id: rest };
   if (kind === "browser-profile" || kind === "browser-handoff" || kind === "browser-controller" || kind === "browser-viewer" || kind === "standalone-browser") return { kind, id: rest };
   if (kind === "research-document" || kind === "ingestion-job" || kind === "research-source") return { kind, id: rest };
   if (kind === "proc-schedule" || kind === "proc-execution" || kind === "proc-run" || kind === "proc-run-window") return { kind, id: rest };

@@ -117,6 +117,7 @@ test("parseNodeKey inverts nodeKey for every kind and rejects malformed keys", (
     { kind: "state-entry", id: "serve:factory-reset" },
     { kind: "subscription", id: "00000000-0000-4000-8000-0000000000a1" },
     { kind: "bot-state", id: "bot-1" },
+    { kind: "bot-history", id: "bot-1" },
     { kind: "account", id: "acc-1" },
     { kind: "worker-account", id: "0fd9d71a-8b46-4c79-9e1a-3a05f1f2f5d2" },
     { kind: "login" },

@@ -106,7 +106,7 @@ export function RoleSkillsWindow() {
       </>
     ),
     duplicate: (skill, items) => ({ name: uniqueName(skill.name, items.map((item) => item.name)), description: skill.description, body: skill.body, files: skill.files, enabled: skill.enabled, harnesses: skill.harnesses }),
-    note: "Enabled Role skills enter later launches only where their harness filters allow. Bots still discover project and bundled skills.",
+    note: "Enabled Role skills enter later launches only where their harness filters allow. Codex Bots may also discover project, home-level and system skills and applicable native configuration; this list is not an exclusive allowlist.",
   }} />;
 }
 

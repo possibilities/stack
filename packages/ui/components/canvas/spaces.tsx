@@ -41,6 +41,7 @@ import { StateInventoryWindow, SubscriptionsWindow } from "./state-windows";
 import { XcomStateWindow } from "./xcom-state";
 import { ArchiveIcon } from "lucide-react";
 import { ChatWindow } from "./chat-window";
+import { BotHistoryWindow } from "./bot-history";
 import { RoleCatalogWindow } from "./role-catalog";
 import { RoleEditorWindow } from "./role-editor";
 import { RoleInstructionsWindow } from "./role-instructions";
@@ -94,6 +95,7 @@ export const spaceViews: Record<SpaceId, {
     windows: (_state, { chats }) => [
       { id: "bots", title: "Bots", icon: BotIcon, accent: "bots", element: <BotsWindow /> },
       { id: "bot-state", title: "Bot state", icon: HardDriveIcon, accent: "bots", element: <BotStateWindow /> },
+      { id: "bot-history", title: "History", icon: HistoryIcon, accent: "bots", element: <BotHistoryWindow /> },
       ...chats.map((chat) => ({ id: chat.id, title: "Chat", icon: SquareTerminalIcon, accent: "bots" as const,
         element: <ChatWindow id={chat.id} /> })),
     ],
@@ -271,7 +273,7 @@ export const spaceViews: Record<SpaceId, {
 
 const paneDescriptions: Record<string, string> = {
   "hud-attention": "Work that needs someone next", "hud-work": "Shared Work hierarchy and selection", "hud-item": "Selected Work item, details and edits", "hud-timeline": "Collaboration history for selected Work", "hud-resources": "Resources deployed on selected Work",
-  bots: "Bots and their existing controls", "bot-state": "Stored state and recovery for a selected Bot", chat: "A Bot's live main-thread transcript",
+  bots: "Bots and their existing controls", "bot-state": "Stored state and recovery for a selected Bot", "bot-history": "Search and read retained Bot conversations", chat: "A Bot's live main-thread transcript",
   workers: "Worker sessions, filters and attention", worker: "A Worker's conversation, changes, turns and tools", "worker-runtimes": "Worker runtimes and availability",
   accounts: "Accounts, sign-in and linked Workers", usage: "Observed quota and reset times", "model-catalogs": "Available models and effort choices",
   "call-speech": "Speech controls for the current call", inference: "Inference requests and their durable ledger",
@@ -297,7 +299,7 @@ export function paneRegistryReady(space: SpaceId, state: StackState): boolean {
 }
 
 export type PaneDefinition = WindowDef & { kind: string; space: SpaceId; description: string; minimum: { width: number; height: number } };
-const readingPanes = new Set(["chat", "worker", "browse-viewer", "role-editor", "role-preview", "content-editor", "content-preview", "brain-reader", "proc-run", "source-delivery"]);
+const readingPanes = new Set(["chat", "bot-history", "worker", "browse-viewer", "role-editor", "role-preview", "content-editor", "content-preview", "brain-reader", "proc-run", "source-delivery"]);
 export function paneDefinitions(space: SpaceId, state: StackState, arrangement: Parameters<(typeof spaceViews)[SpaceId]["windows"]>[1]): PaneDefinition[] {
   return spaceViews[space].windows(state, arrangement).map((def) => {
     const kind = def.id.replace(/-\d+$/, "");

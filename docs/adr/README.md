@@ -83,7 +83,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0077 | [Content Package API with optional collections and portable identities](0077-content-collections.md) | Accepted |
 | 0078 | [Declare HTTP surfaces and select Package API operations per transport](0078-declared-http-surfaces-and-operation-selection.md) | Accepted |
 | 0079 | [System becomes a fourth space, showing owner resources](0079-system-space.md) | Accepted |
-| 0080 | [Fleet chat windows follow each Bot's main thread](0080-fleet-chat-windows.md) | Accepted |
+| 0080 | [Fleet chat windows follow each Bot's main thread](0080-fleet-chat-windows.md) | Accepted; amended by [0184](0184-fleet-history-pane.md) |
 | 0081 | [The inference request ledger as API, with asynchronous admission](0081-infer-request-ledger-api.md) | Accepted |
 | 0082 | [A Roles space for managing instruction fragments](0082-roles-space-for-instruction-fragments.md) | Accepted |
 | 0083 | [Durable notifications without a presentation surface](0083-durable-notifications-api.md) | Superseded |
@@ -186,6 +186,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0181 | [Named standalone browsers in the Browse space](0181-browse-named-browsers.md) | Accepted |
 | 0182 | [Verify research browser capabilities in the shipped guest](0182-research-browser-runtime-capabilities.md) | Accepted |
 | 0183 | [Use official Codex packages and persistent native Bot homes](0183-official-codex-native-homes.md) | Accepted |
+| 0184 | [Fleet History reads retained Bot conversations](0184-fleet-history-pane.md) | Accepted |
 
 ## Historical identifier corrections
 

@@ -209,6 +209,12 @@ export type MainChatLive = { threadId: string | null; instance: string | null; r
 export type MainChatItems = { threadId: string; data: Array<Record<string, unknown>>; nextCursor: string | null };
 /** chat_search may aggregate Bots; each hit's inherited botId pins reads to its owner. */
 export type ChatHit = Chat & { line: number; role: string; snippet: string; score: number };
+/** One raw rollout record from chat_records. `line` is 1-based; an oversized record has a null payload and `truncated`. */
+export type ChatRecord = { line: number; timestamp: string; type: string; payload: unknown; truncated: boolean };
+/** `nextLine` is the next `afterLine`, not a native cursor. Pages carry no revision. */
+export type ChatRecordPage = { records: ChatRecord[]; nextLine: number | null };
+/** Offsets count UTF-16 code units; concatenated chunks are the original JSONL line, without a revision fence. */
+export type ChatRecordChunk = { text: string; totalChars: number; nextOffset: number | null };
 /** Receipt-time native status before send; admission and model consumption may happen later. */
 export type ChatThreadState = { status: Record<string, unknown> | null; activity: "working" | "waiting" | "idle" | "unknown"; observedAt: string; error: string | null };
 export type ChatSendResult = { turn: Record<string, unknown>; threadState: ChatThreadState };
@@ -1195,6 +1201,8 @@ export type NodeRef =
   | { kind: "state-entry" | "subscription"; id: string }
   /** Fleet's state view of one Bot, by Bot ID. Local only. */
   | { kind: "bot-state"; id: string }
+  /** Fleet's History pane scoped to one Bot, by Bot ID; it has no inspectable record. */
+  | { kind: "bot-history"; id: string }
   | { kind: "package"; id: string }
   | { kind: "operation"; id: string; pkg: string }
   /** Content records: a Vault document by slug, a collection by slug, an item by stable ID, an Artifact by name. */

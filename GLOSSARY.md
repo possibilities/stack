@@ -234,6 +234,10 @@ A Codex app-server thread in an Stack-owned Bot's sanctioned main-thread lineage
 
 A Fleet pane that follows one Bot's main thread: human and assistant text, streamed live, with the turn's activity in a status line. The primary chat window switches between Bots; additional chat windows retain their own Bot when hidden. _Avoid_: chat tab
 
+## History pane
+
+A read-only Fleet pane that searches current Bot histories, across all Bots or one, and reads one Chat by exact Bot, thread and record line, including stopped Bots and descendants. It never starts a Bot or admits input; live following and sending belong to the Chat window. It does not cover Worker sessions, removed Bots or retired conversation generations. _Avoid_: chat log, transcript viewer, Bot state history
+
 ## Worker window
 
 A Workers-space pane that follows one Worker: its summary, pending permissions, conversation, turns, tools, records and session metadata, all read-only, plus its managed model and effort settings, which it can save and apply to the exact idle runtime. The primary Worker window follows the Workers list; additional windows retain their own Worker when hidden. Its Bot, not the window, answers and steers the Worker. _Avoid_: Worker chat, Worker console

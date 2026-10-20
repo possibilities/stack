@@ -29,6 +29,7 @@ export const panePresets: Record<SpaceId, PanePreset[]> = {
     preset("chat", "Chat", row([tabs("bots", "bot-state"), 0.28], ["chat", 0.72])),
     preset("tiled", "Tiled chats", (ids) => compare("bots", "chat", ids)),
     preset("state", "State", row(["bots", 0.32], ["bot-state", 0.68])),
+    preset("history", "History", row([tabs("bots", "bot-state"), 0.24], ["bot-history", 0.76])),
   ],
   workers: [
     preset("follow", "Follow", row([column(["workers", 0.74], ["worker-runtimes", 0.26]), 0.3], ["worker", 0.7])),

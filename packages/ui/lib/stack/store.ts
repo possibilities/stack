@@ -45,6 +45,10 @@ export type StackState = Snapshot & {
   resourceHistory: Record<string, Resource<ResourceHistoryPoint[]>>;
   /** Monotonic invalidation generations, independent of the bounded activity log. */
   botInvalidations: Record<string, number>;
+  /** Per-Bot history invalidations: chats_changed, threads_changed, bots_changed and scoped reconnects. History reads compare, never replay. */
+  historyInvalidations: Record<string, number>;
+  /** The latest request to show one Bot's retained conversations in Fleet History. */
+  botHistoryRequest: { botId: string; seq: number } | null;
   /** Newest page of the durable inference request ledger. */
   inferRequests: Resource<InferRequestSummary[]>;
   /** Cached model discovery per Bot account; reading it starts no discovery. */
@@ -399,7 +403,7 @@ export class StackStore {
       ...snapshot, destination, status: {}, scoped: {}, events: [], attempt: snapshot.login.data,
       access: { data: null, error: null, at: null },
       workerAttempts: Object.fromEntries((snapshot.workerLogins.data ?? []).map((login) => [login.account, login])),
-      workerCatalogs: {}, catalogPending: {}, resourceHistory: {}, botInvalidations: {},
+      workerCatalogs: {}, catalogPending: {}, resourceHistory: {}, botInvalidations: {}, historyInvalidations: {}, botHistoryRequest: null,
       inferRequests: { data: null, error: null, at: null }, inferModels: { data: null, error: null, at: null },
       notificationFilter: { dismissed: false }, notifications: { data: null, error: null, at: null },
       notifyCounts: { data: null, error: null, at: null }, notificationRecords: {},
@@ -1729,6 +1733,8 @@ export class StackStore {
 
   /** Show one Bot in Fleet's state window. */
   selectBotState = (id: string | null): void => { this.set({ botStateId: id }); };
+  /** Ask Fleet History to list this Bot's retained conversations. Reading never starts the Bot. */
+  requestBotHistory = (botId: string): void => { this.set({ botHistoryRequest: { botId, seq: (this.state.botHistoryRequest?.seq ?? 0) + 1 } }); };
 
   private bumpBotState(id: string): void {
     this.set({ botStateGenerations: { ...this.state.botStateGenerations, [id]: (this.state.botStateGenerations[id] ?? 0) + 1 } });
@@ -2039,6 +2045,11 @@ export class StackStore {
 
   private invalidateBot(id: string): void {
     this.set({ botInvalidations: { ...this.state.botInvalidations, [id]: (this.state.botInvalidations[id] ?? 0) + 1 } });
+    this.invalidateHistory(id);
+  }
+
+  private invalidateHistory(id: string): void {
+    this.set({ historyInvalidations: { ...this.state.historyInvalidations, [id]: (this.state.historyInvalidations[id] ?? 0) + 1 } });
   }
 
   private refresh(key: ResourceKey): void {
@@ -2307,6 +2318,7 @@ export class StackStore {
           if (topic === "bots_changed") {
             this.refresh("bots");
           }
+          if (topic === "bots_changed" || topic === "threads_changed" || topic === "chats_changed") this.invalidateHistory(id);
           if (topic === "bot_state_changed" || topic === "bots_changed" || topic === "chat_queue_changed") this.bumpBotState(id);
           if (topic === "bot_state_changed" || topic === "bots_changed" || topic === "chat_queue_changed") this.ownerNotice(pkg);
           // threads_changed is an invalidation, not proof the main thread changed; the read decides.

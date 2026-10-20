@@ -220,6 +220,7 @@ function resolve(ref: NodeRef, state: StackState): View | null {
       };
     }
     case "chat":
+    case "bot-history":
     case "notification-compose":
     case "worker-window":
     case "browser-viewer":
@@ -916,7 +917,7 @@ function NotificationRecordControls({ id }: { id: string }) {
 }
 
 function referencePackage(ref: NodeRef): string {
-  if (ref.kind === "bot" || ref.kind === "bot-state") return "bots";
+  if (ref.kind === "bot" || ref.kind === "bot-state" || ref.kind === "bot-history") return "bots";
   if (ref.kind === "server" || ref.kind === "child" || ref.kind === "codex-tool" || ref.kind === "resource" || ref.kind === "process" || ref.kind === "state-entry" || ref.kind === "subscription") return "server";
   if (ref.kind === "role" || ref.kind === "category" || ref.kind === "fragment" || ref.kind === "skill" || ref.kind === "mcp-server" || ref.kind === "trusted-project" || ref.kind === "role-shim") return "roles";
   if (ref.kind === "notification") return "notify";

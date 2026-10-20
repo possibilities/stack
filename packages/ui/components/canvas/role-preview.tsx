@@ -209,7 +209,7 @@ function LaunchView({ launch, updating }: { launch: RoleLaunchPreview; updating:
             ))}
           </ul>
         ) : <p className="px-1.5 text-[0.7rem] text-muted-foreground">No Role skills are selected for this preview.</p>}
-        <p className="px-1.5 text-[0.66rem] text-pretty text-muted-foreground">{launch.harness ? `Selected for ${launch.harness}.` : "No capability harness selected: only unrestricted enabled capabilities are shown."} Instruction-rendering context does not select skills or connections. Launches may also discover project and bundled skills.</p>
+        <p className="px-1.5 text-[0.66rem] text-pretty text-muted-foreground">{launch.harness ? `Selected for ${launch.harness}.` : "No capability harness selected: only unrestricted enabled capabilities are shown."} Instruction-rendering context does not select skills or connections. For Codex Bots, the Role supplies launch skills and MCP connections; Codex may also discover project, home-level and system skills and applicable native configuration, so this preview is not an exclusive capability allowlist.</p>
       </Section>
       <Section title="MCP servers" aside={<span className="text-[0.65rem] text-muted-foreground tabular-nums">{on} of {total} Stack connection{total === 1 ? "" : "s"} included · {launch.mcpServers.length} from the Role</span>}>
         <div className="flex flex-wrap gap-1 px-1.5">

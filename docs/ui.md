@@ -18,7 +18,8 @@ navigate away from the current composition. System is a fourth space; see
 
 Fleet retains Bot lifecycle controls and the full Bot tools dialog from
 [ADR 0056](adr/0056-fleet-usage-catalogs-and-bot-controls.md), alongside main-thread
-Chat windows ([ADR 0080](adr/0080-fleet-chat-windows.md)). Usage and Models live
+Chat windows ([ADR 0080](adr/0080-fleet-chat-windows.md)) and the read-only History pane
+([ADR 0184](adr/0184-fleet-history-pane.md)). Usage and Models live
 in Accounts ([ADR 0069](adr/0069-accounts-space.md)).
 One mounted Bot actions provider retains forms and upload state alongside the
 store, auth and voice providers. The former index's process and local URL details
@@ -125,6 +126,16 @@ loopback HTTP fixture, so it fetches no public site and never touches a live que
 ```sh
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
   node packages/ui/test/scrape-browser-check.mjs
+```
+
+Fleet History's check serves the real bots schemas over fixture rollouts: all-Bot and Bot-scoped search,
+paging, a stopped Bot's descendant read at its match, chunked oversized records, escaped content, invalidation,
+late answers, missing history, removal, hide and reopen, narrow layout and an unexposed operation. It asserts that
+no lifecycle or admission operation is called, and keeps screenshots when `HISTORY_EVIDENCE_DIR` is set:
+
+```sh
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+  node packages/ui/test/history-browser-check.mjs
 ```
 
 The Browse space's check serves fixture browse, Bots and server sockets with the real browse schemas and a

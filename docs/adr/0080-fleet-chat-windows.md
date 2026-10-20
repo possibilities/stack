@@ -2,7 +2,8 @@
 
 Status: accepted, 2026-09-26. Adds windows to the Fleet space of the open bench
 ([ADR 0058](0058-open-bench-and-global-tools.md)) and extends the Bots API's
-live main-thread projection used by the Bot tools.
+live main-thread projection used by the Bot tools. [ADR 0184](0184-fleet-history-pane.md) reads
+stopped Bots' retained history separately; a stopped Bot's chat now links to it.
 
 ## Decision
 
