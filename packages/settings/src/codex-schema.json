@@ -1,5 +1,5 @@
 {
-  "revision": "f90eede076ea40885897c5f2e165b4d48f0fb28f",
+  "revision": "83086188ae0614bd882818ff1aa23f3194962012",
   "schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "additionalProperties": false,
@@ -119,7 +119,7 @@
         "description": "Analytics settings loaded from config.toml. Fields are optional so we can apply defaults.",
         "properties": {
           "enabled": {
-            "description": "When `false`, disables analytics across Codex product surfaces in this profile.",
+            "description": "When `false`, disables OpenAI analytics across Codex product surfaces in this profile. Custom OTLP metrics exporters remain enabled; set `otel.metrics_exporter = \"none\"` to disable them.",
             "type": "boolean"
           }
         },
@@ -354,6 +354,23 @@
           "conversation"
         ],
         "type": "string"
+      },
+      "AsyncCompactionConfigToml": {
+        "additionalProperties": false,
+        "description": "Background compaction settings. A threshold alone does not enable the feature.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "model_async_compact_threshold_percent": {
+            "description": "Percentage of the model's full context window that starts background compaction. Defaults to 65; valid values are 1–100, including when disabled.",
+            "format": "uint8",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
       },
       "AuthCredentialsStoreMode": {
         "description": "Determine where Codex should store CLI auth credentials.",
@@ -769,6 +786,9 @@
                   }
                 ]
               },
+              "async_compaction": {
+                "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
+              },
               "auth_elicitation": {
                 "type": "boolean"
               },
@@ -804,6 +824,9 @@
               },
               "code_mode_host": {
                 "$ref": "#/definitions/FeatureToml_for_CodeModeHostConfigToml"
+              },
+              "code_mode_host_grpc": {
+                "type": "boolean"
               },
               "code_mode_interrupt": {
                 "type": "boolean"
@@ -855,6 +878,9 @@
               },
               "context_management": {
                 "$ref": "#/definitions/FeatureToml_for_ContextManagementConfigToml"
+              },
+              "credential_masking": {
+                "type": "boolean"
               },
               "current_time_reminder": {
                 "$ref": "#/definitions/FeatureToml_for_CurrentTimeReminderConfigToml"
@@ -938,6 +964,9 @@
                 "type": "boolean"
               },
               "guardian_root_handoff_context": {
+                "type": "boolean"
+              },
+              "guardian_trust_orchestrator_connectors": {
                 "type": "boolean"
               },
               "guardianv2": {
@@ -1045,6 +1074,9 @@
               "omit_app_server_notification_media": {
                 "type": "boolean"
               },
+              "output_token_replay": {
+                "type": "boolean"
+              },
               "personality": {
                 "type": "boolean"
               },
@@ -1114,6 +1146,9 @@
               "retain_client_developer_messages": {
                 "type": "boolean"
               },
+              "retain_client_tool_outputs": {
+                "type": "boolean"
+              },
               "rollout_budget": {
                 "$ref": "#/definitions/FeatureToml_for_RolloutBudgetConfigToml"
               },
@@ -1172,6 +1207,9 @@
                 "type": "boolean"
               },
               "step_model_switching": {
+                "type": "boolean"
+              },
+              "subagent_default_context_limits": {
                 "type": "boolean"
               },
               "system_proxy_fallback": {
@@ -1285,6 +1323,9 @@
           "include_environment_context": {
             "type": "boolean"
           },
+          "include_environment_context_time": {
+            "type": "boolean"
+          },
           "include_permissions_instructions": {
             "type": "boolean"
           },
@@ -1378,7 +1419,7 @@
         "type": "object"
       },
       "CopyOnSelect": {
-        "description": "When transcript mouse selections are copied on release.",
+        "description": "When mouse selections are copied on release.",
         "oneOf": [
           {
             "description": "Use the terminal-specific default.",
@@ -1388,7 +1429,7 @@
             "type": "string"
           },
           {
-            "description": "Copy every nonempty transcript mouse selection on release.",
+            "description": "Copy every nonempty transcript or footer mouse selection on release.",
             "enum": [
               "always"
             ],
@@ -1561,6 +1602,16 @@
           }
         },
         "type": "object"
+      },
+      "FeatureToml_for_AsyncCompactionConfigToml": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/definitions/AsyncCompactionConfigToml"
+          }
+        ]
       },
       "FeatureToml_for_CodeModeConfigToml": {
         "anyOf": [
@@ -2898,6 +2949,10 @@
             "description": "Disable the model's direct-message tools; spawning and automatic child results remain available.",
             "type": "boolean"
           },
+          "disable_native_tools": {
+            "description": "Hide native multi-agent tools while retaining the V2 runtime for host-provided tools.",
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -2941,6 +2996,10 @@
             "type": "string"
           },
           "non_code_mode_only": {
+            "type": "boolean"
+          },
+          "preserve_fork_prefix": {
+            "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to false. Legacy compaction without a reusable context baseline still rebuilds.",
             "type": "boolean"
           },
           "root_agent_usage_hint_text": {
@@ -3278,6 +3337,10 @@
             "description": "Tracks whether the user has acknowledged the full access warning prompt.",
             "type": "boolean"
           },
+          "hide_gov_cloud_guidance": {
+            "description": "Tracks whether the user has acknowledged the AWS GovCloud guidance.",
+            "type": "boolean"
+          },
           "hide_gpt-5.1-codex-max_migration_prompt": {
             "description": "Tracks whether the user has seen the gpt-5.1-codex-max migration prompt",
             "type": "boolean"
@@ -3422,7 +3485,7 @@
                 "$ref": "#/definitions/OtelExporterKind"
               }
             ],
-            "description": "Optional metrics exporter"
+            "description": "Metrics exporter. Defaults to `statsig`, which follows `analytics.enabled`. Custom OTLP exporters are independent of `analytics.enabled`; `none` disables metrics export."
           },
           "span_attributes": {
             "additionalProperties": {
@@ -3621,7 +3684,7 @@
         "additionalProperties": false,
         "properties": {
           "enabled": {
-            "default": true,
+            "description": "Explicit activation override. Omission inherits the installed-plugin default.",
             "type": "boolean"
           },
           "mcp_servers": {
@@ -3671,6 +3734,34 @@
             },
             "description": "Per-tool policy settings keyed by tool name.",
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "PluginsConfigToml": {
+        "additionalProperties": {
+          "$ref": "#/definitions/PluginConfig"
+        },
+        "description": "Plugin activation and capability settings loaded from configuration layers.",
+        "properties": {
+          "_default": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/PluginsDefaultConfig"
+              }
+            ],
+            "description": "Defaults for installed plugin activation. Omission preserves source enablement. Explicit plugin enablement settings override this default, but cannot enable an installation disabled by its source."
+          }
+        },
+        "type": "object"
+      },
+      "PluginsDefaultConfig": {
+        "additionalProperties": false,
+        "description": "Default activation settings for installed plugins.",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -3935,22 +4026,38 @@
           "alloy",
           "arbor",
           "ash",
+          "aube",
           "ballad",
           "breeze",
+          "bubbie",
           "cedar",
           "coral",
           "cove",
           "echo",
           "ember",
+          "haetsal",
+          "hanul",
+          "himari",
           "juniper",
+          "leher",
           "maple",
           "marin",
+          "miko",
+          "neer",
+          "porto",
+          "rindo",
+          "rio",
+          "rivage",
           "sage",
+          "selva",
           "shimmer",
           "sol",
+          "sonna",
           "spruce",
+          "tinta",
           "vale",
-          "verse"
+          "verse",
+          "viola"
         ],
         "type": "string"
       },
@@ -4575,7 +4682,12 @@
               }
             ],
             "default": "auto",
-            "description": "Copy selected transcript text when the mouse button is released. Defaults to `auto`: enabled except in direct terminals known to forward their native copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows). Unknown terminals, Ghostty without a recognized version, and tmux/Zellij default to copying."
+            "description": "Copy selected transcript or footer text when the mouse button is released. Defaults to `auto`: enabled except in direct terminals known to forward their native copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows). Unknown terminals, Ghostty without a recognized version, and tmux/Zellij default to copying."
+          },
+          "copy_on_select_clear_selection": {
+            "default": false,
+            "description": "Deselect transcript text after Copy on select confirms clipboard delivery. Defaults to `false` and has no effect when Copy on select is off.",
+            "type": "boolean"
           },
           "disable_paste_burst": {
             "description": "When true, disables burst-paste detection for typed input entirely. All characters are inserted as they are received, and no buffering or placeholder replacement will occur for fast keypress bursts. Overrides the legacy top-level `disable_paste_burst` setting. Defaults to `false`.",
@@ -4676,6 +4788,7 @@
                 "copy": null,
                 "find_transcript": null,
                 "focus_activity": null,
+                "leader": null,
                 "open_agents": null,
                 "open_external_editor": null,
                 "open_transcript": null,
@@ -5479,6 +5592,14 @@
             ],
             "description": "Focus activity groups in the owned transcript to inspect their details."
           },
+          "leader": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/KeybindingsSpec"
+              }
+            ],
+            "description": "Prefix for persistent, context-aware shortcut menus."
+          },
           "open_agents": {
             "allOf": [
               {
@@ -5674,6 +5795,7 @@
               "copy": null,
               "find_transcript": null,
               "focus_activity": null,
+              "leader": null,
               "open_agents": null,
               "open_external_editor": null,
               "open_transcript": null,
@@ -6793,7 +6915,7 @@
             "$ref": "#/definitions/AnalyticsConfigToml"
           }
         ],
-        "description": "When `false`, disables analytics across Codex product surfaces in this machine. Defaults to `true`."
+        "description": "When `enabled` is `false`, disables OpenAI analytics across Codex product surfaces on this machine. Custom OTLP metrics exporters are controlled by `otel.metrics_exporter`. When unset, the default depends on the client."
       },
       "approval_policy": {
         "allOf": [
@@ -6992,6 +7114,9 @@
               }
             ]
           },
+          "async_compaction": {
+            "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
+          },
           "auth_elicitation": {
             "type": "boolean"
           },
@@ -7027,6 +7152,9 @@
           },
           "code_mode_host": {
             "$ref": "#/definitions/FeatureToml_for_CodeModeHostConfigToml"
+          },
+          "code_mode_host_grpc": {
+            "type": "boolean"
           },
           "code_mode_interrupt": {
             "type": "boolean"
@@ -7078,6 +7206,9 @@
           },
           "context_management": {
             "$ref": "#/definitions/FeatureToml_for_ContextManagementConfigToml"
+          },
+          "credential_masking": {
+            "type": "boolean"
           },
           "current_time_reminder": {
             "$ref": "#/definitions/FeatureToml_for_CurrentTimeReminderConfigToml"
@@ -7161,6 +7292,9 @@
             "type": "boolean"
           },
           "guardian_root_handoff_context": {
+            "type": "boolean"
+          },
+          "guardian_trust_orchestrator_connectors": {
             "type": "boolean"
           },
           "guardianv2": {
@@ -7268,6 +7402,9 @@
           "omit_app_server_notification_media": {
             "type": "boolean"
           },
+          "output_token_replay": {
+            "type": "boolean"
+          },
           "personality": {
             "type": "boolean"
           },
@@ -7337,6 +7474,9 @@
           "retain_client_developer_messages": {
             "type": "boolean"
           },
+          "retain_client_tool_outputs": {
+            "type": "boolean"
+          },
           "rollout_budget": {
             "$ref": "#/definitions/FeatureToml_for_RolloutBudgetConfigToml"
           },
@@ -7395,6 +7535,9 @@
             "type": "boolean"
           },
           "step_model_switching": {
+            "type": "boolean"
+          },
+          "subagent_default_context_limits": {
             "type": "boolean"
           },
           "system_proxy_fallback": {
@@ -7585,6 +7728,10 @@
       },
       "include_environment_context": {
         "description": "Whether to inject the `<environment_context>` user block.",
+        "type": "boolean"
+      },
+      "include_environment_context_time": {
+        "description": "Whether environment context includes the current date and timezone.",
         "type": "boolean"
       },
       "include_permissions_instructions": {
@@ -7793,12 +7940,13 @@
         "$ref": "#/definitions/ReasoningEffort"
       },
       "plugins": {
-        "additionalProperties": {
-          "$ref": "#/definitions/PluginConfig"
-        },
+        "allOf": [
+          {
+            "$ref": "#/definitions/PluginsConfigToml"
+          }
+        ],
         "default": {},
-        "description": "User-level plugin config entries keyed by plugin name.",
-        "type": "object"
+        "description": "Default and per-plugin settings keyed by exact `<plugin>@<marketplace>` IDs."
       },
       "profile": {
         "description": "Profile to use from the `profiles` map.",
@@ -7922,7 +8070,7 @@
         "type": "boolean"
       },
       "thread_unload_delay_secs": {
-        "description": "Seconds a thread must have no subscribers and no activity before app-server unloads it. Defaults to 60; zero unloads immediately. Changes require a server restart.",
+        "description": "Seconds a thread must have no subscribers and no activity before app-server unloads it. Defaults to 1800 (30 minutes); zero unloads immediately. Changes require a server restart.",
         "format": "uint64",
         "minimum": 0,
         "type": "integer"

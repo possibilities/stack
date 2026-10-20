@@ -157,7 +157,7 @@ export function LocalPlatform({ release, scope }: { release: Release | null; sco
                 ["Download / unpacked limit", <span key="bytes" className="tabular-nums">{plan.release.bytes.toLocaleString()} / {plan.release.unpackedBytes.toLocaleString()} bytes</span>],
                 ["Release directory", plan.directory, { mono: true }], ["Platform state", plan.platformState, { mono: true }]]} />
               <ul className="list-disc pl-5 text-sm marker:text-muted-foreground">{plan.effects.map(effect => <li key={effect}>{effect}</li>)}</ul>
-              <p className="text-sm text-muted-foreground">Requires: {plan.requires.join(", ")}. Installs may update the shared codexnk runtime. Old releases and platform data are retained.</p>
+              <p className="text-sm text-muted-foreground">Requires: {plan.requires.join(", ")}. Installs may update Stack's official Codex runtime. Old releases and platform data are retained.</p>
             </div> : null}
           </div>
         </li> : null}

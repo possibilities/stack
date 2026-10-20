@@ -1,6 +1,6 @@
 # 3. Require the released codexnk runtime
 
-Status: accepted, 2026-09-23.
+Status: superseded by [ADR 0183](0183-official-codex-native-homes.md), 2026-10-19. Originally accepted, 2026-09-23.
 
 Stack ships with a required, pinned codexnk runtime dependency, not an
 operator-selected Codex command. Its setup invokes the sibling codexnk workshop's

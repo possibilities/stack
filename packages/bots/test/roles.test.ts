@@ -21,7 +21,7 @@ test("Bot launches resolve the current default and apply its internal MCP switch
       return { pid: 50000 + launches.length, exited, kill: () => exit(0) };
     },
   });
-  const config = (spec: LaunchSpec) => readFile(join(spec.args[spec.args.indexOf("--capabilities") + 1]!, "config.toml"), "utf8");
+  const config = (spec: LaunchSpec) => readFile(join(spec.env.CODEX_HOME!, "config.toml"), "utf8");
   try {
     await supervisor.load();
     const account = supervisor.store.addAccount(JSON.stringify({ tokens: { refresh_token: "fixture", access_token: "fixture", id_token: "fixture.jwt.signature" } })).id;
@@ -40,7 +40,7 @@ test("Bot launches resolve the current default and apply its internal MCP switch
     const next = await supervisor.start({ id: "two", cwd: root, account });
     assert.equal(next.roleId, second);
     assert.equal(next.roleRevision, 0);
-    assert.equal(await config(launches[1]!), "", "a noncanonical Bot Role has no Package grants");
+    assert.doesNotMatch(await config(launches[1]!), /mcp_servers/, "a noncanonical Bot Role has no Package grants");
     supervisor.role.setDefault(supervisor.role.catalog().revision, first);
     supervisor.role.role(first).setInternalMcp(0, "notify", false);
     assert.equal(await config(launches[0]!), originalConfig);

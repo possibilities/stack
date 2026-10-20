@@ -8,7 +8,7 @@ export type Job = ClientOutput<"client_job_get">;
 const operationNames: Record<string, string> = { client_install: "Install", client_platform_start: "Start", client_platform_stop: "Stop", client_login_set: "Login preference" };
 export const operationName = (operation: string) => operationNames[operation] ?? operation;
 
-const stageNames: Record<string, string> = { admitted: "Admitted", downloading: "Downloading", extracting: "Extracting", runtime_install: "Installing shared codexnk runtime",
+const stageNames: Record<string, string> = { admitted: "Admitted", downloading: "Downloading", extracting: "Extracting", runtime_install: "Installing official Codex runtime",
   selecting: "Selecting installed release", finished: "Finished", interrupted: "Interrupted", starting_service: "Starting user service", stopping_service: "Stopping user service",
   configuring_login: "Applying login preference" };
 export const stageName = (stage: string) => stageNames[stage] ?? stage;

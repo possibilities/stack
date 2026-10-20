@@ -90,7 +90,7 @@ const botStartInput = z.strictObject({
     id: botId.optional().describe("Existing or custom bot id. Omit to allocate the next bot-N."),
     account: z.uuid().describe("Required enabled Codex account ID from account_list. For an existing bot, must equal its assignment."),
     cwd: z.string().optional().describe("Existing working directory override. Omit for a new private workspace or to reuse an existing bot's workspace. A supplied directory is never deleted by bot_remove."),
-    args: z.array(z.string()).optional().describe("Extra Codex arguments retained for future launches. Omit to reuse saved args; [] clears them while stopped. Stack owns --listen, --identity, --capabilities, and --history-dir."),
+    args: z.array(z.string()).optional().describe("Extra official Codex arguments retained for future launches. Omit to reuse saved args; [] clears them while stopped. Stack owns the endpoint, native home, credentials and Role configuration."),
     settings: botSettings.partial().optional().describe("Override defaults for a new Bot, or update saved settings of a stopped Bot. Omit to reuse its saved settings."),
   });
 async function startBot(ctx: BotsContext, input: z.infer<typeof botStartInput>, adminReason?: string) {
@@ -297,9 +297,14 @@ export const chatTreeDetail = operation({
   },
 });
 export const chatSearch = operation({
-  name: "chat_search", description: "Full-text search over stack-owned Bot rollouts: user and assistant text, tool calls and outputs, and available reasoning summaries. Results rank chats by matching message, with a citeable rollout line and snippet. Only the sanctioned root and descendants are returned; scores are comparable only within one query.",
-  input: z.strictObject({ botId, query: z.string().min(1).max(512), ...page }), output: z.strictObject({ hits: z.array(chatRow.extend({ line: z.number().int(), role: z.string(), snippet: z.string(), score: z.number() })) }), annotations: { title: "Search chats", readOnlyHint: true },
-  async call(ctx: BotsContext, { botId: id, query, limit, offset }) { const bot = botFor(ctx, id); await ctx.chats.refresh(id, bot.mainThreadId); return { hits: ctx.chats.search(id, bot.mainThreadId, query, limit, offset) }; },
+  name: "chat_search", description: "Search Bot histories, including stopped Bots. Omit botId to aggregate all Bots. Hits retain Bot/thread IDs for exact reads and resume routing, a rollout line and snippet. Searches user/assistant text, tools and available reasoning summaries. Returns only each Bot's sanctioned root and descendants; scores are comparable within one query.",
+  input: z.strictObject({ botId: botId.optional(), query: z.string().min(1).max(512), ...page }), output: z.strictObject({ hits: z.array(chatRow.extend({ line: z.number().int(), role: z.string(), snippet: z.string(), score: z.number() })) }), annotations: { title: "Search chats", readOnlyHint: true },
+  async call(ctx: BotsContext, { botId: id, query, limit, offset }) {
+    const bots = id === undefined ? ctx.supervisor.list() : [botFor(ctx, id)];
+    for (const bot of bots) { await ctx.chats.refresh(bot.id, bot.mainThreadId); unchanged(ctx, bot); }
+    for (const bot of bots) unchanged(ctx, bot);
+    return { hits: ctx.chats.searchHistories(bots, query, limit, offset) };
+  },
 });
 export const chatRecords = operation({
   name: "chat_records", description: "Page raw Codex response items and events in rollout order, including fields not projected by thread/items/list. Works while stopped. Records over the response budget have null payload and truncated=true; fetch them with chat_record_chunk. nextLine is the continuation position.",

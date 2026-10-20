@@ -15,12 +15,12 @@ async function bundle(root: string, unsafe = false) {
   const source = join(root, `source-${randomUUID()}`); await mkdir(join(source, "bin"), { recursive: true });
   await mkdir(join(source, "runtime"));
   const manifest = bundleSchema.parse({ version: "test-1", platform: process.platform, architecture: process.arch,
-    codexnk: { tag: "codexnk-v0.1.9", sha: "f90eede076ea40885897c5f2e165b4d48f0fb28f" } });
+    codex: { version: "0.163.0", commit: "83086188ae0614bd882818ff1aa23f3194962012" } });
   await writeFile(join(source, "stack-release.json"), JSON.stringify(manifest));
   await writeFile(join(source, "bin", "stack"), "#!/bin/sh\nexit 0\n");
   // Release producer fixture, not a mocked host: exercises the real installer
   // subprocess without network, native models, credentials or a human home.
-  await writeFile(join(source, "runtime", "codexnk-install.py"), "import pathlib,os\np=pathlib.Path.home()/'.local/libexec/codexnk/codex'\np.parent.mkdir(parents=True,exist_ok=True)\np.write_text('#!/bin/sh\\nexit 0\\n')\np.chmod(0o700)\n");
+  await writeFile(join(source, "runtime", "install-codex.py"), "import pathlib,os\np=pathlib.Path.home()/'.local/libexec/stack/codex/codex'\np.parent.mkdir(parents=True,exist_ok=True)\np.write_text('#!/bin/sh\\nexit 0\\n')\np.chmod(0o700)\n");
   if (unsafe) await symlink("/etc/passwd", join(source, "unsafe"));
   const file = join(root, `${randomUUID()}.tgz`);
   await tar.c({ gzip: true, cwd: source, file }, ["bin", "runtime", "stack-release.json", ...(unsafe ? ["unsafe"] : [])]);

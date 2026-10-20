@@ -6,8 +6,8 @@ import { StateStore, type StoredServer } from "./store.js";
 
 export type SyncStatus = "updated" | "unchanged" | "stale" | "invalid" | "missing" | "unavailable";
 
-// codexnk creates a random, retained runtime home with tempfile::TempDir::new().
-// A private TMPDIR per bot makes that home discoverable without changing Codex.
+// Native auth.json writes pass through the conversation home's symlink to this
+// retained launch directory. Codex never owns its lifetime, including at exit.
 export class RuntimeAuth {
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -121,6 +121,8 @@ export class RuntimeAuth {
   }
 
   private async discover(root: string): Promise<string | null> {
+    if ((await lstat(join(root, "auth.json")).catch(() => null))?.isFile()) return root;
+    // Recover retained credentials from older launches before preparing a new one.
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
     const homes: string[] = [];
     for (const entry of entries) {

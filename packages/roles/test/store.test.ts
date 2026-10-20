@@ -124,15 +124,15 @@ test("a role snapshots instructions and MCP configuration without argv content",
     state = store.update(state.revision, { botMarkdown: "Be an incisive researcher." });
     const first = await materializeRole(root, "bot-1", state, await internal(root));
     assert.equal(await readFile(join(first, "bot.md"), "utf8"), "Be an incisive researcher.");
-    assert.equal(await readFile(join(first, "SYSTEM_APPEND.md"), "utf8"), "Do useful work.\n\n# Role personality (bot.md)\n\nBe an incisive researcher.");
+    assert.equal(JSON.parse((await readFile(join(first, "config.toml"), "utf8")).match(/^developer_instructions = (.*)$/m)![1]!), "Do useful work.\n\n# Role personality (bot.md)\n\nBe an incisive researcher.");
     assert.match(await readFile(join(first, "config.toml"), "utf8"), /\[mcp_servers.auth\]/);
     state = store.updateFragment(state.revision, state.categories[0]!.fragments[0]!.id, { body: "Changed." });
     state = store.update(state.revision, { botMarkdown: "Be a warm collaborator." });
     const second = await materializeRole(root, "bot-1", state, {});
     assert.equal(await readFile(join(first, "bot.md"), "utf8"), "Be an incisive researcher.");
-    assert.equal(await readFile(join(first, "SYSTEM_APPEND.md"), "utf8"), "Do useful work.\n\n# Role personality (bot.md)\n\nBe an incisive researcher.");
+    assert.equal(JSON.parse((await readFile(join(first, "config.toml"), "utf8")).match(/^developer_instructions = (.*)$/m)![1]!), "Do useful work.\n\n# Role personality (bot.md)\n\nBe an incisive researcher.");
     assert.equal(await readFile(join(second, "bot.md"), "utf8"), "Be a warm collaborator.");
-    assert.equal(await readFile(join(second, "SYSTEM_APPEND.md"), "utf8"), "Changed.\n\n# Role personality (bot.md)\n\nBe a warm collaborator.");
+    assert.equal(JSON.parse((await readFile(join(second, "config.toml"), "utf8")).match(/^developer_instructions = (.*)$/m)![1]!), "Changed.\n\n# Role personality (bot.md)\n\nBe a warm collaborator.");
     await assert.rejects(removeRole(root, "bot-2", first), /unrecognized/);
     await removeRole(root, "bot-1", first);
     await removeRole(root, "bot-1", second);

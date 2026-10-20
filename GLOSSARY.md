@@ -270,7 +270,7 @@ update eligibility
 
 ## Role
 
-A named Stack-owned configuration with a stable ID and independent revision: ordered developer-instruction fragments, Bot-only `bot.md` personality, enabled skills, per-Role internal MCP enablement, additional MCP servers and trusted projects. A fresh catalog has canonical Manager, Worker, and Admin Roles. An ordinary Bot default can be selected from non-Admin Roles; every new Worker uses the fixed Worker Role identity, and explicit local-operator Admin launches use the canonical Admin Role. Bot launches receive a private snapshot through codexnk's required `--capabilities` directory; Workers receive instruction fragments, skills and MCP connections without `bot.md`. Worker recovery retains its saved snapshot. Edits and Bot-default changes affect later launches, not a running process. _Avoid_: singleton Role, capability profile, system-prompt flag, live prompt file
+A named Stack-owned configuration with a stable ID and independent revision: ordered developer-instruction fragments, Bot-only `bot.md` personality, enabled skills, per-Role internal MCP enablement, additional MCP servers and trusted projects. A fresh catalog has canonical Manager, Worker, and Admin Roles. An ordinary Bot default can be selected from non-Admin Roles; every new Worker uses the fixed Worker Role identity, and explicit local-operator Admin launches use the canonical Admin Role. Bot launches receive a private snapshot; Workers receive instruction fragments, skills and MCP connections without `bot.md`. Worker recovery retains its saved snapshot. Edits and Bot-default changes affect later launches, not a running process. _Avoid_: singleton Role, capability profile, system-prompt flag, live prompt file
 
 ## Role injection
 

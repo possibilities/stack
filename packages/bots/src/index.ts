@@ -4,6 +4,5 @@ export { appServerSocket, listActiveThreads, type ActiveThread } from "./threads
 export { StateStore, DEFAULT_BOT_SETTINGS, type StoredServer, type BotSettings } from "./store.js";
 export { runningTree } from "./tree.js";
 export { installedRuntimeVersion } from "./runtime.js";
-export { attachInputMiddleware, type InputCandidate, type InputDecision, type InputResolution, type InputMiddlewareConnection } from "./middleware.js";
 export { botSettingsCatalog, botSettingsRead, botSettingsPreview, botSettingsPatch, botSettingsApply, botSettingsOptions, botSettingsNativeSchema } from "./settings.js";
 export { botStateOperations } from "./state.js";

@@ -1,7 +1,7 @@
 # Core Bot and browser workflow
 
 Stack's private Package API sockets are the control boundary. The `auth` owner
-retains registered Codex accounts; `bots` runs the pinned codexnk app-server and
+retains registered Codex accounts; `bots` runs the pinned official Codex app-server and
 owns each Bot's sanctioned main thread, uploads and private workspace. Fleet
 (`/fleet`) follows that thread and sends typed chat input. `browse` provisions an
 exclusive default profile for each Bot in the selected local Hypeman installation.

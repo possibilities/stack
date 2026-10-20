@@ -1,6 +1,6 @@
 # 31. Keep role skills and extra MCP servers in private launch snapshots
 
-Status: accepted, 2026-09-24. Extends the single Role in [ADR 0030](0030-single-role-package.md) and its inherited launch-snapshot behavior from [ADR 0027](0027-default-capabilities-bundle.md).
+Status: accepted, 2026-09-24. Extends the single Role in [ADR 0030](0030-single-role-package.md) and its inherited launch-snapshot behavior from [ADR 0027](0027-default-capabilities-bundle.md). [ADR 0183](0183-official-codex-native-homes.md) supersedes the native capability transport and discovery guarantee; other decisions remain in force.
 
 The `roles` Package API now stores ordered skills and additional MCP servers alongside instruction fragments in the same revisioned SQLite transaction. Each record has a stable ID, a unique launch name, and an enabled flag; create, update, delete, and exact reorder operations have the same revision precondition as fragments. A skill has a Markdown body and base64-encoded supporting files. Stack generates `SKILL.md` metadata, validates relative file paths and bounded payloads, and writes only enabled skills into the Bot's private launch directory. An MCP definition is either HTTP (URL and optional environment-backed token/headers) or stdio (command, args, optional environment). Only enabled definitions join the owner-injected internal MCPs in the launch `config.toml`; collisions with internal Package API names are refused. Edits never change a running Bot.
 

@@ -63,7 +63,7 @@ export function roleMcpConfig(snapshot: Pick<RoleSnapshot, "mcpServers">): strin
   return snapshot.mcpServers.map((value) => mcpRecord.parse(value)).filter((server) => server.enabled).flatMap(mcpLines).join("\n");
 }
 
-/** Codexnk reads SYSTEM_APPEND.md, config.toml and skills/ from --capabilities. */
+/** Capture the Role as native Codex configuration and skills for one launch. */
 export async function materializeRole(stateDir: string, botId: string, snapshot: RoleSnapshot, mcpServers: Readonly<Record<string, McpStdioLaunch>>, cwd?: string): Promise<string> {
   snapshot = selectRoleCapabilities(snapshot, "codex");
   const rendered = renderBotInstructions(snapshot);
@@ -72,8 +72,8 @@ export async function materializeRole(stateDir: string, botId: string, snapshot:
   const root = await mkdtemp(join(parent, "launch-"));
   try {
     await writeFile(join(root, "bot.md"), snapshot.botMarkdown ?? "", { mode: 0o600 });
-    if (rendered) await writeFile(join(root, "SYSTEM_APPEND.md"), rendered, { mode: 0o600 });
-    const lines: string[] = [];
+    const lines: string[] = ['cli_auth_credentials_store = "file"', 'mcp_oauth_credentials_store = "file"',
+      `developer_instructions = ${toml(rendered)}`, ""];
     if (cwd) for (const project of matchingProjects(snapshot, await realpath(cwd))) lines.push(`[projects.${toml(project.path)}]`, 'trust_level = "trusted"', "");
     for (const [name, launch] of Object.entries(mcpServers).sort(([a], [b]) => a.localeCompare(b))) {
       if (snapshot.disabledInternalMcpServers.includes(name)) continue;

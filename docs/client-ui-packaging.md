@@ -57,7 +57,7 @@ build or substitute the generated standalone server for the Client ingress.
 The launcher retains Node `>=24`, immutable client mode, independent Client host
 state and parent-only bootstrap minting. A platform release remains a separate
 `bundleSchema` artifact with durable Node, `bin/stack`, prebuilt platform/UI
-resources and the reviewed codexnk installer. This UI tarball is **not** that
+resources and Stack's official Codex installer plus its adjacent release pin. This UI tarball is **not** that
 bundle and cannot stand in for an operator-reviewed release manifest.
 
 ## Dependency build-script decisions

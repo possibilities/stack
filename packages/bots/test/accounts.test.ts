@@ -23,8 +23,8 @@ test("a server snapshots its account at launch and never falls back to ambient C
     const supervisor = new Supervisor({ stateDir: root, store, graceMs: 20,
       endpoint: async (id) => `ws://127.0.0.1:${id === "one" ? 45501 : 45502}`,
       launch(spec) {
-        // The identity exists only long enough for codexnk to copy it into its private runtime.
-        const identity = spec.args[spec.args.indexOf("--identity") + 1];
+        // Native auth reads the exact account captured by this launch.
+        const identity = spec.env.CODEX_HOME!;
         const auth = requireAuth(identity);
         observed.push({ spec, auth });
         let resolveExit: (code: number | null) => void = () => undefined;
@@ -40,7 +40,7 @@ test("a server snapshots its account at launch and never falls back to ambient C
     const second = await supervisor.start({ cwd, id: "two", account: secondAccount.id });
     assert.deepEqual([first.account, second.account], [firstAccount.id, secondAccount.id]);
     assert.deepEqual(observed.map(({ auth }) => auth), [credential("first-secret"), credential("second-secret")]);
-    assert.deepEqual(observed.map(({ spec }) => spec.env.CODEX_HOME), [undefined, undefined]);
+    assert.deepEqual(observed.map(({ spec }) => spec.env.CODEX_HOME), [join(root, "history", "one"), join(root, "history", "two")]);
     assert.deepEqual(observed.map(({ spec }) => spec.env.TMPDIR), [join(root, "runtime", "one"), join(root, "runtime", "two")]);
     assert.equal((await supervisor.start({ cwd, id: "one" })).account, firstAccount.id);
     assert.equal(supervisor.list().find((server) => server.id === "two")?.account, secondAccount.id);
@@ -72,9 +72,9 @@ test("an existing unbound server stays unbound until assign, then the next start
     const supervisor = new Supervisor({ stateDir: root, store, graceMs: 20,
       endpoint: async () => "ws://127.0.0.1:45503",
       launch(spec) {
-        const identity = spec.args[spec.args.indexOf("--identity") + 1]!;
-        assert.equal(spec.env.CODEX_HOME, undefined);
-        assert.ok(spec.args.includes("--capabilities") && spec.args.includes("--history-dir"));
+        const identity = spec.env.CODEX_HOME!;
+        assert.notEqual(spec.env.CODEX_HOME, process.env.CODEX_HOME);
+        assert.equal(spec.env.CODEX_SQLITE_HOME, spec.env.CODEX_HOME);
         try { observed.push(readFileSync(join(identity, "auth.json"), "utf8")); }
         catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

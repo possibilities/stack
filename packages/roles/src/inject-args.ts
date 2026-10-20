@@ -23,7 +23,8 @@ not supported. Other native options pass through to the harness for validation;
 use -- before a native prompt beginning with a dash. New harness options are
 not automatically evidence that the harness supports this isolation contract.
 Native built-ins and administrator policy still apply; this is not a sandbox.
-Executables are resolved from PATH. Requires Claude's isolation flags, Codex's
+Codex uses Stack's installed official runtime; other harnesses resolve from PATH.
+Requires Claude's isolation flags, Codex's
 no-daemon CLI, or the stable OpenCode 2.0.16 CLI matching the pinned private host.
 Authentication is orthogonal to Role selection: Claude uses native auth;
 OpenCode uses its ordinary native database, credential selection and refresh.

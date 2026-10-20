@@ -10,18 +10,21 @@ const asObject = (value: unknown): Record<string, unknown> | null => value && ty
 
 /** An isolated, short-lived app-server is used only for model/list. It never starts a thread or turn. */
 export async function discoverModels(stateDir: string, auth: string,
-  binary = join(homedir(), ".local/libexec/codexnk/codex"), signal?: AbortSignal): Promise<Model[]> {
+  binary = join(homedir(), ".local/libexec/stack/codex/codex"), signal?: AbortSignal): Promise<Model[]> {
   if (signal?.aborted) throw new Error("catalog_unavailable");
   const root = await mkdtemp(join(stateDir, ".infer-catalog-"));
-  const identity = join(root, "identity"), capabilities = join(root, "capabilities"), history = join(root, "history"), runtime = join(root, "runtime");
+  const home = join(root, "codex"), runtime = join(root, "runtime");
   let child: ReturnType<typeof spawn> | undefined;
   try {
-    await Promise.all([identity, capabilities, history, runtime].map((dir) => mkdir(dir, { mode: 0o700 })));
-    await writeFile(join(identity, "auth.json"), auth, { mode: 0o600, flag: "wx" });
+    await Promise.all([home, runtime].map((dir) => mkdir(dir, { mode: 0o700 })));
+    await writeFile(join(home, "auth.json"), auth, { mode: 0o600, flag: "wx" });
+    await writeFile(join(home, "config.toml"), 'cli_auth_credentials_store="file"\nmcp_oauth_credentials_store="file"\n', { mode: 0o600 });
     const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: runtime };
     for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL", "CODEX_HOME"]) delete env[key];
+    env.CODEX_HOME = home;
+    env.CODEX_SQLITE_HOME = home;
     child = spawn(binary,
-      ["app-server", "--stdio", "--identity", identity, "--capabilities", capabilities, "--history-dir", history],
+      ["app-server", "--stdio"],
       { cwd: root, env, stdio: ["pipe", "pipe", "ignore"] });
     const proc = child;
     return await new Promise<Model[]>((resolve, reject) => {

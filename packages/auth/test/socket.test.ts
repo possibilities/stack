@@ -35,8 +35,8 @@ test("auth serves accounts and device sign-in on its namespaced socket", { timeo
   const home = await mkdtemp(join(tmpdir(), "stack-auth-home-"));
   const savedHome = process.env.HOME;
   process.env.HOME = home;
-  await mkdir(join(home, ".local", "libexec", "codexnk"), { recursive: true });
-  await symlink(fakeLogin, join(home, ".local", "libexec", "codexnk", "codex"));
+  await mkdir(join(home, ".local", "libexec", "stack", "codex"), { recursive: true });
+  await symlink(fakeLogin, join(home, ".local", "libexec", "stack", "codex", "codex"));
   const events: string[] = [];
   const served = await serveApi({
     name: "auth",

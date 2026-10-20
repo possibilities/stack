@@ -1,6 +1,6 @@
 # 27. Materialize the default capabilities bundle for each managed Codex launch
 
-Status: accepted, 2026-09-24. Extends [ADR 0005](0005-server-main-threads.md)'s durable thread binding and [ADR 0021](0021-managed-servers-inherit-owner-mcp.md)'s owner MCP inheritance. Replaces ADR 0021's launch `-c` transport for owner MCP connections with a capability `config.toml`.
+Status: accepted, 2026-09-24. Extends [ADR 0005](0005-server-main-threads.md)'s durable thread binding and [ADR 0021](0021-managed-servers-inherit-owner-mcp.md)'s owner MCP inheritance. Replaces ADR 0021's launch `-c` transport for owner MCP connections with a capability `config.toml`. [ADR 0183](0183-official-codex-native-homes.md) supersedes the launch configuration transport; other decisions remain in force.
 
 The public package and bundle names were superseded by [ADR 0030](0030-single-role-package.md); this record preserves the original launch-snapshot rationale.
 

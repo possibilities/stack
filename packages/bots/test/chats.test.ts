@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile, lstat, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, lstat, symlink, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,7 +8,7 @@ import test from "node:test";
 import { WebSocketServer } from "ws";
 import { ChatIndex, ChatQueue, ChatUploads, chatRpc } from "../src/chats.js";
 import type { ServerView } from "../src/supervisor.js";
-import { chatSend, chatSteer, chatEnqueue, type BotsContext } from "../api.js";
+import { chatSend, chatSteer, chatEnqueue, chatSearch, type BotsContext } from "../api.js";
 
 const rootId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const childId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -77,6 +77,29 @@ test("legacy shared history admits only the adopted root and its private descend
     assert.equal((await index.records("bot-1", rootId, rootId, 0, 20)).records.length, 1);
     assert.equal(index.search("bot-1", rootId, "foreign", 10, 0).length, 0);
   } finally { index?.close(); await rm(state, { recursive: true, force: true }); }
+});
+
+test("chat search aggregates stopped Bot homes and retains exact owners and sanctioned roots", async () => {
+  const state = await mkdtemp(join(tmpdir(), "stack-aggregate-chats-"));
+  const index = new ChatIndex(state);
+  try {
+    await fixture(state, otherId, null, "needle second Bot");
+    await rename(join(state, "history", "bot-1"), join(state, "history", "bot-2"));
+    await fixture(state, rootId, null, "needle first Bot");
+    await fixture(state, childId, rootId, "needle first child");
+    await fixture(state, otherId, null, "needle unrelated top-level thread");
+    const bots = [{ id: "bot-1", mainThreadId: rootId, state: "stopped", url: null },
+      { id: "bot-2", mainThreadId: otherId, state: "stopped", url: null }] as ServerView[];
+    const context = { chats: index, supervisor: { list: () => bots } } as BotsContext;
+    const all = await chatSearch.call(context, { query: "needle", limit: 10, offset: 0 });
+    assert.deepEqual(all.hits.map(hit => `${hit.botId}/${hit.threadId}`).sort(),
+      [`bot-1/${rootId}`, `bot-1/${childId}`, `bot-2/${otherId}`].sort());
+    const one = await chatSearch.call(context, { botId: "bot-2", query: "needle", limit: 10, offset: 0 });
+    assert.deepEqual(one.hits.map(hit => hit.botId), ["bot-2"]);
+    assert.equal((await chatSearch.call(context, { query: "needle", limit: 1, offset: 1 })).hits[0]?.threadId, all.hits[1]?.threadId);
+    bots[1]!.mainThreadId = null;
+    assert.ok((await chatSearch.call(context, { query: "needle", limit: 10, offset: 0 })).hits.every(hit => hit.botId === "bot-1"));
+  } finally { index.close(); await rm(state, { recursive: true, force: true }); }
 });
 
 test("a symlinked history root cannot redirect indexing outside the Bot's state", async () => {

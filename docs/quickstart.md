@@ -1,6 +1,6 @@
 # Quickstart
 
-Stack runs local Codex Bots and account-bound ACP Workers under one process server. It requires Node 24 or newer, pnpm 12.5.1, and the `~/workshops/codexnk` Workshop checkout for setup. Setup installs the pinned GitHub release through that Workshop's verified installer; no `codex` command on PATH is required.
+Stack runs local Codex Bots and account-bound ACP Workers under one process server. It requires Node 24 or newer, pnpm 12.5.1, Python 3, and GitHub CLI (`gh`) for setup. Stack's installer verifies and installs the complete pinned official `openai/codex` release; no `codex` command on PATH is required.
 
 From the repository root:
 
@@ -87,7 +87,7 @@ The command prints its Unix socket path. The two commands use the same state dir
 
 See [operations](operations.md) for state, shutdown, and recovery, and [security](security.md) for the local trust boundary.
 
-All bots use `~/.local/libexec/codexnk/codex`. Sign in to a Codex Bot account through `auth`, read `account_list`, then call `bot_start` with `{ "account": "<enabled Codex Bot account UUID>" }` to allocate the
+All bots use `~/.local/libexec/stack/codex/codex`. Sign in to a Codex Bot account through `auth`, read `account_list`, then call `bot_start` with `{ "account": "<enabled Codex Bot account UUID>" }` to allocate the
 next `bot-N` and a private workspace. It defaults to `sandbox_mode="danger-full-access"` and `approval_policy="never"`. Supply `id`, `cwd`, or `args` to override
 those launch choices and narrow access with later `-c` settings; a supplied external directory remains yours. Executable selection
 is not configurable. New account-bound Bots allocate a sanctioned main thread and admit one automatic

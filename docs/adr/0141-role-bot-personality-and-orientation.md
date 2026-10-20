@@ -5,7 +5,7 @@ Status: accepted, 2026-09-30. Supersedes the first-UI-turn policy in
 [ADR 0043](0043-bot-chat-apis.md) **for newly created, account-bound Bots only**.
 Extends [ADR 0121](0121-roles-space-for-named-roles.md)'s Role editor and
 [ADR 0028](0028-main-thread-voice-call.md)'s initial voice eligibility. Preserves
-[ADR 0120](0120-codex-native-input-admission.md)'s admission semantics.
+[ADR 0120](0120-codex-native-input-admission.md)'s admission semantics. [ADR 0183](0183-official-codex-native-homes.md) supersedes the native developer-instruction transport; other decisions remain in force.
 
 ## Decision
 

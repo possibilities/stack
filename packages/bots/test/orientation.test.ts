@@ -97,14 +97,14 @@ test("new Bot orientation returns on admission, follows only its exact turn, and
     assert.equal(bot.orientation?.state, "running", "thread idle and an admission ACK are not orientation completion");
     assert.equal(bot.mainThreadId, bot.orientation?.threadId);
     assert.ok(bot.orientation?.turnId);
-    const launchRoot = f.launches[0]!.args[f.launches[0]!.args.indexOf("--capabilities") + 1]!;
-    assert.equal(await readFile(join(launchRoot, "bot.md"), "utf8"), "Be a calm researcher.");
+    const launchRoot = f.launches[0]!.env.CODEX_HOME!;
+    assert.match(await readFile(join(launchRoot, "config.toml"), "utf8"), /Be a calm researcher/);
     const admission = f.requests.find((request) => request.method === "turn/start")!.params;
     assert.equal(admission.clientUserMessageId, bot.orientation!.admissionId);
     assert.equal(admission.turnTrigger, "stack_orientation");
     assert.match((admission.input as Array<{ text: string }>)[0]!.text, /initialization request from Stack, not a message or authorization from the human/);
     role.update(role.snapshot().revision, { botMarkdown: "Be a lively collaborator." });
-    assert.equal(await readFile(join(launchRoot, "bot.md"), "utf8"), "Be a calm researcher.");
+    assert.match(await readFile(join(launchRoot, "config.toml"), "utf8"), /Be a calm researcher/);
     f.change(bot.mainThreadId!, "unrelated-turn", "completed");
     f.change("unrelated-root", bot.orientation!.turnId!, "completed");
     // Observe reconciliation through a stop/start rather than assuming a quiet interval proves anything.
@@ -124,7 +124,7 @@ test("new Bot orientation returns on admission, follows only its exact turn, and
     assert.equal(f.requests.filter((request) => request.method === "turn/start").length, 1);
     assert.equal(f.requests.filter((request) => request.method === "thread/inject_items").length, 1, "changed instructions are delivered once, and their acknowledged hash survives owner restart");
     const latest = f.launches.at(-1)!;
-    assert.equal(await readFile(join(latest.args[latest.args.indexOf("--capabilities") + 1]!, "bot.md"), "utf8"), "Be a lively collaborator.");
+    assert.match(await readFile(join(latest.env.CODEX_HOME!, "config.toml"), "utf8"), /Be a lively collaborator/);
   } finally { await f.close(); }
 });
 

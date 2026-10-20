@@ -11,19 +11,19 @@ test("runtime version follows the installed release receipt and fails safely", a
   process.env.HOME = home;
   try {
     assert.equal(await installedRuntimeVersion(), null);
-    const root = join(home, ".local/libexec/codexnk");
+    const root = join(home, ".local/libexec/stack/codex");
     const release = join(root, "release");
-    await mkdir(release, { recursive: true });
-    const binary = join(release, "codex");
+    await mkdir(join(release, "bin"), { recursive: true });
+    const binary = join(release, "bin", "codex");
     await writeFile(binary, "not executed", { mode: 0o755 });
     await symlink(binary, join(root, "codex"));
-    const receipt = join(release, "receipt.json");
-    const fields = { owner: "codexnk-release-v1", repository: "possibilities/codexnk-codex", tag: "codexnk-v0.1.1", commit: "a".repeat(40), version: "codex-cli 0.0.0" };
+    const receipt = join(release, "stack-runtime.json");
+    const fields = { owner: "stack-official-codex-v1", repository: "openai/codex", tag: "rust-v0.163.0", commit: "a".repeat(40), version: "0.163.0" };
     assert.equal(await installedRuntimeVersion(), null);
     await writeFile(receipt, JSON.stringify(fields));
-    assert.equal(await installedRuntimeVersion(), "v0.1.1");
-    await writeFile(receipt, JSON.stringify({ ...fields, tag: "codexnk-v0.2.0" }));
-    assert.equal(await installedRuntimeVersion(), "v0.2.0");
+    assert.equal(await installedRuntimeVersion(), "0.163.0");
+    await writeFile(receipt, JSON.stringify({ ...fields, tag: "rust-v0.164.0", version: "0.164.0" }));
+    assert.equal(await installedRuntimeVersion(), "0.164.0");
     for (const invalid of [null, {}, { ...fields, owner: "foreign" }, { ...fields, repository: "another/repo" }, { ...fields, tag: "codex-cli 0.0.0" }, { ...fields, commit: "unknown" }]) {
       await writeFile(receipt, JSON.stringify(invalid));
       assert.equal(await installedRuntimeVersion(), null);

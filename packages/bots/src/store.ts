@@ -211,6 +211,16 @@ export class StateStore extends AuthStore {
     return this.historyGenerations(id).find(row => row.generation === identity.generation)!.historyPath;
   }
 
+  /** Publish a verified private copy of the legacy shared generation without changing its root. */
+  privatizeHistory(id: string, generation: string, path: string): void {
+    const identity = this.stateIdentity(id);
+    if (identity.generation !== generation) throw new Error("Bot conversation generation changed during history migration");
+    const expected = join(this.stateDir, "history", id);
+    if (path !== expected) throw new Error("unexpected private Bot history destination");
+    const updated = this.db.prepare("UPDATE bot_history_generations SET history_path=?,ownership='stack' WHERE generation=? AND ownership='shared'").run(path, generation);
+    if (!updated.changes && this.historyPath(id) !== path) throw new Error("Bot history changed during migration");
+  }
+
   maintenanceFence(id: string): string | null {
     const identity = this.stateIdentity(id);
     const row = this.db.prepare("SELECT request_id FROM bot_state_fences WHERE id=? AND incarnation=?").get(id, identity.incarnation) as { request_id: string } | undefined;

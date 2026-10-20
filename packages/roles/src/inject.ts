@@ -136,7 +136,8 @@ export async function inject(args: string[]): Promise<number> {
 async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
   assertInstallationOpen(process.env);
   const { role, harness, native, command, commandIndex, context } = injectArguments(args);
-  const binary = await executable(harness);
+  // Codex must not resolve through a terminal shim that may select another runtime.
+  const binary = await executable(harness === "codex" ? join(homedir(), ".local", "libexec", "stack", "codex", "codex") : harness);
   const selected = await snapshotFor(role);
   const snapshot = selectRoleCapabilities(selected.snapshot, harness);
   const instructions = renderBotInstructions(snapshot, context);

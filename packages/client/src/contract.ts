@@ -29,8 +29,8 @@ export const releaseSchema = z.strictObject({
 });
 export type Release = z.infer<typeof releaseSchema>;
 export const bundleSchema = z.strictObject({ version: releaseSchema.shape.version, platform: releaseSchema.shape.platform,
-  architecture: releaseSchema.shape.architecture, codexnk: z.strictObject({ tag: z.literal("codexnk-v0.1.9"),
-    sha: z.literal("f90eede076ea40885897c5f2e165b4d48f0fb28f") }) });
+  architecture: releaseSchema.shape.architecture, codex: z.strictObject({ version: z.literal("0.163.0"),
+    commit: z.literal("83086188ae0614bd882818ff1aa23f3194962012") }) });
 
 /** These are client-host operations, NOT remotely exposed platform Package APIs. */
 export const clientInputs = {
@@ -61,11 +61,11 @@ export const clientInputs = {
 export type ClientOperation = keyof typeof clientInputs;
 export const clientDescriptions: Record<ClientOperation, string> = {
   client_snapshot: "Read local installation, background service, saved login preference, secret-free connection metadata and recent jobs. Does not install, start or discover remote servers.",
-  client_prerequisites: "Observe local bootstrap prerequisites without installing, starting, signing in or importing configuration. Local platform release support is macOS arm64 and Debian x64 for the reviewed codexnk installer. Missing python3/gh or a user service session needs explicit operator setup; remote-only use does not install these dependencies.",
+  client_prerequisites: "Observe local bootstrap prerequisites without installing, starting, signing in or importing configuration. Local platform release support is macOS arm64 and Debian x64 for Stack's official Codex installer. Missing python3/gh or a user service session needs explicit operator setup; remote-only use does not install these dependencies.",
   client_qr_render: "Validate and render an unexpired Access request, invitation or receipt locally, even without a running platform. Returns the existing four-module quiet-zone matrix contract. Never navigate QR data or send it to an online encoder; invitation payloads are sensitive.",
   client_job_get: "Read one exact durable local job and its definite or unknown outcome; no raw process output or credentials.",
   client_install_plan: "Validate a pinned release for this macOS/Debian host and preview paths, bytes and effects. Downloads nothing; installing never starts or restarts Stack.",
-  client_install: "Admit pinned-bundle installation; return a durable job immediately. Exact UUID retries recover; changed intents conflict. Calls codexnk's bundled release installer with the required tag/SHA at its owned home path. Needs python3/gh, never sudo, a workshop checkout, package-manager scripts, service start or live-directory rebuild.",
+  client_install: "Admit pinned-bundle installation; return a durable job immediately. Exact UUID retries recover; changed intents conflict. Calls Stack's bundled installer for the complete digest-pinned official Codex release at Stack's owned home path. Needs python3/gh, never sudo, a workshop checkout, package-manager scripts, service start or live-directory rebuild.",
   client_platform_start: "Admit starting only this host's managed local platform as a user background service. Reuses its exact owned service; never adopts another running Stack or signals a PID from disk. Admission is not readiness.",
   client_platform_stop: "Admit stopping only the exact owned launchd/systemd user service. No remote shutdown, arbitrary PID signals, deletion or state reset. Stack performs its normal graceful shutdown.",
   client_login_set: "Explicitly save and apply whether this local platform starts at login (default false). Does not start or restart the current platform. On macOS a live service can leave application pending until explicitly stopped. Debian requires an existing systemd user session, not root or lingering.",

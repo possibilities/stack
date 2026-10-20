@@ -143,8 +143,7 @@ test("isolated app-server discovery handshakes, paginates and leaves no credenti
     await writeFile(bin, `#!${process.execPath}\n` + `
 const fs = require("node:fs");
 const readline = require("node:readline");
-const at = process.argv.indexOf("--identity");
-if (!process.argv.includes("--stdio") || at < 0 || !fs.readFileSync(process.argv[at+1] + "/auth.json", "utf8").includes("test-secret")) process.exit(1);
+if (!process.argv.includes("--stdio") || !process.env.CODEX_HOME || !fs.readFileSync(process.env.CODEX_HOME + "/auth.json", "utf8").includes("test-secret")) process.exit(1);
 let initialized = false;
 readline.createInterface({input: process.stdin}).on("line", line => {
   const req = JSON.parse(line);

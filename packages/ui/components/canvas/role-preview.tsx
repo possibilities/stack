@@ -109,7 +109,7 @@ export function RolePreviewWindow() {
   }
 
   return (
-    <Window id="role-preview" title="Preview" subtitle={[roleView.label, "SYSTEM_APPEND.md"].filter(Boolean).join(" · ")} icon={FileTextIcon} accent="roles"
+    <Window id="role-preview" title="Preview" subtitle={[roleView.label, "Developer instructions"].filter(Boolean).join(" · ")} icon={FileTextIcon} accent="roles"
       status={status.roles} endpoint={endpoints.roles} updatedAt={rolePreview.at} error={rolePreview.error}
       actions={preview?.rendered ? <CopyButton value={preview.rendered} label="Fragments" className="opacity-100" /> : undefined}>
       <DefaultNote />
@@ -125,7 +125,7 @@ export function RolePreviewWindow() {
           <p className="px-0.5 text-[0.66rem] text-pretty text-muted-foreground">
             {contextSummary(roleContext)
               ? "Context selects which fragments render for an injected launch; Bots and Workers supply none, so they receive the preview without it. bot.md is Bot-only and is excluded from Workers and injected CLIs, so the size above is not what an injected launch receives."
-              : "Bots append these fragments and bot.md to SYSTEM_APPEND.md; Workers receive only the fragments."} Native and repository guidance still apply.
+              : "Bots receive these fragments and bot.md as developer instructions; Workers receive only the fragments."} Native and repository guidance still apply.
           </p>
         </div>
       ) : null}

@@ -356,7 +356,7 @@ try {
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(copied, await rendered(), "Copy Fragments copies the rendered Fragments");
   assert.equal(copied.includes(starterPersonality.trim()), false, "bot.md is not in the copied Fragments");
-  await preview.getByText(/Bots append these fragments and bot\.md to SYSTEM_APPEND\.md; Workers receive only the fragments\./).waitFor();
+  await preview.getByText(/Bots receive these fragments and bot\.md as developer instructions; Workers receive only the fragments\./).waitFor();
 
   // Conditions are fragment metadata: they save with the draft, survive unrelated edits, and a fragment that
   // lacks its context is never called Off. The shared preview context changes only what the previews show.

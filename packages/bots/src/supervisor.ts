@@ -1,5 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { accessSync, constants, createWriteStream, existsSync } from "node:fs";
@@ -8,6 +8,7 @@ import { codexRuntimePath } from "./paths.js";
 import { DEFAULT_BOT_SETTINGS, StateStore, nativeSettings, legacySettings, type BotSettings, type StoredServer } from "./store.js";
 import { nativeArgs, settingValue, type SettingValues, type SettingsPatch, type SettingsSnapshot } from "@stack/settings";
 import { RuntimeAuth, type SyncStatus } from "./runtime-auth.js";
+import { prepareCodexHome, privateHistoryHome, releaseCodexHome } from "./codex-home.js";
 import { bindMainThread, findEligibleMainThread, watchThreadEvents } from "./threads.js";
 import { orientationSettled, pendingOrientation, orientationPrompt, readOrientationTurn, type Orientation } from "./orientation.js";
 import { chatRpc, observeThreadState, type ThreadStateObservation } from "./chats.js";
@@ -404,7 +405,7 @@ export class Supervisor {
       if (input.adminReason && current.roleId !== this.role.accessRoleIds().adminRoleId)
         throw new Error("stop the ordinary Bot before starting it as Admin");
       if (current.codexBin !== codexBin) {
-        throw new Error(`server ${id} uses a different Codex runtime; stop it before starting it with codexnk`);
+        throw new Error(`server ${id} uses a different Codex runtime; stop it before starting it with the official release`);
       }
       if (input.args !== undefined && !sameArgs(input.args, current.args)) {
         throw new Error(`server ${id} is running with different launch arguments; stop it before changing args`);
@@ -456,7 +457,7 @@ export class Supervisor {
     const instructions = renderBotInstructions(snapshot);
     const instructionsHash = createHash("sha256").update(instructions).digest("hex");
     const privateHistory = join(this.options.stateDir, "history", id);
-    const history = current ? this.store.historyPath(id) : privateHistory;
+    const history = current ? await privateHistoryHome(this.store, id, current.mainThreadId) : privateHistory;
     await mkdir(history, { recursive: true, mode: 0o700 });
 
     let lastError: Error | undefined;
@@ -466,7 +467,6 @@ export class Supervisor {
       const logPath = join(this.options.stateDir, "logs", `${id}.log`);
       await mkdir(join(this.options.stateDir, "logs"), { recursive: true, mode: 0o700 });
       const runtimeRoot = await this.runtime.prepare(id);
-      const identity = await mkdtemp(join(this.options.stateDir, ".identity-"));
       let rolePath: string | undefined;
       let child: RunningChild;
       try {
@@ -474,21 +474,24 @@ export class Supervisor {
         const launchRole = snapshot.id === access.adminRoleId ? "admin" : snapshot.id === access.managerRoleId ? "manager" : "unassigned";
         const mcpServers = await this.options.mcpServers?.(id, url, launchRole) ?? {};
         rolePath = await materializeRole(this.options.stateDir, id, snapshot, mcpServers, cwd);
-        if (account) await writeFile(join(identity, "auth.json"), account.auth, { mode: 0o600 });
+        await prepareCodexHome(history, rolePath, runtimeRoot, account?.auth ?? null);
         const env = { ...process.env };
         for (const key of Object.keys(env)) if (key.startsWith("AGENT_BROWSER_")) delete env[key];
         Object.assign(env, this.options.browserEnv?.(id, url));
         for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL", "CODEX_HOME", "AGENTUSAGE_AUTH_TOKEN", "AGENTUSAGE_ACCOUNT"]) delete env[key];
         env.TMPDIR = runtimeRoot;
+        env.CODEX_HOME = history;
+        env.CODEX_SQLITE_HOME = history;
         child = this.launch({
           bin: codexBin,
-          args: [...appServerArgs(userArgs, url, settings, managed.values), "--enable", "realtime_conversation", "--identity", identity, "--capabilities", rolePath, "--history-dir", history],
+          args: [...appServerArgs(userArgs, url, settings, managed.values), "--enable", "realtime_conversation",
+            "-c", 'cli_auth_credentials_store="file"', "-c", 'mcp_oauth_credentials_store="file"', "-c", `sqlite_home=${JSON.stringify(history)}`],
           cwd,
           logPath,
           env,
         });
       } catch (error) {
-        await rm(identity, { recursive: true, force: true });
+        if (rolePath) await releaseCodexHome(history, rolePath, runtimeRoot);
         await rm(runtimeRoot, { recursive: true, force: true });
         if (rolePath) await removeRole(this.options.stateDir, id, rolePath);
         throw new Error(error instanceof Error ? error.message : String(error));
@@ -529,7 +532,6 @@ export class Supervisor {
             await this.setOrientation(record, { state: "unknown", issue: "The exact orientation root could not be resumed with its captured Role instructions. Inspect its native history, then stop/start to retry the exact root or explicitly reset the conversation; no new root or introduction was submitted." });
           }
         }
-        await rm(identity, { recursive: true, force: true });
         await this.runtime.watch(record);
         this.recoveryIssues.delete(id);
         this.watchOrientation(record);
@@ -540,7 +542,6 @@ export class Supervisor {
         lastError = error instanceof Error ? error : new Error(String(error));
         await this.killChild(id, child);
         await this.finishRuntime(record);
-        await rm(identity, { recursive: true, force: true });
         await cleanupEndpoint(url);
         await this.releaseRole(record);
         this.markStopped(record);
@@ -721,6 +722,8 @@ export class Supervisor {
   private async releaseRole(record: RecordFile, required = false): Promise<void> {
     if (!record.roleRoot) return;
     try {
+      const home = this.store.hasServer(record.id) ? this.store.historyPath(record.id) : join(this.options.stateDir, "history", record.id);
+      await releaseCodexHome(home, record.roleRoot, this.runtime.rootFor(record.id));
       await removeRole(this.options.stateDir, record.id, record.roleRoot);
       record.roleRoot = null;
     } catch (error) {
@@ -818,15 +821,15 @@ export function appServerArgs(userArgs: readonly string[], url: string, settings
 
 function validateAppServerArgs(userArgs: readonly string[]): void {
   for (const [index, arg] of userArgs.entries()) {
-    if (["--listen", "--identity", "--capabilities", "--history-dir"].some((flag) => arg === flag || arg.startsWith(`${flag}=`))) {
-      throw new Error("do not pass --listen, --identity, --capabilities, or --history-dir; stack owns these axes");
+    if (arg === "--listen" || arg.startsWith("--listen=")) {
+      throw new Error("do not pass --listen; Stack owns the app-server endpoint");
     }
     const override = arg === "-c" || arg === "--config" ? userArgs[index + 1]
       : arg.startsWith("--config=") ? arg.slice("--config=".length)
       : arg.startsWith("-c") && arg.length > 2 ? arg.slice(2) : undefined;
     const key = override?.split("=", 1)[0]?.trim();
-    if (key === "developer_instructions" || key === "mcp_servers" || key?.startsWith("mcp_servers.")) {
-      throw new Error("developer_instructions and mcp_servers are managed by the role");
+    if (["developer_instructions", "mcp_servers", "cli_auth_credentials_store", "mcp_oauth_credentials_store", "sqlite_home"].some((owned) => key === owned || key?.startsWith(`${owned}.`))) {
+      throw new Error("Role, credential storage and native history configuration are managed by Stack");
     }
   }
 }
@@ -936,7 +939,7 @@ export function launchChild(spec: LaunchSpec): RunningChild {
   try {
     accessSync(spec.bin, constants.X_OK);
   } catch {
-    throw new Error(`required codexnk runtime is missing or not executable at ${spec.bin}; run ~/code/agentstart/scripts/install.sh --install`);
+    throw new Error(`required official Codex runtime is missing or not executable at ${spec.bin}; run Stack's scripts/install.sh --install`);
   }
   const log = createWriteStream(spec.logPath, { flags: "a" });
   log.on("error", (error) => console.error(`app-server log: ${error.message}`));

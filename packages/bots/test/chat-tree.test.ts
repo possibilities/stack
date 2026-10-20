@@ -10,7 +10,7 @@ import { ChatIndex } from "../src/chats.js";
 import { chatTreeDetail, detailChunk, pageChatTree, readChatTree, chatTreePage } from "../src/chat-tree.js";
 import type { ServerView } from "../src/supervisor.js";
 
-// Evidence contract: codexnk-v0.1.4 / f2905ff011ff8fda607e91dfdd8f13b6083b1642:
+// Native Codex evidence fixtures (release pin in scripts/codex-release.json):
 // app-server-protocol/schema/typescript/v2/{Thread,ThreadItemsListResponse,ThreadItemEntry,ThreadItem}.ts,
 // protocol/src/protocol.rs (SessionMeta, ThreadSettingsAppliedEvent, CollabAgentSpawnEndEvent),
 // rollout/src/ordinal.rs, and core/src/tools/handlers/multi_agents/spawn.rs.

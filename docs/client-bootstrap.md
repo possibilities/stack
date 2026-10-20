@@ -126,7 +126,7 @@ descriptor is not a claim that a published release exists.
 Prerequisites describe only observed OS/architecture, executable availability
 and user-service availability; they do not prove Debian qualification or GitHub
 authentication. Reviewed plans disclose paths, hashes, byte limits, requirements
-and the shared codexnk runtime effect. Jobs show actual stages without fabricated
+and the Stack-owned official Codex runtime effect. Jobs show actual stages without fabricated
 percentages.
 
 Install/Start/Stop/Login persist a UUID and immutable input in a client-root-scoped
@@ -215,20 +215,21 @@ metadata expansion are bounded separately.
 The archive contains files/directories only, with no enclosing directory:
 
 - `stack-release.json`: the exported `bundleSchema`: version, platform,
-  architecture and exact `{codexnk:{tag,sha}}` required by Stack.
+  architecture and exact `{codex:{version,commit}}` required by Stack.
 - `bin/stack`: self-contained executable supporting `serve`, locating all owned
   resources relative to its immutable bundle; it must not rely on npx's cache,
   a shell profile or a development checkout.
 - Prebuilt platform packages, UI and dependencies, with any workspace links
   materialized safely, and a durable Node runtime needed by the launcher.
-- `runtime/codexnk-install.py`: the compatible reviewed codexnk owner installer.
-  It receives `--install --tag codexnk-v0.1.9 --sha
-  f90eede076ea40885897c5f2e165b4d48f0fb28f`. The consumer clears relocation and
-  preserves `~/.local/libexec/codexnk/codex`. Pin advances remain coordinated with
-  Stack's existing installer and AgentStart. This is consumption, not a fork patch.
+- `runtime/install-codex.py` and `runtime/codex-release.json`: Stack's installer
+  and exact official release pin, copied together from `scripts/`. The installer
+  receives `--install --version <version> --commit <commit>` from the bundle
+  contract, rejects a differing pin, verifies archive size and SHA-256, and
+  installs the full package with companions at `~/.local/libexec/stack/codex`.
+  It atomically selects `codex` there and leaves other Codex installations alone.
 
-Install is not startup. It never builds `.next` or registers a service. The shared
-codexnk path can be updated by its authoritative installer; a running process is
+Install is not startup. It never builds `.next` or registers a service. The Stack-owned
+Codex path can be updated by its bundled installer; a running process is
 not restarted. A local owned live service must first be explicitly stopped before
 another platform release is selected. Old immutable releases and platform data
 are retained; this version has no uninstall, rollback or garbage-collection API.
@@ -239,8 +240,7 @@ the client, are currently private. The UI can prepare a private, offline-install
 [candidate](client-ui-packaging.md); public ownership, publication and an actual
 public npx check remain undecided. No DMG/deb is required, but packaging-independent does not mean
 artifact-independent. Initial local runtime targets are macOS arm64 and Debian
-x64; supporting other targets needs matching codexnk releases/installer support,
-not a vendor-runtime fallback. Missing prerequisites are surfaced, not installed
+x64; supporting other targets needs matching official package pins and installer support. Missing prerequisites are surfaced, not installed
 with sudo/brew/apt or signed in automatically.
 
 ## Remote connections and phone-mediated enrollment

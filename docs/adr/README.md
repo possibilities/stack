@@ -6,8 +6,8 @@ Each row links to its complete decision record. Status is taken only from that r
 | --- | --- | --- |
 | 0001 | [Package APIs are typed libraries served by transport](0001-package-apis.md) | Unstated |
 | 0002 | [Keep local control on private Unix sockets](0002-private-control-transport.md) | Accepted |
-| 0003 | [Require the released codexnk runtime](0003-required-codexnk-runtime.md) | Accepted |
-| 0004 | [Bind managed Codex servers to Stack accounts](0004-codex-account-state.md) | Accepted |
+| 0003 | [Require the released codexnk runtime](0003-required-codexnk-runtime.md) | Superseded by [0183](0183-official-codex-native-homes.md) |
+| 0004 | [Bind managed Codex servers to Stack accounts](0004-codex-account-state.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0005 | [Bind every Codex Server to one main thread](0005-server-main-threads.md) | Superseded |
 | 0006 | [Render the Package API reference from discovery](0006-live-package-api-reference.md) | Superseded |
 | 0007 | [Filter bot change events by subscription scope](0007-bot-scoped-change-events.md) | Accepted |
@@ -18,10 +18,10 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0012 | [Keep Codex account IDs stable and ordinals presentational](0012-stable-codex-account-ids.md) | Accepted |
 | 0013 | [Run the standalone UI canvas with the owner](0013-owner-managed-ui-canvas.md) | Accepted |
 | 0014 | [Retire superseded runtime copies and drain dependent Servers in order](0014-recovery-and-shutdown-order.md) | Accepted |
-| 0015 | [Remove test input observation from Package APIs](0015-remove-test-input-observation-api.md) | Accepted |
+| 0015 | [Remove test input observation from Package APIs](0015-remove-test-input-observation-api.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0016 | [Use the UI root for live local links](0016-live-ui-index-and-system-theme.md) | Accepted |
 | 0017 | [Persist caller launch arguments with each Server](0017-persist-server-launch-arguments.md) | Accepted |
-| 0018 | [Allow a Server to start without a Codex account](0018-unbound-server-launch.md) | Accepted |
+| 0018 | [Allow a Server to start without a Codex account](0018-unbound-server-launch.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0019 | [Serve markdown twins from the local pages](0019-markdown-twins.md) | Superseded |
 | 0020 | [Admit WebSocket connections from current Package API configuration](0020-live-websocket-admission.md) | Accepted |
 | 0021 | [Connect managed Codex Servers to the owner's MCP Package APIs](0021-managed-servers-inherit-owner-mcp.md) | Accepted |
@@ -30,14 +30,14 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0024 | [Make the first canvas experiment a live, read-only workbench](0024-live-canvas-workbench.md) | Accepted |
 | 0025 | [Verify recovered app-server ownership and use per-launch sockets](0025-app-server-process-ownership.md) | Accepted |
 | 0026 | [Operate the auth Package API from the canvas](0026-canvas-auth-controls.md) | Accepted |
-| 0027 | [Materialize the default capabilities bundle for each managed Codex launch](0027-default-capabilities-bundle.md) | Accepted |
+| 0027 | [Materialize the default capabilities bundle for each managed Codex launch](0027-default-capabilities-bundle.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0028 | [Dial native realtime into the existing main thread](0028-main-thread-voice-call.md) | Accepted |
 | 0029 | [Make Bots the sole managed Codex lifecycle](0029-bots-own-codex-lifecycle.md) | Accepted |
-| 0030 | [Name the single launch configuration a Role](0030-single-role-package.md) | Superseded |
-| 0031 | [Keep role skills and extra MCP servers in private launch snapshots](0031-role-resources.md) | Accepted |
+| 0030 | [Name the single launch configuration a Role](0030-single-role-package.md) | Superseded; amended by [0183](0183-official-codex-native-homes.md) |
+| 0031 | [Keep role skills and extra MCP servers in private launch snapshots](0031-role-resources.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0032 | [Bind internal MCP connections to live Bot launches](0032-bot-mcp-invocation-context.md) | Accepted |
 | 0033 | [Deliver Package API event snapshots into subscribed Bot threads](0033-agent-facing-event-subscriptions.md) | Accepted |
-| 0034 | [Select project MCP through explicit Role trust](0034-explicit-project-trust-for-role-bots.md) | Accepted |
+| 0034 | [Select project MCP through explicit Role trust](0034-explicit-project-trust-for-role-bots.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0035 | [Launch Bots with full access by default](0035-full-access-bot-default.md) | Accepted |
 | 0036 | [Bind worker catalogs to isolated native ACP accounts](0036-account-bound-acp-foundation.md) | Accepted |
 | 0037 | [Snapshot API-owned launch defaults for each Bot](0037-bot-launch-settings.md) | Accepted |
@@ -55,7 +55,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0049 | [Operate Worker accounts from the canvas](0049-canvas-worker-account-controls.md) | Accepted |
 | 0050 | [API-driven Worker sign-in](0050-api-driven-worker-sign-in.md) | Accepted |
 | 0051 | [Explicit inspect controls](0051-explicit-inspect-controls.md) | Accepted |
-| 0052 | [Bound experimental inference to an explicit Bot account and private socket](0052-private-experimental-inference.md) | Accepted |
+| 0052 | [Bound experimental inference to an explicit Bot account and private socket](0052-private-experimental-inference.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0053 | [Submit speech on the exact connected Bot call](0053-voice-speech-submission.md) | Accepted |
 | 0054 | [Observe resources from the owner's process ancestry](0054-owner-resource-observations.md) | Accepted |
 | 0055 | [Keep agent-tree observations with Bots and Workers](0055-agent-tree-observability.md) | Accepted |
@@ -126,7 +126,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0120 | [Let Codex schedule subscribed events and chat input](0120-codex-native-input-admission.md) | Accepted |
 | 0121 | [The Roles space manages named Roles and per-Role internal MCP switches](0121-roles-space-for-named-roles.md) | Accepted |
 | 0122 | [Select a Worker's Role at creation and deliver capabilities without Role instructions](0122-worker-role-selection-without-instructions.md) | Accepted |
-| 0123 | [Inject a Role into one native CLI invocation](0123-role-injection-for-native-clis.md) | Accepted |
+| 0123 | [Inject a Role into one native CLI invocation](0123-role-injection-for-native-clis.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0124 | [Separate Manager and Worker launch defaults with instruction-capable Workers](0124-manager-and-worker-launch-defaults.md) | Accepted |
 | 0125 | [The Roles space sets the Worker default](0125-roles-space-worker-default-control.md) | Accepted |
 | 0126 | [The Roles space edits fragment conditions and previews a rendering context](0126-roles-space-fragment-conditions.md) | Accepted |
@@ -144,7 +144,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0138 | [Global developer mode gates upstream harness-release observations](0138-developer-mode-and-harness-releases.md) | Accepted |
 | 0139 | [Owner maintenance in existing spaces](0139-owner-maintenance-in-existing-spaces.md) | Accepted |
 | 0140 | [Use native stdio for Stack-provided MCP connections](0140-internal-mcp-over-stdio.md) | Accepted |
-| 0141 | [Role-owned bot.md and fenced first-turn orientation](0141-role-bot-personality-and-orientation.md) | Accepted |
+| 0141 | [Role-owned bot.md and fenced first-turn orientation](0141-role-bot-personality-and-orientation.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0142 | [Retire exact Work bodies without deleting semantic identity](0142-exact-work-body-retirement.md) | Accepted |
 | 0143 | [Retire terminal Bot queue bodies with atomic admission evidence](0143-terminal-bot-queue-body-retirement.md) | Accepted |
 | 0144 | [Brain payload retirement preserves admission and recovery authority](0144-brain-payload-retirement.md) | Accepted |
@@ -155,7 +155,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0149 | [Settings receipt retirement keeps permanent edit dedupe](0149-settings-receipt-retirement.md) | Accepted |
 | 0150 | [Auth cache cleanup selects proven pure-cache bytes only](0150-auth-pure-cache-allow-list.md) | Accepted |
 | 0151 | [Access retirement is exact expired metadata, not identity revocation](0151-exact-expired-access-history.md) | Accepted |
-| 0152 | [Independent client bootstrap and scoped desktop UI handoffs](0152-independent-client-bootstrap-and-ui-handoffs.md) | Accepted |
+| 0152 | [Independent client bootstrap and scoped desktop UI handoffs](0152-independent-client-bootstrap-and-ui-handoffs.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
 | 0153 | [Exact closed-Worker state maintenance](0153-exact-worker-state-maintenance.md) | Accepted |
 | 0154 | [Coordinate Notification sends and one-shot dismissal watches in the Server](0154-notification-send-and-watch.md) | Accepted |
 | 0155 | [Correlate asynchronous admissions with exact completion and attention reads](0155-correlated-admission-watches.md) | Accepted |
@@ -185,6 +185,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0179 | [Headless Canvas maintenance and observation lifetimes](0179-canvas-maintenance-and-observation-lifetimes.md) | Accepted |
 | 0181 | [Named standalone browsers in the Browse space](0181-browse-named-browsers.md) | Accepted |
 | 0182 | [Verify research browser capabilities in the shipped guest](0182-research-browser-runtime-capabilities.md) | Accepted |
+| 0183 | [Use official Codex packages and persistent native Bot homes](0183-official-codex-native-homes.md) | Accepted |
 
 ## Historical identifier corrections
 

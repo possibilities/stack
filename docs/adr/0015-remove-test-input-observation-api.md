@@ -1,6 +1,6 @@
 # 15. Remove test input observation from Package APIs
 
-Status: accepted, 2026-09-24. Supersedes the `inputs_changed` portion of [ADR 0007](0007-bot-scoped-change-events.md).
+Status: accepted, 2026-09-24. Supersedes the `inputs_changed` portion of [ADR 0007](0007-bot-scoped-change-events.md). [ADR 0183](0183-official-codex-native-homes.md) supersedes the retained input-middleware helper; other decisions remain in force.
 
 The pass-through observer was a test of Codex input middleware. Its `input_observe_start`, `input_observe_stop`, and `input_observe_list` operations have no current client after the UI was removed, and the in-memory log is not a useful user-facing contract. Remove those operations from the Codex Package API, along with the Codex and bots `inputs_changed` events and the unused observer implementation. This also stops exposing observed prompt text through Package API calls.
 

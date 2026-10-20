@@ -207,6 +207,7 @@ export type MainChatLive = { threadId: string | null; instance: string | null; r
   coverage: "partial"; reset: boolean; items: Array<{ turnId: string; item: Record<string, unknown>; complete: boolean; completed: boolean; omitted: boolean }> };
 /** Newest first; entries are native `{ turnId, item, startedAtMs, completedAtMs }` or an `omitted` summary. */
 export type MainChatItems = { threadId: string; data: Array<Record<string, unknown>>; nextCursor: string | null };
+/** chat_search may aggregate Bots; each hit's inherited botId pins reads to its owner. */
 export type ChatHit = Chat & { line: number; role: string; snippet: string; score: number };
 /** Receipt-time native status before send; admission and model consumption may happen later. */
 export type ChatThreadState = { status: Record<string, unknown> | null; activity: "working" | "waiting" | "idle" | "unknown"; observedAt: string; error: string | null };

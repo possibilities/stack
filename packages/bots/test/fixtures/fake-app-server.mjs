@@ -23,7 +23,7 @@ if (process.argv.includes("--device-auth")) {
     }
     res.writeHead(404).end();
   });
-  const history = process.argv[process.argv.indexOf("--history-dir") + 1];
+  const history = process.env.CODEX_HOME;
   const log = join(history, "fake-threads.jsonl");
   const entries = () => {
     try { return readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); }

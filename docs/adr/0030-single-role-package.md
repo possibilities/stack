@@ -1,6 +1,6 @@
 # 30. Name the single launch configuration a Role
 
-Status: superseded by [ADR 0118](0118-multiple-roles-and-default.md) for the singleton/default model. Accepted, 2026-09-24. Supersedes the public `capabilities` package, `bundle_*` operations, and `bundle_changed` event of [ADR 0027](0027-default-capabilities-bundle.md). Retains its fragment ordering, revision preconditions, launch snapshot, and owner MCP behavior.
+Status: superseded by [ADR 0118](0118-multiple-roles-and-default.md) for the singleton/default model. Accepted, 2026-09-24. Supersedes the public `capabilities` package, `bundle_*` operations, and `bundle_changed` event of [ADR 0027](0027-default-capabilities-bundle.md). Retains its fragment ordering, revision preconditions, launch snapshot, and owner MCP behavior. [ADR 0183](0183-official-codex-native-homes.md) supersedes the native launch configuration transport; other decisions remain in force.
 
 Stack configures one Role for every newly launched Bot. The `roles` Package API reads it with `role_snapshot`, previews rendered instructions with `role_preview`, and publishes `role_changed`; category and fragment CRUD keep their existing operation names and behavior. Bot views report `roleRevision`. The owner serves the `roles` socket, MCP, and WebSocket paths in place of `capabilities` and supplies its bound MCP URL to Bots. The canvas and markdown twins show the new names through discovery without adding controls.
 

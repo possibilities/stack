@@ -15,13 +15,51 @@ import type { StoredServer } from "../src/store.js";
 
 const fakeBin = fileURLToPath(new URL("../../test/fixtures/fake-app-server.mjs", import.meta.url));
 
+test("legacy shared history migration copies only the sanctioned lineage and recovers publication without recopying", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "stack-history-upgrade-"));
+  const rootId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", childId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", otherId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const shared = join(stateDir, "history", "sessions", "2026", "10", "19");
+  const launches: LaunchSpec[] = [];
+  const supervisor = new Supervisor({ stateDir, waitReady: async () => undefined, bindThread: async (_url, _cwd, id) => id,
+    endpoint: async () => "ws://127.0.0.1:43111", launch(spec) {
+      launches.push(spec); let finish!: (code: number | null) => void;
+      return { pid: 93, exited: new Promise(resolve => { finish = resolve; }), kill() { finish(0); } };
+    } });
+  try {
+    await mkdir(shared, { recursive: true });
+    for (const [id, parent] of [[rootId, null], [childId, rootId], [otherId, null]])
+      await writeFile(join(shared, `rollout-test-${id}.jsonl`), JSON.stringify({ type: "session_meta", payload: { id, parent_thread_id: parent } }) + "\n");
+    supervisor.store.saveServer({ id: "legacy", cwd: stateDir, pid: null, state: "stopped", url: null, codexBin: "previous-runtime",
+      account: null, launchedAccount: null, authVersion: null, runtimeRoot: null, mainThreadId: rootId, threadStarting: false, args: [] });
+    await supervisor.load();
+    const publish = supervisor.store.privatizeHistory.bind(supervisor.store);
+    supervisor.store.privatizeHistory = () => { throw new Error("publication interrupted"); };
+    await assert.rejects(supervisor.start({ id: "legacy", cwd: stateDir }), /publication interrupted/);
+    assert.equal(launches.length, 0);
+    assert.equal(supervisor.store.historyPath("legacy"), join(stateDir, "history"));
+    supervisor.store.privatizeHistory = publish;
+    const migrated = await supervisor.start({ id: "legacy", cwd: stateDir });
+    const home = supervisor.store.historyPath("legacy");
+    assert.equal(home, join(stateDir, "history", "legacy"));
+    assert.equal(launches[0]!.env.CODEX_HOME, home);
+    assert.equal(migrated.mainThreadId, rootId);
+    const copies = join(home, "sessions", "2026", "10", "19");
+    assert.deepEqual((await readdir(copies)).sort(), [rootId, childId].map(id => `rollout-test-${id}.jsonl`).sort());
+    assert.equal(await readFile(join(copies, `rollout-test-${rootId}.jsonl`), "utf8"), await readFile(join(shared, `rollout-test-${rootId}.jsonl`), "utf8"));
+    assert.equal((await readdir(shared)).length, 3, "shared source and unrelated threads remain intact");
+    await supervisor.stop("legacy");
+    await assert.rejects(lstat(join(home, "auth.json")), /ENOENT/, "stopped history cannot point into the next account's launch");
+    assert.equal((await readdir(copies)).length, 2);
+  } finally { await supervisor.stopAll(); supervisor.role.close(); supervisor.store.close(); await rm(stateDir, { recursive: true, force: true }); }
+});
+
 test("conversation reset survives owner restart with a new history namespace and keeps a reused Bot ID separate", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-reset-")), launched: LaunchSpec[] = [];
   const options: SupervisorOptions = { stateDir, waitReady: async () => undefined,
     endpoint: async () => "ws://127.0.0.1:43110", bindThread: async (_url, _cwd, id) => id,
     launch(spec) { launched.push(spec); let exit!: (value: number | null) => void;
       return { pid: 92, exited: new Promise(resolve => { exit = resolve; }), kill() { exit(0); } }; },
-    findMainThread: async () => launched.at(-1)!.args.includes(join(stateDir, "history", "one")) ? "old-root" : null,
+    findMainThread: async () => launched.at(-1)!.env.CODEX_HOME === join(stateDir, "history", "one") ? "old-root" : null,
   };
   let supervisor = new Supervisor(options);
   try {
@@ -36,7 +74,7 @@ test("conversation reset survives owner restart with a new history namespace and
     const restarted = await supervisor.start({ id: "one", cwd: stateDir });
     assert.equal(restarted.mainThreadId, null); assert.equal(await supervisor.adoptMainThread("one", restarted.url!), null);
     assert.notEqual(supervisor.store.historyPath("one"), oldPath);
-    assert.ok(launched.at(-1)!.args.includes(supervisor.store.historyPath("one")));
+    assert.equal(launched.at(-1)!.env.CODEX_HOME, supervisor.store.historyPath("one"));
     await supervisor.stop("one"); await supervisor.remove("one");
     await supervisor.start({ id: "one", cwd: stateDir });
     assert.notEqual(supervisor.store.stateIdentity("one").incarnation, identity.incarnation);
@@ -134,7 +172,7 @@ test("start is idempotent and stop is idempotent", async () => {
     assert.equal(launched[0]?.env.AGENT_BROWSER_CONFIG, "alpha:ws://127.0.0.1:41000");
     assert.equal(launched[0]?.bin, codexRuntimePath());
     assert.deepEqual(launched[0]?.args.slice(0, 3), ["app-server", "--listen", "ws://127.0.0.1:41000"]);
-    assert.deepEqual(launched[0]?.args.filter((arg) => arg.startsWith("--") && arg !== "--listen"), ["--enable", "--identity", "--capabilities", "--history-dir"]);
+    assert.deepEqual(launched[0]?.args.filter((arg) => arg.startsWith("--") && arg !== "--listen"), ["--enable"]);
     assert.equal(first.account, supervisor.store.listAccounts()[0]?.id);
     assert.equal(first.mainThreadId, null);
     assert.equal(launched[0]?.cwd, cwd);
@@ -233,7 +271,7 @@ test("launch arguments survive owner recovery and can change only while stopped"
     await first.start({ cwd, id: "configured" });
     await first.start({ cwd, id: "configured", args: ["-c", 'model="gpt-5.4"'] });
     await assert.rejects(first.start({ cwd, id: "configured", args: ["-c", 'model="gpt-5.6"'] }), /stop it before changing args/);
-    await assert.rejects(first.start({ cwd, id: "configured", args: ["--listen", "other"] }), /stack owns these axes/);
+    await assert.rejects(first.start({ cwd, id: "configured", args: ["--listen", "other"] }), /Stack owns the app-server endpoint/);
     assert.equal(launches.length, 1);
     await first.stop("configured");
 
@@ -264,12 +302,12 @@ test("launch arguments survive owner recovery and can change only while stopped"
 test("saved Bot settings survive defaults changes and override only when stopped", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-settings-"));
   const cwd = await mkdtemp(join(tmpdir(), "stack-settings-cwd-"));
-  const launches: string[][] = [];
+  const launches: LaunchSpec[] = [];
   const options: SupervisorOptions = {
     stateDir,
     endpoint: async () => `ws://127.0.0.1:${43900 + launches.length}`,
     launch(spec) {
-      launches.push(spec.args);
+      launches.push(spec);
       let finish: (code: number | null) => void = () => undefined;
       const child: RunningChild = { pid: 500 + launches.length, exited: new Promise((resolve) => { finish = resolve; }), kill() { child.exitCode = 0; finish(0); } };
       return child;
@@ -283,7 +321,7 @@ test("saved Bot settings survive defaults changes and override only when stopped
     first.store.setBotDefaults({ model: "gpt-new", reasoningEffort: "high", sandboxMode: "read-only" });
     const created = await first.start({ id: "one", cwd, settings: { model: "gpt-local" } });
     assert.deepEqual(created.settings, { model: "gpt-local", reasoningEffort: "high", sandboxMode: "read-only", approvalPolicy: "never" });
-    assert.deepEqual(launches[0]?.slice(3, 11), ["-c", 'model="gpt-local"', "-c", 'model_reasoning_effort="high"', "-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"']);
+    assert.deepEqual(launches[0]?.args.slice(3, 11), ["-c", 'model="gpt-local"', "-c", 'model_reasoning_effort="high"', "-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"']);
     await assert.rejects(first.start({ id: "one", cwd, settings: { reasoningEffort: "medium" } }), /stop it before changing settings/);
     await first.stop("one");
     first.store.setBotDefaults({ model: "gpt-future", reasoningEffort: "low" });
@@ -292,11 +330,11 @@ test("saved Bot settings survive defaults changes and override only when stopped
     assert.equal(recovered.store.botDefaults().model, "gpt-future");
     await recovered.resumeAll();
     assert.equal(recovered.list()[0]?.settings?.model, "gpt-local");
-    assert.deepEqual(launches[1]?.slice(3, 7), ["-c", 'model="gpt-local"', "-c", 'model_reasoning_effort="high"']);
+    assert.deepEqual(launches[1]?.args.slice(3, 7), ["-c", 'model="gpt-local"', "-c", 'model_reasoning_effort="high"']);
     await recovered.stop("one");
     const changed = await recovered.start({ id: "one", cwd, settings: { reasoningEffort: "medium" } });
     assert.equal(changed.settings?.reasoningEffort, "medium");
-    assert.equal(launches[2]?.[6], 'model_reasoning_effort="medium"');
+    assert.equal(launches[2]?.args[6], 'model_reasoning_effort="medium"');
   } finally {
     await recovered?.stopAll();
     await recovered?.runtime.close();
@@ -313,7 +351,7 @@ test("saved Bot settings survive defaults changes and override only when stopped
 test("owner MCP connections are materialized in each launch bundle without persisting as caller arguments", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-mcp-launch-"));
   const cwd = await mkdtemp(join(tmpdir(), "stack-mcp-cwd-"));
-  const launches: string[][] = [];
+  const launches: LaunchSpec[] = [];
   const { internalMcpLaunches, workspaceRoot } = await import("@stack/api");
   const exposed = ["notify"];
   const supervisor = new Supervisor({
@@ -321,7 +359,7 @@ test("owner MCP connections are materialized in each launch bundle without persi
     endpoint: async () => `ws://127.0.0.1:${43400 + launches.length}`,
     mcpServers: async (botId, endpoint, role) => Object.fromEntries(Object.entries(await internalMcpLaunches(workspaceRoot(import.meta.dirname), { kind: "bot", botId, endpoint, role }, { STACK_STATE_DIR: stateDir })).filter(([name]) => exposed.includes(name))),
     launch(spec) {
-      launches.push(spec.args);
+      launches.push(spec);
       let finish: (code: number | null) => void = () => undefined;
       const child: RunningChild = {
         pid: 200 + launches.length,
@@ -337,14 +375,14 @@ test("owner MCP connections are materialized in each launch bundle without persi
     await supervisor.load();
     seedAccount(supervisor);
     await supervisor.start({ id: "with-mcp", cwd, args: ["-c", 'model="gpt-5.4"'] });
-    const firstRoot = launches[0]?.[launches[0].indexOf("--capabilities") + 1];
+    const firstRoot = launches[0]?.env.CODEX_HOME;
     assert.ok(firstRoot);
     assert.match(await readFile(join(firstRoot, "config.toml"), "utf8"), /\[mcp_servers.notify\]/);
     assert.deepEqual(supervisor.store.servers()[0]?.args, ["-c", 'model="gpt-5.4"']);
     await supervisor.stop("with-mcp");
     exposed.push("brain");
     await supervisor.start({ id: "with-mcp", cwd });
-    const secondRoot = launches[1]?.[launches[1].indexOf("--capabilities") + 1];
+    const secondRoot = launches[1]?.env.CODEX_HOME;
     assert.ok(secondRoot);
     assert.match(await readFile(join(secondRoot, "config.toml"), "utf8"), /\[mcp_servers.brain\]/);
     assert.equal(supervisor.list()[0]?.mainThreadId, null);
@@ -357,17 +395,17 @@ test("owner MCP connections are materialized in each launch bundle without persi
   }
 });
 
-test("Bot launch passes only matching Role project trust to the private codexnk config", async () => {
+test("Bot launch passes only matching Role project trust to the private official Codex config", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-project-mcp-launch-"));
   const project = join(stateDir, "project");
   const cwd = join(project, "nested");
   await mkdir(cwd, { recursive: true });
   await mkdir(join(project, ".git"));
-  const launches: string[][] = [];
+  const launches: LaunchSpec[] = [];
   const supervisor = new Supervisor({
     stateDir, endpoint: async () => `ws://127.0.0.1:${43500 + launches.length}`,
     launch(spec) {
-      launches.push(spec.args);
+      launches.push(spec);
       let finish: (code: number | null) => void = () => undefined;
       const child: RunningChild = { pid: 300 + launches.length, exited: new Promise((resolve) => { finish = resolve; }), kill() { child.exitCode = 0; finish(0); } };
       return child;
@@ -379,13 +417,13 @@ test("Bot launch passes only matching Role project trust to the private codexnk 
     const contents = supervisor.role.role(supervisor.role.catalog().defaultRoleId!);
     const role = contents.createTrustedProject(0, project, "Explicit project MCP");
     await supervisor.start({ id: "project-bot", cwd });
-    const firstRoot = launches[0]?.[launches[0].indexOf("--capabilities") + 1];
+    const firstRoot = launches[0]?.env.CODEX_HOME;
     assert.ok(firstRoot);
     assert.match(await readFile(join(firstRoot, "config.toml"), "utf8"), /\[projects\..*\]\ntrust_level = "trusted"/);
     await supervisor.stop("project-bot");
     contents.updateTrustedProject(role.revision, role.trustedProjects[0]!.id, { enabled: false });
     await supervisor.start({ id: "project-bot", cwd });
-    const secondRoot = launches[1]?.[launches[1].indexOf("--capabilities") + 1];
+    const secondRoot = launches[1]?.env.CODEX_HOME;
     assert.ok(secondRoot);
     assert.doesNotMatch(await readFile(join(secondRoot, "config.toml"), "utf8"), /\[projects\./);
   } finally {
@@ -405,8 +443,7 @@ test("a new Server launches with credentials reconciled from an older Server", a
   const supervisor = new Supervisor({ stateDir,
     endpoint: async () => "ws://127.0.0.1:43210",
     launch(spec) {
-      const at = spec.args.indexOf("--identity");
-      launchedWith = readFileSync(join(spec.args[at + 1]!, "auth.json"), "utf8");
+      launchedWith = readFileSync(join(spec.env.CODEX_HOME!, "auth.json"), "utf8");
       return { pid: 12345, exited: new Promise(() => undefined), kill() {} };
     },
     waitReady: async () => undefined,
@@ -442,8 +479,7 @@ test("a stopped Server resumes after re-sign-in while preserving its old runtime
     endpoint: async () => "ws://127.0.0.1:43211",
     launch(spec) {
       launchedArgs = spec.args;
-      const at = spec.args.indexOf("--identity");
-      launchedWith = readFileSync(join(spec.args[at + 1]!, "auth.json"), "utf8");
+      launchedWith = readFileSync(join(spec.env.CODEX_HOME!, "auth.json"), "utf8");
       return { pid: 12346, exited: new Promise(() => undefined), kill() {} };
     },
     waitReady: async () => undefined,
@@ -567,7 +603,7 @@ test("model, effort, and access defaults precede caller overrides, and owned lau
   assert.deepEqual(appServerArgs([], url, { ...DEFAULT_BOT_SETTINGS, model: "gpt-custom", reasoningEffort: "high" }).slice(3, 7), ["-c", 'model="gpt-custom"', "-c", 'model_reasoning_effort="high"']);
   assert.throws(() => appServerArgs(["--listen", "ws://127.0.0.1:1"], url), /do not pass --listen/);
   assert.throws(() => appServerArgs(["--listen=ws://127.0.0.1:1"], url), /do not pass --listen/);
-  assert.throws(() => appServerArgs(["--identity", "/tmp/other"], url), /stack owns these axes/);
+  assert.throws(() => appServerArgs(["-c", 'sqlite_home="/tmp/other"'], url), /managed by Stack/);
 
   const stateDir = await mkdtemp(join(tmpdir(), "stack-args-"));
   const cwd = await mkdtemp(join(tmpdir(), "stack-args-cwd-"));
@@ -777,10 +813,10 @@ test("recovery reaps a real recorded app-server with a spaced socket path", { sk
   await Promise.all(["app", "logs", "history"].map((name) => mkdir(join(stateDir, name))));
   const child = launchChild({
     bin: fakeBin,
-    args: ["app-server", "--listen", url, "--history-dir", join(stateDir, "history")],
+    args: ["app-server", "--listen", url],
     cwd: stateDir,
     logPath: join(stateDir, "logs", "prior.log"),
-    env: { ...process.env },
+    env: { ...process.env, CODEX_HOME: join(stateDir, "history") },
   });
   const supervisor = new Supervisor({ stateDir, graceMs: 1_000 });
   try {
@@ -1093,7 +1129,7 @@ test("a legacy unconfirmed thread start still blocks automatic recovery", async 
   }
 });
 
-test("a persisted live server from another runtime is not returned as codexnk", async () => {
+test("a persisted live server from another runtime is not returned as the official runtime", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "stack-legacy-"));
   const cwd = await mkdtemp(join(tmpdir(), "stack-legacy-cwd-"));
   let launched = false;

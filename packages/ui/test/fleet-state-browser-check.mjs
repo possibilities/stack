@@ -27,8 +27,8 @@ const external = await mkdtemp(join("/tmp", "as-fleet-ext-"));
 const evidence = process.env.FLEET_STATE_EVIDENCE_DIR ?? join(dir, "evidence");
 await mkdir(evidence, { recursive: true });
 // The fake runtime is found through HOME; nothing of the live installation is used.
-await mkdir(join(home, ".local", "libexec", "codexnk"), { recursive: true });
-await symlink(join(root, "packages", "bots", "test", "fixtures", "fake-app-server.mjs"), join(home, ".local", "libexec", "codexnk", "codex"));
+await mkdir(join(home, ".local", "libexec", "stack", "codex"), { recursive: true });
+await symlink(join(root, "packages", "bots", "test", "fixtures", "fake-app-server.mjs"), join(home, ".local", "libexec", "stack", "codex", "codex"));
 const savedHome = process.env.HOME;
 process.env.HOME = home;
 const env = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("STACK_"))), STACK_STATE_DIR: dir, NEXT_TELEMETRY_DISABLED: "1" };

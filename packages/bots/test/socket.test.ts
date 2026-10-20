@@ -24,7 +24,7 @@ test("bots own the complete app-server lifecycle on one socket", { timeout: 120_
   const external = await mkdtemp(join(tmpdir(), "stack-bots-external-"));
   const savedHome = process.env.HOME;
   process.env.HOME = home;
-  const runtime = join(home, ".local", "libexec", "codexnk", "codex");
+  const runtime = join(home, ".local", "libexec", "stack", "codex", "codex");
   await mkdir(join(runtime, ".."), { recursive: true });
   await symlink(fakeBin, runtime);
   const store = new StateStore(stateDir);

@@ -87,6 +87,10 @@ async function setup({ serve = true } = {}) {
   await mkdir(home); await mkdir(bin);
   await writeFile(join(home, "ambient"), "ordinary home untouched");
   for (const harness of ["claude", "codex", "opencode"]) { await writeFile(join(bin, harness), fixture); await chmod(join(bin, harness), 0o700); }
+  const runtime = join(home, ".local", "libexec", "stack", "codex");
+  await mkdir(runtime, { recursive: true });
+  await writeFile(join(runtime, "codex"), fixture, { mode: 0o700 });
+  await writeFile(join(bin, "codex"), `#!${process.execPath}\nthrow new Error('Stack must not launch the ambient Codex shim');\n`, { mode: 0o700 });
   const env = { ...process.env, HOME: home, STACK_STATE_DIR: state, STACK_INSTALL_BIN_DIR: bin, PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: join(home, ".codex"),
     CLAUDE_CONFIG_DIR: join(home, ".claude"), XDG_DATA_HOME: join(home, "data"), XDG_CONFIG_HOME: join(home, "config"), XDG_STATE_HOME: join(home, "state"), XDG_CACHE_HOME: join(home, "cache"),
     OPENCODE_TEST_HOME: home, OPENCODE_DB: join(home, "ordinary.db"), OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_DISABLE_FFF: "1",

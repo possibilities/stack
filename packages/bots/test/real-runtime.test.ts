@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -9,8 +9,9 @@ import { codexRuntimePath } from "../src/paths.js";
 import { Supervisor, appServerArgs, waitForReady } from "../src/supervisor.js";
 import { appServerSocket } from "../src/threads.js";
 import { chatRpc } from "../src/chats.js";
+import { ChatIndex } from "../src/chats.js";
 
-test("installed codexnk consumes and refreshes Role bot.md without replaying the orientation", { skip: !process.env.STACK_TEST_REAL_CODEX, timeout: 30_000 }, async () => {
+test("installed official Codex consumes and refreshes Role bot.md without replaying the orientation", { skip: !process.env.STACK_TEST_REAL_CODEX, timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-orientation-native-"));
   const requests: Record<string, unknown>[] = [];
   let nextRequest: (() => void) | undefined;
@@ -29,13 +30,28 @@ test("installed codexnk consumes and refreshes Role bot.md without replaying the
     response.end();
   });
   const supervisor = new Supervisor({ stateDir: root });
+  let migrated: Supervisor | undefined;
   try {
     await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
     const baseUrl = `http://127.0.0.1:${(model.address() as { port: number }).port}/v1`;
     const claims = Buffer.from(JSON.stringify({ email: "fixture@example.test", "https://api.openai.com/auth": { chatgpt_account_id: "orientation-fixture" } })).toString("base64url");
-    const account = supervisor.store.addAccount(JSON.stringify({ tokens: { refresh_token: "fixture-only", access_token: "fixture-only", id_token: `e30.${claims}.fixture` } })).id;
+    const credential = (token: string, stamp: string) => JSON.stringify({ last_refresh: stamp,
+      tokens: { refresh_token: token, access_token: "fixture-only", id_token: `e30.${claims}.fixture` } });
+    const account = supervisor.store.addAccount(credential("fixture-only", "2026-10-01T00:00:00Z")).id;
     const role = supervisor.role.role(supervisor.role.catalog().defaultRoleId!);
     role.update(0, { botMarkdown: "Be a measured research collaborator; your personality marker is native-orientation-fixture." });
+    const skill = role.createSkill(role.snapshot().revision, "native-role-fixture", "Disposable native Role skill", "Do nothing.").skills[0]!;
+    // A real stdio peer proves native discovery, without an external service or model call.
+    const mcpPeer = `const readline = require('node:readline');
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const m = JSON.parse(line); if (m.id === undefined) return;
+  const result = m.method === 'initialize' ? { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+    : m.method === 'tools/list' ? { tools: [{ name: 'inspect_fixture', description: 'Read the disposable fixture', inputSchema: { type: 'object', properties: {} } }] }
+    : { content: [{ type: 'text', text: 'fixture' }] };
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+});`;
+    const mcp = role.createMcpServer(role.snapshot().revision, "native-role-fixture", "Disposable native Role MCP",
+      { type: "stdio", command: process.execPath, args: ["-e", mcpPeer] }).mcpServers[0]!;
     await supervisor.load();
     let finish!: () => void;
     const completed = new Promise<void>((resolve) => { finish = resolve; });
@@ -53,15 +69,23 @@ test("installed codexnk consumes and refreshes Role bot.md without replaying the
     const sent = JSON.stringify(requests[0]);
     assert.match(sent, /native-orientation-fixture/);
     assert.match(sent, /initialization request from Stack/);
+    const skills = await chatRpc(bot.url!, "skills/list", { cwds: [root], forceReload: true });
+    assert.match(JSON.stringify(skills), /native-role-fixture/);
+    const servers = await chatRpc(bot.url!, "mcpServerStatus/list", {});
+    assert.match(JSON.stringify(servers), /inspect_fixture/);
     const history = await chatRpc(bot.url!, "thread/turns/list", { threadId: bot.mainThreadId, itemsView: "full" });
     assert.match(JSON.stringify(history), /research collaborator/);
     assert.equal((history.data as unknown[]).length, 1);
     role.update(role.snapshot().revision, { botMarkdown: "Your current personality marker is native-next-launch-personality." });
+    role.updateSkill(role.snapshot().revision, skill.id, { enabled: false });
+    role.updateMcpServer(role.snapshot().revision, mcp.id, { enabled: false });
     await supervisor.stop("one");
     const restarted = await supervisor.start({ id: "one", cwd: root });
     assert.equal(restarted.mainThreadId, bot.mainThreadId);
     assert.equal(restarted.orientation?.state, "completed");
     assert.equal(requests.length, 1, "resuming the exact root does not trigger a new model request");
+    assert.doesNotMatch(JSON.stringify(await chatRpc(restarted.url!, "skills/list", { cwds: [root], forceReload: true })), /native-role-fixture/);
+    assert.doesNotMatch(JSON.stringify(await chatRpc(restarted.url!, "mcpServerStatus/list", {})), /inspect_fixture/);
     const follow = async (url: string, text: string) => {
       const observed = new Promise<void>((resolve) => { nextRequest = resolve; });
       await chatRpc(url, "turn/start", { threadId: bot.mainThreadId, input: [{ type: "text", text, text_elements: [] }] });
@@ -81,42 +105,61 @@ test("installed codexnk consumes and refreshes Role bot.md without replaying the
     const snapshots = input.filter((item) => item.role === "developer").flatMap((item) => item.content ?? []).map((part) => part.text ?? "").filter((text) => text.startsWith("[Stack Role launch instructions]"));
     assert.match(snapshots.at(-1)!, /current Role supplies no instruction Fragments or bot.md personality/);
     assert.doesNotMatch(snapshots.at(-1)!, /native-next-launch-personality/);
+    // Codex used to own and delete the credential copy during shutdown. A final
+    // refresh must survive even when the watcher debounce has not run yet.
+    const refreshed = credential("fixture-refreshed", "2026-10-02T00:00:00Z");
+    await writeFile(join(root, "history", "one", "auth.json"), refreshed);
+    await supervisor.stop("one");
+    assert.equal(supervisor.store.accountCredentials(account).auth, refreshed);
+    const index = new ChatIndex(root, id => supervisor.store.historyPath(id));
+    try {
+      await index.refresh("one", bot.mainThreadId);
+      assert.equal(index.search("one", bot.mainThreadId, "research collaborator", 10, 0)[0]?.threadId, bot.mainThreadId);
+    } finally { index.close(); }
+
+    // Existing shared stores retain rollouts, without the new persistent home DBs.
+    // Verify migration and native hydration from those bytes, using the exact root.
+    const legacyState = join(root, "legacy");
+    await mkdir(join(legacyState, "history"), { recursive: true });
+    await cp(join(root, "history", "one", "sessions"), join(legacyState, "history", "sessions"), { recursive: true });
+    migrated = new Supervisor({ stateDir: legacyState });
+    migrated.store.saveServer({ ...supervisor.store.servers()[0]!, account: null, launchedAccount: null,
+      authVersion: null, runtimeRoot: null, roleRoot: null, orientation: null });
+    await migrated.load();
+    const legacy = await migrated.start({ id: "one", cwd: root });
+    assert.equal(legacy.mainThreadId, bot.mainThreadId);
+    assert.equal(migrated.store.historyPath("one"), join(legacyState, "history", "one"));
+    const restored = await chatRpc(legacy.url!, "thread/turns/list", { threadId: bot.mainThreadId, itemsView: "full" });
+    assert.match(JSON.stringify(restored), /research collaborator/);
+    assert.equal(requests.length, 3, "history migration and resume admit no model turn");
   } finally {
+    if (migrated) { await migrated.stopAll(); await migrated.runtime.close(); migrated.role.close(); migrated.store.close(); }
     await supervisor.stopAll(); await supervisor.runtime.close(); supervisor.role.close(); supervisor.store.close();
     await new Promise<void>((resolve) => model.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("installed codexnk retains its private runtime and honors Bot launch defaults", { skip: !process.env.STACK_TEST_REAL_CODEX }, async () => {
+test("installed official Codex honors Bot launch defaults", { skip: !process.env.STACK_TEST_REAL_CODEX }, async () => {
   const root = await mkdtemp(join(tmpdir(), "stack-settings-native-"));
-  const identity = join(root, "identity");
-  const capabilities = join(root, "capabilities");
-  const history = join(root, "history");
+  const home = join(root, "codex");
   const runtime = join(root, "runtime");
-  await Promise.all([identity, capabilities, history, runtime].map((path) => mkdir(path, { mode: 0o700 })));
-  const fakeAuth = JSON.stringify({ tokens: { refresh_token: "fixture-only" } });
-  await writeFile(join(identity, "auth.json"), fakeAuth, { mode: 0o600 });
+  await Promise.all([home, runtime].map((path) => mkdir(path, { mode: 0o700 })));
+  const claims = Buffer.from(JSON.stringify({ email: "native-account@example.test", "https://api.openai.com/auth": { chatgpt_account_id: "native-account-fixture" } })).toString("base64url");
+  const fakeAuth = JSON.stringify({ last_refresh: new Date().toISOString(), tokens: {
+    refresh_token: "fixture-only", access_token: "fixture-only", id_token: `e30.${claims}.fixture` } });
+  await writeFile(join(home, "auth.json"), fakeAuth, { mode: 0o600 });
   const url = `unix://${join(root, "app.sock")}`;
-  const env = { ...process.env, TMPDIR: runtime, STACK_STATE_DIR: root };
-  for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL", "CODEX_HOME"]) delete (env as NodeJS.ProcessEnv)[key];
+  const env = { ...process.env, TMPDIR: runtime, STACK_STATE_DIR: root, CODEX_HOME: home, CODEX_SQLITE_HOME: home };
+  for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL"]) delete (env as NodeJS.ProcessEnv)[key];
   const child = spawn(codexRuntimePath(), [...appServerArgs([], url, undefined, { model: "gpt-6-sol", model_reasoning_effort: "medium", sandbox_mode: "danger-full-access", approval_policy: "never",
     model_context_window: 120_000, model_auto_compact_token_limit_scope: "body_after_prefix", "agents.default_subagent_reasoning_effort": "high",
-    "features.hooks": false, "features.multi_agent_v2.enabled": true, "features.multi_agent_v2.max_concurrent_threads_per_session": 3 }), "--identity", identity, "--capabilities", capabilities, "--history-dir", history], {
+    "features.hooks": false, "features.multi_agent_v2.enabled": true, "features.multi_agent_v2.max_concurrent_threads_per_session": 3 }), "-c", 'cli_auth_credentials_store="file"'], {
     env, cwd: root, stdio: "ignore",
   });
   let ws: ReturnType<typeof appServerSocket> | undefined;
   try {
     await waitForReady(url, new Promise((resolve) => child.once("exit", resolve)), 10_000);
-    let home: string | null = null;
-    for (let i = 0; i < 100 && !home; i += 1) {
-      const children = await readdir(runtime);
-      for (const name of children) {
-        if ((await stat(join(runtime, name, "config.toml")).catch(() => null))?.isFile()) home = join(runtime, name);
-      }
-      if (!home) await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-    assert.ok(home, "codexnk should create its retained runtime inside TMPDIR");
     assert.equal(await readFile(join(home, "auth.json"), "utf8"), fakeAuth);
     ws = appServerSocket(url);
     await new Promise<void>((resolve, reject) => { ws!.once("open", () => resolve()); ws!.once("error", reject); });
@@ -136,6 +179,8 @@ test("installed codexnk retains its private runtime and honors Bot launch defaul
     await request(1, "initialize", { clientInfo: { name: "stack-test", version: "0.0.0" }, capabilities: { experimentalApi: true, requestAttestation: false } });
     ws.send(JSON.stringify({ method: "initialized" }));
     const result = await request(2, "config/read", { includeLayers: false, cwd: root });
+    const account = await request(3, "account/read", { refreshToken: false });
+    assert.match(JSON.stringify(account), /native-account@example.test/, "native account reads use this invocation's credential file");
     const config = result.config as { model?: string; model_reasoning_effort?: string; approval_policy?: string; sandbox_mode?: string };
     assert.equal(config.model, "gpt-6-sol");
     assert.equal(config.model_reasoning_effort, "medium");

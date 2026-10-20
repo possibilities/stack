@@ -138,7 +138,7 @@ export class ChatIndex {
         if (entry.isDirectory()) {
           // Legacy shared history was date-partitioned. Never walk another Bot's
           // private subtree just because it resides beneath history/.
-          if (!sharedTop || /^\d{4}$/.test(entry.name)) await visit(path);
+          if (!sharedTop || /^\d{4}$/.test(entry.name) || ["sessions", "archived_sessions"].includes(entry.name)) await visit(path);
           continue;
         }
         if (!entry.isFile() || !/^rollout-.*-[0-9a-f-]{36}\.jsonl$/i.test(entry.name)) continue;
@@ -159,7 +159,7 @@ export class ChatIndex {
         const meta = object(first.payload);
         const id = text(meta.id);
         // Reverts retain SessionMeta.id but use a fresh rollout ID in the filename
-        // (codexnk protocol.rs HistoryPosition). The owned metadata is identity.
+        // (native HistoryPosition). The owned metadata is identity.
         if (first.type !== "session_meta" || !uuid.test(id)) continue;
         const parentId = parent(meta);
         if (parentId === undefined) continue;
@@ -314,20 +314,26 @@ export class ChatIndex {
       .map((row) => { const { path: _path, ...chat } = this.row(botId, row.threadId)!; return chat; });
   }
   search(botId: string, mainThreadId: string | null, query: string, limit: number, offset: number): ChatHit[] {
+    return this.searchHistories([{ id: botId, mainThreadId }], query, limit, offset);
+  }
+  searchHistories(bots: { id: string; mainThreadId: string | null }[], query: string, limit: number, offset: number): ChatHit[] {
     const terms = query.match(/[\p{L}\p{N}]+/gu) ?? [];
     if (!terms.length) return [];
     const match = terms.map((term) => `"${term}"`).join(" ");
-    const rows = this.db.prepare(`SELECT m.thread_id AS threadId,m.line,m.role,
+    const roots = new Map(bots.map(bot => [bot.id, bot.mainThreadId]));
+    const rows = this.db.prepare(`SELECT m.bot_id AS botId,m.thread_id AS threadId,m.line,m.role,
       snippet(messages_fts,0,'[',']',' … ',48) AS snippet,bm25(messages_fts) AS score
       FROM messages_fts JOIN messages m ON m.id=messages_fts.rowid
-      WHERE messages_fts MATCH ? AND m.bot_id=? ORDER BY score LIMIT 50000`).all(match, botId) as
-      { threadId: string; line: number; role: string; snippet: string; score: number }[];
+      WHERE messages_fts MATCH ? AND m.bot_id IN (SELECT value FROM json_each(?))
+      ORDER BY score,m.bot_id,m.thread_id,m.line LIMIT 50000`).all(match, JSON.stringify([...roots.keys()])) as
+      { botId: string; threadId: string; line: number; role: string; snippet: string; score: number }[];
     const seen = new Set<string>();
     return rows.filter((row) => {
-      if (seen.has(row.threadId) || !this.allowed(botId, row.threadId, mainThreadId)) return false;
-      seen.add(row.threadId); return true;
+      const key = `${row.botId}/${row.threadId}`;
+      if (seen.has(key) || !this.allowed(row.botId, row.threadId, roots.get(row.botId) ?? null)) return false;
+      seen.add(key); return true;
     }).slice(offset, offset + limit).map((row) => {
-      const { path: _path, ...chat } = this.row(botId, row.threadId)!;
+      const { path: _path, ...chat } = this.row(row.botId, row.threadId)!;
       return { ...chat, line: row.line, role: row.role, snippet: row.snippet.slice(0, 2048), score: row.score };
     });
   }

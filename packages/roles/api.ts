@@ -48,7 +48,7 @@ const internalServer = z.strictObject({ name: z.string().describe("Stable connec
   included: z.boolean().describe("Whether Role policy selects this connection for the requested harness. Codex Role injection also omits bridges unavailable in its live upstream catalog."), selectionReason: capabilitySelectionReason });
 const launchPreview = z.strictObject({
   roleId, revision, harness: capabilityHarness.nullable().describe("Capability-selection harness; null means unspecified, not inferred from instruction context."),
-  instructions: z.strictObject({ bytes: count.describe("UTF-8 size of instruction fragments."), botBytes: count.describe("UTF-8 size of Bot SYSTEM_APPEND.md, including bot.md."), limitBytes: count, fragments: count.describe("Fragments that render.") }),
+  instructions: z.strictObject({ bytes: count.describe("UTF-8 size of instruction fragments."), botBytes: count.describe("UTF-8 size of Bot developer instructions, including bot.md."), limitBytes: count, fragments: count.describe("Fragments that render.") }),
   skills: z.array(z.strictObject({ id, name: resourceName, description: resourceDescription, files: count.describe("Supporting files beside SKILL.md."),
     bytes: count.describe("Decoded size of the body and supporting files.") })).describe("Skills selected for the requested harness, in order; each becomes skills/<name>/SKILL.md."),
   internalMcpServers: z.array(internalServer).describe("The default MCP fleet, stored enablement and effective harness selection. Codex Role injection checks bridge availability at launch."),

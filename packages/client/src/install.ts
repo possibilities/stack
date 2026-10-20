@@ -21,7 +21,7 @@ export function installPlan(state: ClientState, input: Release) {
   return { release, directory, platformState: join(state.root, "platform", "state"),
     requires: ["Node.js >=24", "python3", "GitHub CLI (gh)", process.platform === "darwin" ? "launchd user session" : "Debian with systemd user session"],
     effects: ["download pinned archive", "verify SHA-256 and size", "extract to a new private release",
-      "invoke codexnk's pinned release installer at ~/.local/libexec/codexnk (no workshop required)", "select installed release"],
+      "install the complete pinned official Codex package at ~/.local/libexec/stack/codex", "select installed release"],
     startsPlatform: false, changesLogin: false };
 }
 
@@ -76,17 +76,16 @@ export async function installRelease(state: ClientState, release: Release, progr
     if (manifest.version !== release.version || manifest.platform !== release.platform || manifest.architecture !== release.architecture) throw new Error("release_manifest_mismatch");
     // The launcher must be self-contained: absolute resources relative to its bundle,
     // with Node and the built UI supplied by the release producer. Runtime installation
-    // stays with codexnk's authoritative installer, not a competing downloader.
+    // uses the same official-package installer as checkout setup.
     const launcher = join(unpacked, "bin", "stack");
     if (!(await lstat(launcher)).isFile()) throw new Error("release_launcher_missing");
     await chmod(launcher, 0o700); await access(launcher, constants.X_OK);
-    const installer = join(unpacked, "runtime", "codexnk-install.py");
+    const installer = join(unpacked, "runtime", "install-codex.py");
     if (!(await lstat(installer)).isFile()) throw new Error("runtime_installer_missing");
     progress("runtime_install");
-    const env = { ...process.env }; delete env.CODEXNK_INSTALL_ROOT;
-    await new Promise<void>((resolve, reject) => execFile("python3", [installer, "--install", "--tag", manifest.codexnk.tag, "--sha", manifest.codexnk.sha],
-      { env, timeout: 600_000, maxBuffer: 65_536, signal }, error => error ? reject(new Error("runtime_install_failed")) : resolve()));
-    await access(join(homedir(), ".local", "libexec", "codexnk", "codex"), constants.X_OK);
+    await new Promise<void>((resolve, reject) => execFile("python3", [installer, "--install", "--version", manifest.codex.version, "--commit", manifest.codex.commit],
+      { timeout: 600_000, maxBuffer: 65_536, signal }, error => error ? reject(new Error("runtime_install_failed")) : resolve()));
+    await access(join(homedir(), ".local", "libexec", "stack", "codex", "codex"), constants.X_OK);
     await writeFile(join(unpacked, ".stack-client-release.json"), JSON.stringify(release), { mode: 0o600, flag: "wx" });
     progress("selecting");
     try { await rename(unpacked, plan.directory); }

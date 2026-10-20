@@ -276,6 +276,7 @@ test("the api package serves structured documents for every workspace package", 
     assert.deepEqual(Object.keys(speech.outputSchema.properties ?? {}).sort(), ["sessionId", "status"]);
     assert.equal(speech.annotations.idempotentHint, undefined);
     assert.deepEqual(Object.keys(bots.operations.find((operation) => operation.name === "chat_search")?.inputSchema.properties ?? {}).sort(), ["botId", "limit", "offset", "query"]);
+    assert.equal((bots.operations.find((operation) => operation.name === "chat_search")?.inputSchema.required as string[]).includes("botId"), false, "history search can aggregate Bot homes");
     assert.deepEqual(Object.keys(bots.operations.find((operation) => operation.name === "chat_records")?.outputSchema.properties ?? {}).sort(), ["nextLine", "records"]);
     for (const name of ["chat_send", "chat_open", "chat_steer", "chat_enqueue"]) {
       const output = bots.operations.find((operation) => operation.name === name)!.outputSchema;

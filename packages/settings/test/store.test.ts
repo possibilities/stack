@@ -48,8 +48,8 @@ test("durable edits fence concurrent writers and retries, and preserve native nu
 });
 
 test("managed configuration paths and published native schema stay on the consumer runtime pin", async () => {
-  const installer = await readFile(new URL("../../../../scripts/install.sh", import.meta.url), "utf8");
-  assert.equal(source.revision, installer.match(/^integration_sha=([a-f0-9]{40})$/m)?.[1]);
+  const release = JSON.parse(await readFile(new URL("../../../../scripts/codex-release.json", import.meta.url), "utf8"));
+  assert.equal(source.revision, release.commit);
   assert.equal(CODEX_REVISION, source.revision);
   type Schema = boolean | { $ref?: string; properties?: Record<string, Schema>; anyOf?: Schema[]; allOf?: Schema[] };
   const definitions = source.schema.definitions as Record<string, Schema>;
