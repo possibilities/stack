@@ -3,7 +3,10 @@
 Status: accepted, 2026-09-29. Extends [ADR 0118](0118-multiple-roles-and-default.md)
 and [ADR 0119](0119-per-role-internal-mcp.md) with a local operator launch path.
 The Bot and Worker delivery contracts, including
-[ADR 0122](0122-worker-role-selection-without-instructions.md), remain independent. [ADR 0183](0183-official-codex-native-homes.md) binds Codex injection to Stack's official runtime; other invocation behavior remains.
+[ADR 0122](0122-worker-role-selection-without-instructions.md), remain independent. [ADR 0183](0183-official-codex-native-homes.md) binds Codex injection to Stack's official runtime.
+[ADR 0186](0186-on-demand-opencode-role-compatibility.md) replaces the exact
+OpenCode CLI release requirement with a selected-command capability check;
+the pinned private host and its isolation contract remain.
 
 ## Decision
 

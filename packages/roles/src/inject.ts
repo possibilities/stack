@@ -97,11 +97,17 @@ function tomlConfig(instructions: string, servers: Record<string, Mcp>): string 
 }
 
 /** Fail before a turn if the installed executable lacks our native isolation contract. */
-async function compatible(binary: string, harness: Harness, env: NodeJS.ProcessEnv): Promise<void> {
-  const { stdout } = await promisify(execFile)(binary, [harness === "opencode" ? "--version" : "--help"], { env, timeout: 15_000, maxBuffer: 1_000_000 });
+async function compatible(binary: string, harness: Harness, env: NodeJS.ProcessEnv, command?: string): Promise<void> {
+  const args = harness === "opencode" && command ? [command, "--help"] : ["--help"];
+  const { stdout } = await promisify(execFile)(binary, args, { env, timeout: 15_000, maxBuffer: 1_000_000 });
+  if (harness === "opencode") {
+    if (!/(?:^|\s)--server(?:[\s=,]|$)/.test(stdout))
+      throw new Error(`installed opencode ${command ?? "interactive command"} does not advertise --server; Role injection requires a private server connection`);
+    return;
+  }
   const required = harness === "claude" ? ["--setting-sources", "--strict-mcp-config", "--plugin-dir", "--append-system-prompt", "--system-prompt-snapshot"] : ["--no-daemon"];
-  if (harness === "opencode" ? !/^(?:opencode\s+)?v?2\.0\.16\s*$/.test(stdout) : required.some((flag) => !stdout.includes(flag)))
-    throw new Error(`installed ${harness} does not support the roles inject isolation contract${harness === "opencode" ? "; the private host requires the matching stable OpenCode 2.0.16 CLI" : ""}`);
+  if (required.some((flag) => !stdout.includes(flag)))
+    throw new Error(`installed ${harness} does not support the roles inject isolation contract`);
 }
 
 type Exit = { code: number; signal: NodeJS.Signals | null };
@@ -212,8 +218,8 @@ async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
       await file(join(config, "opencode.json"), json({ $schema: "https://opencode.ai/config.json", plugins: ["-opencode.config.compatibility", "-opencode.config.instruction", plugin], skills: [join(capabilities, "skills")], mcp: { servers: mcp } }));
       await file(join(config, "cli.json"), "{}\n");
       await file(join(env.XDG_CONFIG_HOME, "opencode", "cli.json"), "{}\n");
-      // Version-check the exact CLI before the host can open the native database.
-      await compatible(binary, harness, env);
+      // Check the selected command before the host can open the native database.
+      await compatible(binary, harness, env, command);
       assertInstallationOpen(process.env);
       host = await startOpenCodeHost(env, signal);
       // --server belongs to the selected native subcommand, even when root

@@ -126,7 +126,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0120 | [Let Codex schedule subscribed events and chat input](0120-codex-native-input-admission.md) | Accepted |
 | 0121 | [The Roles space manages named Roles and per-Role internal MCP switches](0121-roles-space-for-named-roles.md) | Accepted |
 | 0122 | [Select a Worker's Role at creation and deliver capabilities without Role instructions](0122-worker-role-selection-without-instructions.md) | Accepted |
-| 0123 | [Inject a Role into one native CLI invocation](0123-role-injection-for-native-clis.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) |
+| 0123 | [Inject a Role into one native CLI invocation](0123-role-injection-for-native-clis.md) | Accepted; amended by [0183](0183-official-codex-native-homes.md) and [0186](0186-on-demand-opencode-role-compatibility.md) |
 | 0124 | [Separate Manager and Worker launch defaults with instruction-capable Workers](0124-manager-and-worker-launch-defaults.md) | Accepted |
 | 0125 | [The Roles space sets the Worker default](0125-roles-space-worker-default-control.md) | Accepted |
 | 0126 | [The Roles space edits fragment conditions and previews a rendering context](0126-roles-space-fragment-conditions.md) | Accepted |
@@ -188,6 +188,7 @@ Each row links to its complete decision record. Status is taken only from that r
 | 0183 | [Use official Codex packages and persistent native Bot homes](0183-official-codex-native-homes.md) | Accepted |
 | 0184 | [Fleet History reads retained Bot conversations](0184-fleet-history-pane.md) | Accepted |
 | 0185 | [Check native purge compatibility only when requested](0185-on-demand-native-purge-compatibility.md) | Accepted |
+| 0186 | [Check OpenCode Role launch capabilities on demand](0186-on-demand-opencode-role-compatibility.md) | Accepted |
 
 ## Historical identifier corrections
 

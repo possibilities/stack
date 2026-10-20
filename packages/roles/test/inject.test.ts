@@ -22,7 +22,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const argv = process.argv.slice(2);
 const harness = path.basename(process.argv[1]);
-if (argv.length === 1 && argv[0] === '--help') {
+if (argv.at(-1) === '--help') {
+ if (harness === 'opencode') {
+  const command = argv.length === 1 ? 'root' : argv[0];
+  console.log(process.env.FIXTURE_NO_SERVER === command ? '--server-password' : '--server string');
+  process.exit(0);
+ }
  console.log('--setting-sources --strict-mcp-config --plugin-dir --append-system-prompt --system-prompt-snapshot --no-daemon'); process.exit(0);
 }
 if (argv.length === 1 && argv[0] === '--version') { console.log(process.env.FIXTURE_VERSION || '2.0.16'); process.exit(0); }
@@ -535,7 +540,7 @@ test("the production OpenCode host uses ordinary native credentials without admi
     await f.call("skill_create", { roleId, expectedRevision: 0, name: "role-skill", description: "Role fixture", body: "Role body" });
     await f.call("role_internal_mcp_update", { roleId, expectedRevision: 1, name: "notify", enabled: false });
     await f.call("role_internal_mcp_update", { roleId, expectedRevision: 2, name: "roles", enabled: false });
-    const result = await f.run(["inject", "--", "opencode", "run", "fixture"], { FIXTURE_AUTH: credentialId, OPENCODE_DB: "opencode.db" });
+    const result = await f.run(["inject", "--", "opencode", "run", "fixture"], { FIXTURE_AUTH: credentialId, OPENCODE_DB: "opencode.db", FIXTURE_VERSION: "2.0.17" });
     assert.equal(result.code, 0, result.stderr);
     const report = JSON.parse(result.stdout);
     assert.ok(report.nativeSkills.some((skill: { id: string }) => skill.id === "role-skill"));
@@ -551,13 +556,21 @@ test("the production OpenCode host uses ordinary native credentials without admi
       assert.equal(row?.value, credential);
       assert.equal(after.prepare("SELECT value FROM kv WHERE key='wellknown:sources'").get()?.value, JSON.stringify([origin]));
     } finally { after.close(); }
-    // A mismatched native CLI must be refused before opening/migrating any DB.
+    // Capability refusal must happen before the host can open a native database.
+    // A root flag alone is insufficient when the selected subcommand lacks it.
     const untouched = join(f.home, "must-not-open.db");
     const launches = join(f.state, "roles", "inject");
     const beforeLaunches = await readdir(launches);
-    const mismatch = await f.run(["inject", "--", "opencode"], { FIXTURE_VERSION: "2.0.17", OPENCODE_DB: untouched });
-    assert.equal(mismatch.code, 1); assert.match(mismatch.stderr, /matching stable OpenCode 2.0.16/);
+    const nativeBefore = await readFile(f.env.OPENCODE_DB);
+    for (const command of ["root", "run", "mini"]) {
+      const refused = await f.run(["inject", "--", "opencode", ...(command === "root" ? [] : [command])],
+        { FIXTURE_NO_SERVER: command, OPENCODE_DB: command === "root" ? untouched : f.env.OPENCODE_DB });
+      assert.equal(refused.code, 1, refused.stderr);
+      assert.match(refused.stderr, /does not advertise --server/);
+      assert.equal(refused.stdout, "", "an incompatible CLI never reaches the foreground launch");
+    }
     await assert.rejects(stat(untouched), { code: "ENOENT" });
+    assert.deepEqual(await readFile(f.env.OPENCODE_DB), nativeBefore);
     const failedHost = await f.run(["inject", "--", "opencode"], { OPENCODE_DB: f.home });
     assert.equal(failedHost.code, 1); assert.equal(failedHost.stdout, "");
     assert.match(failedHost.stderr, /host exited before readiness/);
