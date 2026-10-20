@@ -77,9 +77,23 @@ test("verified offline native primitives delete exact sessions/descendants but r
     ddb.close(); await writeFile(join(d.profile, "data", "devin", "credentials.toml"), "fake credential sentinel");
     manager.ledger.setSession(d.reserved.worker.id, ids[0]!); manager.ledger.setSession(d.sibling.worker.id, ids[1]!);
     manager.ledger.setWorkerPhase(d.reserved.worker.id, "closed"); manager.ledger.setWorkerPhase(d.sibling.worker.id, "closed");
+    // An unverified native release must stay blocked even when its private store
+    // looks compatible. This exercises the public plan/apply boundary before
+    // proving the actual installed release below.
+    const unsupported = join(root, "unverified-devin");
+    await writeFile(unsupported, '#!/bin/sh\nif [ "$1" = --version ]; then echo "devin 9999.0.0"; else exit 99; fi\n', { mode: 0o700 });
+    env.STACK_DEVIN_BIN = unsupported;
+    try {
+      const refused = await call("worker_state_plan", { kind: "native_session", ids: [d.reserved.worker.id] });
+      assert.ok(refused.blockedBy.includes("Native session purge version has not been scope-verified"));
+      await assert.rejects(call("worker_state_clear", request(refused)), /Native session purge version has not been scope-verified/);
+      const untouched = new DatabaseSync(dpath, { readOnly: true });
+      assert.equal(untouched.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id IN (?,?)").get(...ids)!.n, 2);
+      untouched.close();
+    } finally { env.STACK_DEVIN_BIN = devin; }
     const dp = await call("worker_state_plan", { kind: "native_session", ids: [d.reserved.worker.id] }); assert.deepEqual(dp.blockedBy, []);
     const dr = await call("worker_state_clear", request(dp)); assert.equal(dr.status, "completed");
-    const dv = new DatabaseSync(dpath, { readOnly: true }); assert.equal(dv.prepare("SELECT id FROM sessions WHERE id=?").get(ids[0]!), undefined); assert.equal(dv.prepare("SELECT content FROM prompt_history WHERE session_id=?").get(ids[1]!)!.content, "native private prompt"); dv.close();
+    const dv = new DatabaseSync(dpath, { readOnly: true }); assert.equal(dv.prepare("SELECT id FROM sessions WHERE id=?").get(ids[0]!), undefined); assert.equal(dv.prepare("SELECT content FROM prompt_history WHERE session_id=?").get(ids[0]!), undefined); assert.equal(dv.prepare("SELECT content FROM prompt_history WHERE session_id=?").get(ids[1]!)!.content, "native private prompt"); dv.close();
     assert.equal(await readFile(join(d.profile, "data", "devin", "credentials.toml"), "utf8"), "fake credential sentinel");
 
     const c = await make("claude"), sid = randomUUID(), siblingId = randomUUID(), project = join(c.profile, "claude", "projects", c.cwd.replace(/[^a-zA-Z0-9]/g, "-"));

@@ -31,7 +31,7 @@ or replaying its unknown turn.
   clear. Operators must quiesce other repository writers.
 - Native purge is closed-only, never reset-and-reopen. Verified offline fixtures
   establish OpenCode 2.0.16 `session delete --standalone` (exact root plus descendants),
-  Devin 3000.11.3 `rm <full-ID> --force` and Claude SDK 0.3.283 `deleteSession({dir})`.
+  Devin 3000.11.3 and 3000.11.92 `rm <full-ID> --force` and Claude SDK 0.3.283 `deleteSession({dir})`.
   Bounded read-only native observations bind exact identity/directory, selected
   payload digests, siblings and credentials. Refuse unknown versions/platforms,
   unsafe roots, ambiguous Claude project scope and sibling Worker descendants.
@@ -54,3 +54,12 @@ Unknown native scope is blocked, not treated as zero bytes or emulated by deleti
 profile. External writers, SQLite free pages/WAL, backups and other owners' content
 remain independent. Existing UI wire types and cached readers stay truthful; new
 controls require a separately authorized UI handoff.
+
+## Verification update — October 20, 2026
+
+The same offline native fixture was rerun for Devin 3000.11.92. Its exact-ID
+removal preserves sibling transcripts and the credential sentinel, and removes
+both the selected session and its prompt history. The admitted versions remain
+an explicit allowlist; the public plan/apply test also proves an unverified
+release cannot purge an otherwise compatible store. This adds one verified
+version without relaxing the scope or receipt contract.

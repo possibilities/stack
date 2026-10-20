@@ -1024,7 +1024,12 @@ try {
 
   const internalServers = (await rolesCall("role_internal_mcp_list", { roleId: A })).servers;
   const internalNames = internalServers.map((server) => server.name);
-  const nativeConnections = internalServers.filter((server) => server.kind === "codex").length;
+  // Inclusion follows Role grants, switch state and the selected harness. The
+  // number of native Codex bridges is not the number of included connections.
+  const launchSummary = async () => {
+    const launch = await rolesCall("role_launch_preview", { roleId: A });
+    return `${launch.internalMcpServers.filter((server) => server.included).length} of ${launch.internalMcpServers.length} Stack connections included · ${launch.mcpServers.length} from the Role`;
+  };
   assert.ok(internalNames.length >= 3 && internalNames.includes("roles"), `the repository configures several internal MCP servers: ${internalNames}`);
   const total = internalNames.length;
   const count = (on) => servers.getByText(`${on} of ${total} on`, { exact: true }).first();
@@ -1036,7 +1041,7 @@ try {
   assert.deepEqual(Object.values(await enabledNow(B)).every(Boolean), true);
   await servers.getByText("Stack connections use stdio for Bot and Worker launches and stack roles inject when switched on and allowed by their harness filter. Switches and filters are independent. Running sessions keep their connections. New Stack connections start on and unrestricted.").waitFor();
   await preview.getByRole("button", { name: "Launch", exact: false }).click();
-  await preview.getByText(`${nativeConnections} of ${total} Stack connections included · 1 from the Role`).waitFor();
+  await preview.getByText(await launchSummary(), { exact: true }).waitFor();
   await preview.getByText("Outside this Role's tool grants", { exact: true }).first().waitFor();
   // Off for this Role only, and the preview tells enabled from configured.
   await stackSwitch("bots").click();
@@ -1044,7 +1049,7 @@ try {
   assert.equal((await enabledNow(B)).bots, true, "switches belong to their own Role");
   await count(total - 1).waitFor();
   await servers.locator("li").filter({ has: page.getByText("bots", { exact: true }) }).getByText("Off", { exact: true }).waitFor();
-  await preview.getByText(`${nativeConnections} of ${total} Stack connections included · 1 from the Role`).waitFor();
+  await preview.getByText(await launchSummary(), { exact: true }).waitFor();
   assert.equal(await preview.locator('[title$="Off for this Role"]').count(), 1);
   assert.deepEqual((await rolesCall("role_launch_preview", { roleId: A })).internalMcpServers.filter((server) => !server.enabled).map((server) => server.name), ["bots"]);
   await shot("roles-internal-off");

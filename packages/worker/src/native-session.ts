@@ -93,7 +93,7 @@ export async function observeNativeSession(root: string, worker: WorkerRecord, e
       || (config.experimental && (typeof config.experimental !== "object" || Object.keys(config.experimental).some(key => key !== "policies")))) throw new Error("Native OpenCode configuration has unverified extensions; maintenance refuses to launch them");
   }
   const version = worker.provider === "claude" ? "0.3.283" : await native(root, worker, env, ["--version"]);
-  if ((worker.provider === "codex" && !/^(?:opencode v)?2\.0\.16$/.test(version)) || (worker.provider === "devin" && !/^devin 3000\.11\.3(?: \([a-f0-9]+\))?$/.test(version))) throw new Error("Native session purge version has not been scope-verified");
+  if ((worker.provider === "codex" && !/^(?:opencode v)?2\.0\.16$/.test(version)) || (worker.provider === "devin" && !/^devin 3000\.11\.(?:3|92)(?: \([a-f0-9]+\))?$/.test(version))) throw new Error("Native session purge version has not been scope-verified");
   const store = await (worker.provider === "claude" ? claudeStore(root, worker) : sqliteStore(root, worker));
   return { ...store, revision: stateHash([worker, version, store]) };
 }
