@@ -17,6 +17,8 @@ import { CopyButton, Empty, Flash, NodeCard, NodeLink, NodeTitle, Row, StatusDot
 import { useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
 import { useBrowseBlocked } from "./browse-handoffs";
 import { BrowseMaintenanceFence, BrowseVolumes, ProfileMaintenanceDialog, browseMaintenanceOperations } from "./browse-maintenance";
+import { ProfileExtensionsDialog } from "./browse-extensions";
+import { PuzzleIcon } from "lucide-react";
 import { localOperations } from "@/lib/stack/state";
 import { Elapsed, fieldLabel } from "./scrape-shared";
 import { footerButton, Section, Window } from "./window";
@@ -90,6 +92,7 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
   const { goTo } = useWorkbench();
   const [deleting, setDeleting] = useState(false);
   const [maintenance, setMaintenance] = useState<"reset" | "site" | null>(null);
+  const [extensions, setExtensions] = useState(false);
   const node = { kind: "browser-profile" as const, id: profile.id };
   const held = heldBy(profile.id, browserHandoffs.data);
   const block = deleteBlock(profile, browserControllers.data, browserHandoffs.data);
@@ -113,6 +116,7 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => goTo({ kind: "browser-viewer", id: viewers.open(profile.id) })}><EyeIcon />Open in a new viewer</DropdownMenuItem>
+                  {localOperations(state, "browse", ["browser_profile_extensions_get"]).available ? <DropdownMenuItem onClick={() => setExtensions(true)}><PuzzleIcon />Extensions…</DropdownMenuItem> : null}
                   {localOperations(state, "browse", [browseMaintenanceOperations.reset.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("reset")}>Reset profile…</DropdownMenuItem> : null}
                   {localOperations(state, "browse", [browseMaintenanceOperations.site.receipt]).available ? <DropdownMenuItem onClick={() => setMaintenance("site")}>Clear site data…</DropdownMenuItem> : null}
                   {isStandalone(profile)
@@ -133,6 +137,7 @@ function ProfileRow({ profile, controllers }: { profile: BrowserProfile; control
       </NodeCard>
       {deleting ? <DeleteProfileDialog profile={profile} open={deleting} onOpenChange={setDeleting} /> : null}
       {maintenance ? <ProfileMaintenanceDialog profile={profile} kind={maintenance} onClose={() => setMaintenance(null)} /> : null}
+      {extensions ? <ProfileExtensionsDialog profile={profile} onClose={() => setExtensions(false)} /> : null}
     </li>
   );
 }

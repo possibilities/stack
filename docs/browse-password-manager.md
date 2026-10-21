@@ -1,8 +1,9 @@
 # Browse extensions and agent password manager
 
 Browse can load MV3 extensions into individual durable profiles. An optional Vaultwarden service supplies
-an agent-owned password manager through the official Bitwarden extension. This feature is API-first;
-new UI controls are a separate implementation. Existing Browse handoff viewers remain usable.
+an agent-owned password manager through the official Bitwarden extension. On the local UI, Browse's
+Extensions and Password manager panes and each profile's Extensions dialog drive the steps below; the
+existing Handoffs pane and viewer carry Take and Finish. The API remains the reference.
 
 ## Requirements and boundaries
 

@@ -23,6 +23,7 @@ import type { ReceiverCreateInput } from "./source-setup";
 import type { GithubDelivery, GithubDeliveryPage, GithubEndpoint, GithubFilter, GithubRemoteReceiptPage, GithubSetup, GithubStatus, GithubWatch, GithubWatchRead } from "./types";
 import { completionsObservation, inventoryObservation, occurrencesObservation, subscriptionsObservation, localOperation, type CompletionFilter, type CompletionList, type OccurrenceFilter, type OccurrenceList, type StateInventory, type StateSelection, type SubscriptionFilter, type SubscriptionList } from "./state";
 import { observationResource, type ObservedResource } from "./observation";
+import { BrowseManagementReads } from "./browse-management";
 import { checkSettled, developerModeOn, type HarnessCheck } from "./developer";
 import type { HarnessCheckAdmission, HarnessReleases, ServeSettings } from "./types";
 
@@ -272,7 +273,10 @@ type ResourceKey = ContentKey | "access" | "server" | "codexTools" | "resources"
 
 /** Which reads each browse write can change; each is re-read afterwards, since a lost acknowledgement may still have acted. */
 function browseReads(name: string): ResourceKey[] {
-  if (name.startsWith("browser_handoff_")) return ["browserHandoffs", "browserProfiles", "browserControllers"];
+  if (name.startsWith("browser_handoff_") || name === "browser_operator_handoff_request" || name === "browser_management_page_open") return ["browserHandoffs", "browserProfiles", "browserControllers"];
+  // Catalog, configuration and service reads are observations (BrowseManagementReads); inspection observes a running profile.
+  if (name === "browser_profile_extensions_inspect") return ["browserProfiles"];
+  if (name.startsWith("browser_extension_") || name.startsWith("browser_profile_extensions_") || name.startsWith("browser_vault_")) return [];
   if (name.startsWith("browser_profile_")) return ["browserProfiles", "browserStandalone", "browserToolchain"];
   if (name.startsWith("browser_standalone_")) return ["browserStandalone", "browserProfiles", "browserControllers", "browserToolchain"];
   return ["browserToolchain"];
@@ -496,6 +500,7 @@ export class StackStore {
   start({ packages, scopedBots = true }: StackConnections = {}): void {
     this.observationsRunning = true;
     this.syncServeObservations();
+    this.syncBrowseManagement();
     // Inventory and Watches intentionally have Store-owned background demand. History/Occurrences
     // keep view-owned leases; passive resource projections above never acquire demand.
     this.backgroundObservations ??= [this.inventoryRead.activate(), this.subscriptionRead.activate()];
@@ -584,12 +589,17 @@ export class StackStore {
     // Browse notices are invalidations only. Legacy disposable reservations have no UI, so their topic is not subscribed.
     // browser_standalone_changed accompanies every profile-ledger save, health observations included, so it stays out of
     // the activity log beside the profiles notice that is already logged.
-    open("browse", this.refreshBrowse, (topic) => {
+    // Extension and vault notices invalidate the management observations; they never imply application, health or unlock.
+    open("browse", () => { this.refreshBrowse(); this.browseManagement.reconnected(); }, (topic) => {
       if (topic === "browser_handoffs_changed") this.refresh("browserHandoffs");
       if (topic === "browser_profiles_changed") { this.refresh("browserProfiles"); this.refresh("browserControllers"); }
       if (topic === "browser_standalone_changed") this.refresh("browserStandalone");
       if (topic === "browser_system_changed") this.refresh("browserToolchain");
-    }, ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed"], { silent: ["browser_standalone_changed"] });
+      if (topic === "browser_extensions_changed") this.browseManagement.extensionsChanged();
+      if (topic === "browser_vault_changed") this.browseManagement.vaultChanged();
+    }, this.state.remote ? ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed"]
+      : ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed", "browser_extensions_changed", "browser_vault_changed"],
+    { silent: ["browser_standalone_changed"], onStatus: () => this.syncBrowseManagement() });
     // Brain's notices are invalidations only. Ledger notices follow every job transition while
     // ingestion runs, so they stay out of the activity log.
     open("brain", () => { this.refreshBrainLedger(); this.refresh("brainSources"); this.invalidateBrainIndex(); }, (topic) => {
@@ -632,6 +642,7 @@ export class StackStore {
   stop(): void {
     this.observationsRunning = false;
     this.syncServeObservations();
+    this.syncBrowseManagement();
     for (const release of this.backgroundObservations ?? []) release();
     this.backgroundObservations = null;
     this.sourceLedgerSession.dispose();
@@ -797,7 +808,21 @@ export class StackStore {
 
   /** A browse write. What it can change is re-read either way; nothing is resent automatically. */
   browse = <T>(name: string, args: Record<string, unknown> = {}): Promise<T> =>
-    this.call<T>("browse", name, args).finally(() => { for (const key of browseReads(name)) this.refresh(key); });
+    this.call<T>("browse", name, args).finally(() => { for (const key of browseReads(name)) this.refresh(key); this.browseManagement.settled(name, args); });
+
+  /**
+   * Extension catalog, per-profile configurations, managed vault status and backups (ADR 0187). Local operator reads
+   * with view-held demand; owner notices and settled writes invalidate them.
+   */
+  readonly browseManagement = new BrowseManagementReads((name, args) => this.call("browse", name, args));
+
+  private syncBrowseManagement(): void {
+    this.browseManagement.sync(this.state.destination.serverId ?? "unnamed", (operation) => {
+      if (!this.observationsRunning) return "Store is stopped.";
+      const access = localOperation(this.state, "browse", operation);
+      return !access.available ? access.reason : this.main.get("browse")?.status !== "open" ? "The browse connection is not open." : null;
+    });
+  }
 
   /** Re-read everything the Browse space shows. */
   refreshBrowse = (): void => {
@@ -1816,6 +1841,7 @@ export class StackStore {
   private set(patch: Partial<StackState>): void {
     this.state = { ...this.state, ...patch };
     if (patch.catalog || patch.remote) this.syncServeObservations();
+    if (patch.catalog || patch.remote || patch.destination) this.syncBrowseManagement();
     for (const listener of this.listeners) listener();
   }
 

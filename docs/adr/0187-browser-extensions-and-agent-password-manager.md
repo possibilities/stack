@@ -86,4 +86,13 @@ and permission review, per-profile selection/application, service setup and reco
 management-page handoffs, and truthful saved/applied/observed/unlocked distinctions. Browse remains local-only
 under ADR 0101. The Content Vault is unrelated; use “agent password manager” for this capability.
 
+The UI now implements this in the Browse space: an Extensions pane (catalog by stable ID and digest, declared
+permissions, server-path import and the pinned Bitwarden install), a per-profile Extensions dialog reached from
+Profiles, Browsers and both new panes (draft, revisioned Save, receipt-only plan/apply, Inspect, the existing
+profile fence), and a Password manager pane (independent service facts, a resumable setup checklist of observed
+facts and human steps, one receipt-only recovery slot per lifecycle action that is never keyed by the current
+service ID, fence release against the status revision, and backup metadata). Operator handoff requests and
+management-page opens record their exact input under the destination before sending and are recovered only by
+inspection, never resent. Both panes register only when live discovery exposes their reads locally.
+
 See the maintained [operator runbook](../browse-password-manager.md).

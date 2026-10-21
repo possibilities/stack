@@ -10,8 +10,8 @@ import { createRequire } from "node:module";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { api as botsApi } from "../../bots/dist/api.js";
-import { publishedJsonSchema, serveSocket, serveWebSocket, socketPath, StateJournal } from "@stack/api";
-import { anyObject, fixtureDoc, freePort as port, gatewayRoot, ui, z, authorizeBrowser, serveFixture, fixtureServerId, seedRecovery } from "./browser-fixture.mjs";
+import { findPackage, publishedJsonSchema, serveSocket, serveWebSocket, socketPath, StateJournal } from "@stack/api";
+import { anyObject, fixtureDoc, freePort as port, gatewayRoot, root, ui, z, authorizeBrowser, serveFixture, fixtureServerId, seedRecovery } from "./browser-fixture.mjs";
 
 if (!process.env.PLAYWRIGHT_MODULE) throw new Error("Set PLAYWRIGHT_MODULE to an installed Playwright module");
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE);
@@ -236,6 +236,8 @@ try {
   // operation for the gateway to admit the page. Unobserved ones still throw if the UI ever calls them.
   const unobserved = (name) => () => { throw new Error(`${name} is not observed in this fixture`); };
   for (const op of botsApi.operations) handlers[op.name] ??= unobserved(op.name);
+  // The real browse manifest selects explicit names too; extension and vault management are checked in browse-management-browser-check.mjs.
+  for (const name of (await findPackage(root, "browse")).config.websocket.operations) handlers[name] ??= unobserved(name);
   const definitions = { browse: Object.keys(handlers).filter((name) => name.startsWith("browser_") || name.startsWith("browse_state_") || name.startsWith("agent_browser_") || name.startsWith("hypeman_")),
     serve: serve.names, bots: botsApi.operations.map((op) => op.name), api: ["docs_snapshot"] };
   const topics = { browse: browseApi.events.topics, serve: serve.topics, bots: botsApi.events.topics, api: {} };
@@ -280,7 +282,7 @@ try {
   const controllers = page.locator('[data-window="browse-controllers"]');
   const toolchain = page.locator('[data-window="browse-toolchain"]');
   const inspector = page.getByRole("region", { name: "Inspector" });
-  await handoffs.getByText("A Bot is waiting for you").waitFor();
+  await handoffs.getByText("A browser handoff is waiting for you").waitFor();
   await handoffs.getByText("Requested tab found").waitFor();
 
   // Attention names the waiting Bot and the failed profile.
@@ -310,7 +312,7 @@ try {
   assert.ok(!stored.includes("/control/"), "the control grant is never stored");
 
   if (await page.locator('[data-pane-frame="browse-viewer"]').count()) {
-    const note = viewer.getByLabel("Note for the Bot"), heldNote = await note.elementHandle();
+    const note = viewer.getByLabel("Handoff note"), heldNote = await note.elementHandle();
     await note.fill("Unsaved handoff note");
     const pause = async (action) => {
       const element = await frame.elementHandle(), document = await element.contentFrame();
@@ -389,12 +391,12 @@ try {
   assert.deepEqual(reopen[1].input, reopen[0].input, "Reopen resends the identical take");
 
   // Finish from the viewer with a note; the viewer returns to observing.
-  await viewer.getByLabel("Note for the Bot").fill("Signed in; MFA approved");
+  await viewer.getByLabel("Handoff note").fill("Signed in; MFA approved");
   await viewer.getByRole("button", { name: "Completed", exact: true }).click();
   await viewer.getByText("Live view · follows the visible tab · delivery not verified").waitFor();
   const finish = calls.find((call) => call.name === "browser_handoff_finish");
   assert.deepEqual({ outcome: finish.input.outcome, note: finish.input.note, expectedRevision: finish.input.expectedRevision }, { outcome: "completed", note: "Signed in; MFA approved", expectedRevision: 3 });
-  await handoffs.getByText("Nothing waiting. Bots ask here when a page needs a person.").waitFor();
+  await handoffs.getByText("Nothing waiting. Browser handoffs appear here when a page needs a person.").waitFor();
   await handoffs.getByRole("button", { name: "Show 2" }).click();
   await handoffs.getByText(/Completed · reported/).waitFor();
   // History rows carry the exact Chat thread and request id for correlation.

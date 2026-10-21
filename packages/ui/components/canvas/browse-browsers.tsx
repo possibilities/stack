@@ -15,6 +15,9 @@ import { CopyButton, Empty, Flash, NodeCard, NodeLink, NodeTitle, StatusDot, Tim
 import { useStack, useStore, useViewerWindows, useWorkbench } from "./provider";
 import { useBrowseBlocked } from "./browse-handoffs";
 import { BrowseMaintenanceFence } from "./browse-maintenance";
+import { ProfileExtensionsDialog } from "./browse-extensions";
+import { localOperations } from "@/lib/stack/state";
+import { PuzzleIcon } from "lucide-react";
 import { PendingLabel, useBrowseWrite, WriteError } from "./browse-operator";
 import { fieldLabel } from "./scrape-shared";
 import { footerButton, Window } from "./window";
@@ -99,7 +102,8 @@ function DeleteBrowserDialog({ browser, open, onOpenChange }: { browser: Browser
 }
 
 function BrowserRow({ browser }: { browser: BrowserProfile }) {
-  const { browserHandoffs } = useStack();
+  const state = useStack();
+  const { browserHandoffs } = state;
   const blocked = useBrowseBlocked();
   const { viewers } = useViewerWindows();
   const { goTo } = useWorkbench();
@@ -107,6 +111,7 @@ function BrowserRow({ browser }: { browser: BrowserProfile }) {
   const stop = useBrowseWrite<BrowserProfile>("browser_standalone_stop");
   const [deleting, setDeleting] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [extensions, setExtensions] = useState(false);
   const name = browser.name ?? "";
   const node = { kind: "standalone-browser" as const, id: name };
   const status = standaloneStatus(browser);
@@ -145,6 +150,7 @@ function BrowserRow({ browser }: { browser: BrowserProfile }) {
                 <DropdownMenuGroup>
                   <DropdownMenuItem disabled={!viewable} onClick={() => goTo({ kind: "browser-viewer", id: viewers.open(browser.id) })}><EyeIcon />Open in a new viewer</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => goTo({ kind: "browser-profile", id: browser.id })}><HardDriveIcon />Show its profile</DropdownMenuItem>
+                  {localOperations(state, "browse", ["browser_profile_extensions_get"]).available ? <DropdownMenuItem onClick={() => setExtensions(true)}><PuzzleIcon />Extensions…</DropdownMenuItem> : null}
                   <DropdownMenuItem variant="destructive" disabled={Boolean(reason)} title={reason ?? undefined} onClick={() => setDeleting(true)}>
                     <Trash2Icon />{actions.blocked ?? "Delete browser…"}
                   </DropdownMenuItem>
@@ -172,6 +178,7 @@ function BrowserRow({ browser }: { browser: BrowserProfile }) {
         {connecting ? <ConnectPanel name={name} /> : null}
       </NodeCard>
       {deleting ? <DeleteBrowserDialog browser={browser} open={deleting} onOpenChange={setDeleting} /> : null}
+      {extensions ? <ProfileExtensionsDialog key={browser.id} profile={browser} onClose={() => setExtensions(false)} /> : null}
     </li>
   );
 }

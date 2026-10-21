@@ -1132,7 +1132,7 @@ test("browse subscribes the standalone notice, re-reads named browsers on it wit
     store.start();
     await until(store, () => store.getState().browserStandalone.data?.length === 1);
     const main = [...sockets].flatMap((socket) => [...socket.subscriptions.values()]).find((subscription) => subscription.package === "browse");
-    assert.deepEqual([...main.topics].sort(), ["browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed"]);
+    assert.deepEqual([...main.topics].sort(), ["browser_extensions_changed", "browser_handoffs_changed", "browser_profiles_changed", "browser_standalone_changed", "browser_system_changed", "browser_vault_changed"]);
 
     // The notice is an invalidation: re-read, never a payload, and it accompanies every ledger save, so it stays out of the log.
     browsers = [...browsers, named("major-briggs", { state: "starting" })];
@@ -1150,4 +1150,126 @@ test("browse subscribes the standalone notice, re-reads named browsers on it wit
     store.stop();
     globalThis.WebSocket = original;
   }
+});
+
+test("browse management reads wait for demand and discovery, follow their own notices, and settle exact writes", async () => {
+  const original = globalThis.WebSocket;
+  const sockets = new Set();
+  const calls = [];
+  let extensions = [];
+  let status = { id: null, version: "1.37.4", image: "image", revision: "r0", desiredRunning: false, state: "absent", healthy: false, signupsAllowed: false, instanceId: null, volumeId: null, fence: null, connection: null, blockedBy: [] };
+  const config = (profileId, revision) => ({ profileId, revision, desired: [], applied: null, appliedAt: null, observedAt: null, observed: null, issue: null, vaultId: null, appliedVault: null });
+  const revisions = { p1: "c1", p2: "c2" };
+  let failBackups = false;
+  const results = {
+    browser_standalone_list: () => ({ browsers: [] }), browser_profile_list: () => ({ profiles: [] }), browser_controller_list: () => ({ controllers: [] }),
+    browser_handoff_list: () => ({ handoffs: [] }), browser_status: () => ({ provider: "hypeman", mode: "durable", sessions: 0, profiles: 0 }),
+    agent_browser_status: () => ({}), agent_browser_detect: () => ({ installations: [] }), hypeman_detect: () => ({ installations: [] }),
+    browser_extension_list: () => ({ extensions }), browser_vault_status: () => status,
+    browser_vault_backup_list: () => { if (failBackups) throw new Error("backup directory unreadable"); return { backups: [] }; },
+    browser_profile_extensions_get: ({ profileId }) => config(profileId, revisions[profileId]),
+    browser_profile_extensions_set: ({ profileId }) => { revisions[profileId] = `${revisions[profileId]}+`; return config(profileId, revisions[profileId]); },
+  };
+  class FakeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    readyState = FakeWebSocket.CONNECTING;
+    subscriptions = new Map();
+    constructor(url) { this.url = url; sockets.add(this); queueMicrotask(() => { this.readyState = FakeWebSocket.OPEN; this.onopen?.(); }); }
+    send(raw) {
+      const { id, method, params } = JSON.parse(raw);
+      if (method === "events/subscribe") this.subscriptions.set(params.subscription, params);
+      if (method === "tools/call") calls.push(params.name);
+      let result, error;
+      try { result = method.startsWith("events/") ? params : results[params.name]?.(params.arguments); } catch (cause) { error = { message: cause.message }; }
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, ...(error ? { error } : { result }) }) }));
+    }
+    close() { this.readyState = 3; sockets.delete(this); this.onclose?.(); }
+  }
+  const publish = (topic) => {
+    for (const socket of sockets) for (const subscription of socket.subscriptions.values()) {
+      if (subscription.package !== "browse" || !subscription.topics.includes(topic)) continue;
+      socket.onmessage?.({ data: JSON.stringify({ method: "events/changed", params: { package: "browse", subscription: subscription.subscription, topic } }) });
+    }
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+  const operations = ["browser_extension_list", "browser_profile_extensions_get", "browser_profile_extensions_set", "browser_vault_status", "browser_vault_backup_list"];
+  const browseDoc = { name: "browse", operations: [], transports: [{ type: "websocket", operations, events: [] }] };
+  globalThis.WebSocket = FakeWebSocket;
+  const store = new StackStore({
+    server: resource(null), resources: resource(null), accounts: resource([]), workerAccounts: resource([]), workerRuntimes: resource([]),
+    login: resource(null), workerLogins: resource([]), bots: resource([]), voice: resource(null), catalog: resource([browseDoc]),
+    endpoints: { browse: "ws://fixture.invalid/websocket" },
+  });
+  const reads = store.browseManagement;
+  try {
+    store.start();
+    await until(store, () => store.getState().status.browse === "open");
+    await settle();
+    // Passive subscription never reads: only a view's demand lease does.
+    assert.ok(!calls.includes("browser_extension_list") && !calls.includes("browser_vault_status"));
+    const releases = [reads.catalog.activate(), reads.vault.activate(), reads.backups.activate()];
+    const one = reads.configuration("p1"), two = reads.configuration("p2");
+    releases.push(one.activate(), two.activate());
+    await settle();
+    assert.equal(reads.vault.getSnapshot().evidence.value.state, "absent");
+    assert.deepEqual(reads.catalog.getSnapshot().evidence.value, []);
+    assert.equal(one.getSnapshot().evidence.value.revision, "c1");
+    assert.equal(two.getSnapshot().evidence.value.revision, "c2", "each profile keeps its own configuration");
+
+    // Each notice invalidates only its own reads; neither carries a record.
+    calls.length = 0;
+    extensions = [{ id: "bitwarden", digest: "d".repeat(64) }];
+    publish("browser_extensions_changed");
+    await settle();
+    assert.deepEqual(reads.catalog.getSnapshot().evidence.value.map((row) => row.id), ["bitwarden"]);
+    assert.ok(calls.includes("browser_profile_extensions_get") && !calls.includes("browser_vault_status"));
+    calls.length = 0;
+    status = { ...status, id: "11111111-1111-4111-8111-111111111111", state: "running", healthy: true, revision: "r1" };
+    publish("browser_vault_changed");
+    await settle();
+    assert.equal(reads.vault.getSnapshot().evidence.value.state, "running");
+    assert.ok(calls.includes("browser_vault_backup_list") && !calls.includes("browser_extension_list"));
+
+    // A failed read keeps the last evidence, marked stale, beside its error.
+    failBackups = true;
+    publish("browser_vault_changed");
+    await settle();
+    assert.deepEqual(reads.backups.getSnapshot().evidence.value, []);
+    assert.equal(reads.backups.getSnapshot().error, "backup directory unreadable");
+
+    // A settled save re-reads exactly that profile's configuration.
+    calls.length = 0;
+    await store.browse("browser_profile_extensions_set", { profileId: "p1", expectedRevision: "c1", extensions: [] });
+    await settle();
+    assert.equal(one.getSnapshot().evidence.value.revision, "c1+");
+    assert.equal(two.getSnapshot().evidence.value.revision, "c2");
+    assert.equal(calls.filter((name) => name === "browser_profile_extensions_get").length, 1);
+    assert.ok(!calls.includes("browser_status"), "management writes do not re-read the toolchain");
+
+    // Released demand pauses reads; notices only mark evidence stale until a view returns.
+    for (const release of releases) release();
+    calls.length = 0;
+    publish("browser_extensions_changed");
+    await settle();
+    assert.ok(!calls.includes("browser_extension_list"));
+    assert.equal(reads.catalog.getSnapshot().stale, true);
+  } finally {
+    store.stop();
+    globalThis.WebSocket = original;
+  }
+});
+
+test("browse management reads are unavailable until discovery exposes them on the local WebSocket", async () => {
+  const store = new StackStore({
+    server: resource(null), resources: resource(null), accounts: resource([]), workerAccounts: resource([]), workerRuntimes: resource([]),
+    login: resource(null), workerLogins: resource([]), bots: resource([]), voice: resource(null), catalog: resource([{ name: "browse", operations: [], transports: [{ type: "websocket", operations: ["browser_profile_list"], events: [] }] }]),
+    endpoints: {},
+  });
+  store.start();
+  try {
+    assert.equal(store.browseManagement.vault.getSnapshot().unavailable, "browse does not expose browser_vault_status on its WebSocket.");
+    assert.equal(store.browseManagement.configuration("p1").getSnapshot().unavailable, "browse does not expose browser_profile_extensions_get on its WebSocket.");
+  } finally { store.stop(); }
+  assert.equal(store.browseManagement.catalog.getSnapshot().unavailable, "Store is stopped.");
 });

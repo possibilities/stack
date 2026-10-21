@@ -24,6 +24,7 @@ import { BotWatch, useObservedRead } from "./watch-receipts";
 import { ObservationStatus } from "./owner-reads";
 import { Section, Window } from "./window";
 import { usePane } from "./pane-context";
+import { ManagementPages } from "./browse-management-pages";
 
 function mint(): string {
   return crypto.randomUUID();
@@ -149,7 +150,7 @@ function ActionNote({ handoff }: { handoff: BrowserHandoff }) {
 }
 
 /** One handoff's controls for its current state. */
-function HandoffControls({ handoff, inViewer }: { handoff: BrowserHandoff; inViewer?: boolean }) {
+export function HandoffControls({ handoff, inViewer }: { handoff: BrowserHandoff; inViewer?: boolean }) {
   const { act, retry, resumable, actions, grants } = useHandoffActions();
   const { viewers } = useViewerWindows();
   const { goTo } = useWorkbench();
@@ -229,6 +230,7 @@ function HandoffRow({ handoff, profile }: { handoff: BrowserHandoff; profile: Br
             <span>{handoff.issue}{handoff.state === "preparing" ? ". The profile stays held; there is no force release." : ""}</span>
           </p>
         ) : null}
+        {handoff.origin === "operator" && handoff.state === "awaiting_human" ? <ManagementPages handoff={handoff} /> : null}
         <HandoffControls handoff={handoff} />
       </NodeCard>
     </li>
