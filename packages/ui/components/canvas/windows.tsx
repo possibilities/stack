@@ -10,7 +10,6 @@ import {
   EllipsisVerticalIcon,
   FolderIcon,
   KeyRoundIcon,
-  LinkIcon,
   MessageSquareIcon,
   PhoneIcon,
   PlusIcon,
@@ -681,7 +680,6 @@ export function BotsWindow() {
                   <BotChip icon={SparklesIcon} title="Saved model · effort">{model ?? "Codex default"}</BotChip>
                   <BotChip icon={FolderIcon} title={bot.cwd} copy={bot.cwd} label="workspace">{workspaceName(bot.cwd)}</BotChip>
                   <BotChip icon={MessageSquareIcon} title={bot.mainThreadId ?? "No main thread yet"} copy={bot.mainThreadId} label="main thread">{bot.mainThreadId ? shortId(bot.mainThreadId) : "No thread"}</BotChip>
-                  {bot.url ? <BotChip icon={LinkIcon} title={bot.url} copy={bot.url} label="socket">{bot.url.replace(/^\w+:\/\//, "")}</BotChip> : null}
                   <BotCliCommand bot={bot} />
                   <WorkersLink filter={{ botId: bot.id }} />
                   <ProcSchedulesLink botId={bot.id} />
