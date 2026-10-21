@@ -103,11 +103,19 @@ export async function credentialEvidence(stateDir: string, account: WorkerAccoun
     throw new Error("native worker credentials are not a private regular file");
   if (account.provider !== "devin") {
     const db = new DatabaseSync(path, { readOnly: true });
-    let rows: Array<{ integration_id: string | null; value: string }>;
-    try { rows = db.prepare("SELECT integration_id, value FROM credential").all() as typeof rows; }
+    let rows: Array<{ integration_id: string | null; value: string; active: number | null }>;
+    try {
+      const columns = db.prepare("PRAGMA table_info(credential)").all() as Array<{ name: string }>;
+      // Native reauthentication retains older credentials and marks just the
+      // selected one active. Older V2 profiles had no selection column.
+      const selection = columns.some(({ name }) => name === "active") ? "active" : "1 AS active";
+      rows = db.prepare(`SELECT integration_id, value, ${selection} FROM credential`).all() as typeof rows;
+    }
     finally { db.close(); }
-    if (rows.length !== 1 || rows[0]?.integration_id !== "openai") throw new Error("native worker profile contains credentials for another provider");
-    const value = JSON.parse(rows[0].value) as Record<string, unknown>;
+    if (rows.some((row) => row.integration_id !== "openai")) throw new Error("native worker profile contains credentials for another provider");
+    const selected = rows.filter((row) => row.active === 1);
+    if (selected.length !== 1) throw new Error("native worker profile must have exactly one active OpenAI credential");
+    const value = JSON.parse(selected[0]!.value) as Record<string, unknown>;
     if (value.type !== "oauth" || typeof value.access !== "string" || !value.access ||
         typeof value.refresh !== "string" || !value.refresh) throw new Error("native worker OAuth credentials are unavailable");
     const metadata = value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
@@ -120,7 +128,7 @@ export async function credentialEvidence(stateDir: string, account: WorkerAccoun
         if (typeof native === "string" && native) identity = native;
       } catch { /* Some native access tokens do not contain a readable account claim. */ }
     }
-    return { digest: createHash("sha256").update(rows[0].value).digest("hex"), identity };
+    return { digest: createHash("sha256").update(selected[0]!.value).digest("hex"), identity };
   }
   const content = await readFile(path);
   if (content.length < 8 || content.length > 128_000) throw new Error("native Devin credentials are missing or invalid");

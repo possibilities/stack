@@ -13,8 +13,9 @@ const writeEvidence = () => {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "opencode.db");
   const db = new DatabaseSync(path);
-  db.exec("CREATE TABLE credential (integration_id TEXT, value TEXT)");
-  db.prepare("INSERT INTO credential VALUES (?, ?)").run("openai", JSON.stringify({ type: "oauth", access: "fake-codex-access", refresh: secret, metadata: { accountID: "fixture-account" } }));
+  db.exec("CREATE TABLE IF NOT EXISTS credential (integration_id TEXT, value TEXT, active INTEGER)");
+  db.exec("UPDATE credential SET active = 0");
+  db.prepare("INSERT INTO credential VALUES (?, ?, 1)").run("openai", JSON.stringify({ type: "oauth", access: "fake-codex-access", refresh: secret, metadata: { accountID: "fixture-account" } }));
   db.close();
   chmodSync(path, 0o600);
 };

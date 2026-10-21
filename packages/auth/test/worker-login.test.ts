@@ -84,6 +84,22 @@ test("codex sign-in surfaces only the link and code, then confirms the account r
   } finally { await login.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Codex reauthentication confirms the active credential while native history remains", async () => {
+  const { root, store, login, account } = await harness("codex");
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const prepared = store.prepareWorker("codex", account.id);
+      assert.equal(prepared.ready, false);
+      const started = await login.start(prepared);
+      const result = await settle(login, started.id);
+      assert.equal(result.status, "complete");
+      assert.equal(result.error, null);
+      assert.equal(result.authUrl, null);
+      assert.equal(store.workerAccounts().find((item) => item.id === account.id)?.ready, true);
+    }
+  } finally { await login.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("devin sign-in shows its link, rejects then accepts pasted codes, then confirms ready", async () => {
   const { root, store, login, account } = await harness("devin");
   try {

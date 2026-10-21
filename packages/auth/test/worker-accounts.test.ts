@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, stat, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,47 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AuthStore } from "../src/store.js";
 import { accountEnvironment, accountRoot, credentialEvidence, loginCommand, prepareAccountProfile } from "../src/worker-accounts.js";
+
+test("native credential selection accepts retained history without guessing or changing it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "stack-worker-selection-"));
+  const store = new AuthStore(dir);
+  try {
+    const bot = store.addAccount(JSON.stringify({ tokens: { refresh_token: "refresh", access_token: "access", id_token: "fixture.jwt.signature", account_id: "selected-account" } }));
+    const account = store.prepareWorker("codex", store.pairedWorker(bot.id));
+    await prepareAccountProfile(dir, account);
+    const folder = join(accountRoot(dir, account.id), "data", "opencode");
+    await mkdir(folder, { recursive: true });
+    const path = join(folder, "opencode.db");
+    const db = new DatabaseSync(path);
+    try {
+      db.exec("CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER)");
+      await chmod(path, 0o600);
+      const selected = JSON.stringify({ type: "oauth", access: "selected-access", refresh: "selected-refresh", metadata: { accountID: "selected-account" } });
+      const insert = db.prepare("INSERT INTO credential VALUES (?, ?, ?)");
+      insert.run("openai", "unreadable retired credential", 0);
+      insert.run("openai", selected, 1);
+      insert.run("openai", "another retired credential", 0);
+      const before = await readFile(path);
+      const evidence = await credentialEvidence(dir, account);
+      assert.equal(evidence.identity, "selected-account");
+      assert.equal(evidence.digest, createHash("sha256").update(selected).digest("hex"));
+      assert.equal(store.confirmWorker(account.id, evidence.digest, evidence.identity).ready, true);
+      assert.deepEqual(await readFile(path), before);
+
+      insert.run("openai", selected, 1);
+      await assert.rejects(credentialEvidence(dir, account), /exactly one active/);
+      db.exec("DELETE FROM credential WHERE rowid = 4; UPDATE credential SET active = 0");
+      await assert.rejects(credentialEvidence(dir, account), /exactly one active/);
+      db.exec("UPDATE credential SET active = 1 WHERE rowid = 2");
+      insert.run("another-provider", "retired", 0);
+      await assert.rejects(credentialEvidence(dir, account), /another provider/);
+      db.exec("DELETE FROM credential WHERE integration_id <> 'openai'; ALTER TABLE credential DROP COLUMN active");
+      await assert.rejects(credentialEvidence(dir, account), /exactly one active/);
+      db.exec("DELETE FROM credential WHERE rowid <> 2");
+      assert.deepEqual(await credentialEvidence(dir, account), evidence);
+    } finally { db.close(); }
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
 
 test("two native account profiles keep sign-ins and configuration separate", async () => {
   const dir = await mkdtemp(join(tmpdir(), "stack-worker-accounts-"));
