@@ -873,10 +873,18 @@ export type BrowserController = {
   botId: string; instance: string; session: string; profileId: string; actualProfileId: string | null; targetId: string | null; cdpUrl: string | null;
   state: "connecting" | "connected" | "disconnected" | "unknown"; revision: number; observedAt: string | null; error: string | null;
 };
+/** Immutable extension artifact identity. Import, selection, application and runtime observation are separate. */
+export type BrowserExtensionRef = { id: string; digest: string };
+export type BrowserExtension = BrowserExtensionRef & { chromeId: string; name: string; version: string; permissions: string[]; hostPermissions: string[]; optionalPermissions: string[]; optionalHostPermissions: string[]; contentMatches: string[]; importedAt: string; source: "directory" | "zip" | "bitwarden"; bytes: number; popup: string | null; options: string | null };
+export type BrowserVaultConnection = { id: string; origin: string; hostname: string; ip: string; spki: string };
+export type BrowserExtensionConfiguration = { profileId: string; revision: string; desired: BrowserExtensionRef[]; applied: BrowserExtensionRef[] | null; appliedAt: string | null; observedAt: string | null; observed: { id: string; name: string; version: string }[] | null; issue: string | null; vaultId: string | null; appliedVault: BrowserVaultConnection | null };
+export type BrowserVaultStatus = { id: string | null; version: string; image: string; revision: string; desiredRunning: boolean; state: "absent" | "running" | "stopped" | "unavailable"; healthy: boolean; signupsAllowed: boolean; instanceId: string | null; volumeId: string | null; fence: string | null; connection: BrowserVaultConnection | null; blockedBy: string[] };
+export type BrowserVaultBackup = { id: string; vaultId: string; createdAt: string; bytes: number; sha256: string; path: string };
 /** A durable Browser handoff. `issue` is a runtime problem separate from the human outcome; completed is a report, not verification. */
 export type BrowserHandoff = {
   contentClearedAt: string | null; requestDigest: string | null;
-  id: string; profileId: string; botId: string; threadId: string; instance: string; requestId: string;
+  origin: "bot" | "operator";
+  id: string; profileId: string; botId: string | null; threadId: string | null; instance: string | null; requestId: string;
   targetId: string | null; targetStatus: "unspecified" | "present" | "missing" | "unknown"; message: string;
   state: "preparing" | "awaiting_human" | "human_controlling" | "returning" | "resolved";
   outcome: "completed" | "skipped" | "cancelled" | null; note: string | null;

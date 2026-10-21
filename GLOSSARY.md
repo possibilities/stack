@@ -93,13 +93,21 @@ A one-use, one-minute secret for opening one document, Content item or immutable
 
 A durable, empty-at-creation Chrome user-data volume with one server-supervised Kernel/Hypeman browser while Stack runs. Each Bot has an exclusive default; additional profiles may belong exclusively to that Bot, remain unassigned, or be named standalone browsers independent of Bots. A standalone browser has a unique local name and explicit start/stop intent; stopping retains its volume and suppresses supervision until start or provider attach. Deleting a Bot retains its profiles unassigned. Only explicit profile deletion discards their data. Planned server shutdown closes Chrome before stopping the exact VM; restart retains the volume and refreshes its guest address and CDP relay. _Avoid_: disposable task, shared account profile, sleeping browser
 
+## Browser extension
+
+An immutable MV3 package imported into Browse's catalog and explicitly selected by digest for a durable Browser profile. All tabs and controllers of that profile share its applied set. Saving a selection does not apply it; disabling retains its data. _Avoid_: global browser setting, per-tab extension, automatic store update
+
+## Agent password manager
+
+Browse's optional managed Vaultwarden service and Bitwarden browser extension, using a dedicated account whose credentials agents may use unattended. The service and each browser's unlock policy are separate. Human management uses the upstream web interface inside a Browser handoff. This is unrelated to the Content Vault. _Avoid_: Content Vault, native credential import, implicit unlock
+
 ## Browser controller
 
 An agent-browser session in a private Bot-launch namespace, bound to one Browser profile at a time. The private signed launch configuration establishes Bot identity; an arbitrary session name does not. Management selects the profile and queues native reconnect with that controller's commands, invalidating prior refs. Page and tab operations remain in agent-browser. Closing a controller disconnects it without deleting or stopping its profile. Named standalone browsers use the same provider with a browser name and separate controller admission/close receipts, without a Bot identity. Other Bot and controller sessions remain independent. _Avoid_: browser ownership by session name, human handoff, global interaction lock
 
 ## Browser handoff
 
-A durable request from a verified Bot Chat for human help with an entire Browser profile, including all its tabs and managed controllers. One unresolved handoff holds managed automation until drain is confirmed, human input is revoked, and controller refs are invalidated on return. Human completion or skip is a report that the agent verifies with a fresh snapshot; disconnect and timeout never resolve it. The originating Chat watches its completion-only read through the existing MCP event subscription service. _Avoid_: tab lease, advisory pause, continuation queue, `readOnly=1` as enforcement
+A durable request from a verified Bot Chat or local operator for human help with an entire Browser profile, including all its tabs and managed controllers. One unresolved handoff holds managed automation until drain is confirmed, human input is revoked, and controller refs are invalidated on return. Human completion or skip is a report that the agent verifies with a fresh snapshot; disconnect and timeout never resolve it. A Bot-origin handoff watches its completion-only read through the existing MCP event subscription service; an operator-origin handoff has no Bot, Chat or completion watch. _Avoid_: tab lease, advisory pause, continuation queue, `readOnly=1` as enforcement
 
 ## Transport
 

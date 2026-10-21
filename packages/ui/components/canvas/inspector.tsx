@@ -520,7 +520,7 @@ function resolve(ref: NodeRef, state: StackState): View | null {
       if (!handoff) return null;
       const profile = state.browserProfiles.data?.find((item) => item.id === handoff.profileId);
       const related: View["related"] = [{ ref: { kind: "browser-profile", id: handoff.profileId }, label: `${profileName(profile, handoff.profileId)} · profile` }];
-      if (state.bots.data?.some((bot) => bot.id === handoff.botId)) related.push({ ref: { kind: "bot", id: handoff.botId }, label: `${handoff.botId} · asked for help` });
+      if (handoff.botId && state.bots.data?.some((bot) => bot.id === handoff.botId)) related.push({ ref: { kind: "bot", id: handoff.botId }, label: `${handoff.botId} · asked for help` });
       return {
         eyebrow: `Browser handoff · ${handoff.outcome ? handoffOutcomes[handoff.outcome] : handoffStates[handoff.state].label}`, accent: "browse", title: handoff.contentClearedAt ? "Handoff content cleared" : handoff.message.split("\n")[0].slice(0, 80) || "Handoff",
         record: handoff, fields: browseFields(catalog, "browser_handoff_list", "handoffs"), related,

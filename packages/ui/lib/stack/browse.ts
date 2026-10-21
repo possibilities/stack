@@ -51,7 +51,7 @@ export const handoffStates: Record<BrowserHandoff["state"], { label: string; ton
   preparing: { label: "Draining automation", tone: "muted" },
   awaiting_human: { label: "Waiting for you", tone: "warning" },
   human_controlling: { label: "You have control", tone: "info" },
-  returning: { label: "Returning to the Bot", tone: "muted" },
+  returning: { label: "Returning to automation", tone: "muted" },
   resolved: { label: "Resolved", tone: "success" },
 };
 
@@ -165,8 +165,8 @@ export function intentFor(kind: "take" | "finish", handoff: BrowserHandoff, stor
 export function browseAttention(handoffs: readonly BrowserHandoff[] | null, profiles: readonly BrowserProfile[] | null, toolchain: BrowserToolchain | null): string[] {
   const reasons: string[] = [];
   for (const item of handoffs ?? []) {
-    if (item.state === "awaiting_human") reasons.push(`${item.botId} needs browser help`);
-    if (item.state !== "resolved" && item.issue) reasons.push(`${item.botId} handoff: ${item.issue}`);
+    if (item.state === "awaiting_human") reasons.push(`${item.botId ?? "Operator handoff"} needs browser help`);
+    if (item.state !== "resolved" && item.issue) reasons.push(`${item.botId ?? "Operator"} handoff: ${item.issue}`);
   }
   for (const profile of profiles ?? []) if (profile.state === "failed") reasons.push(`${profileName(profile)} browser failed`);
   if (toolchain && !toolchain.hypeman.some((item) => item.selected)) reasons.push("No local Hypeman selected");

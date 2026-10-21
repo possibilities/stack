@@ -326,6 +326,9 @@ importers:
       '@stack/scrape':
         specifier: workspace:*
         version: link:../scrape
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       ws:
         specifier: ^8.18.3
         version: 8.21.3

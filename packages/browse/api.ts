@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { operation, stateDependencies, stateDependencyInput, stateHash, requireStateOperator, completionIdentityInput, browseCompletionLink, type PackageApi } from "@stack/api";
+import { Vault } from "./src/vault.js";
+import { vaultOperations } from "./src/vault-operations.js";
+import { Extensions } from "./src/extensions.js";
 import { Backend, cleanupSchema } from "./src/backend.js";
 import { BrowserSystem } from "./src/system.js";
 import { Profiles, profileSchema, bindingSchema, standaloneName } from "./src/profiles.js";
@@ -24,7 +27,7 @@ export const browseBotDependencies = operation({ name: "browse_bot_dependencies"
     requireStateOperator(invocation);
     const profiles = ctx.profiles.list().filter(row => row.botId === botId);
     const bindings = ctx.profiles.bindings().filter(row => row.botId === botId);
-    const handoffs = ctx.profiles.handoffs(null).filter(row => row.botId === botId && row.state !== "resolved");
+    const handoffs = ctx.profiles.handoffs(null).filter(row => (row.botId === botId || profiles.some(p => p.id === row.profileId)) && row.state !== "resolved");
     return { revision: stateHash([profiles.map(row => [row.id, row.default]), bindings.map(row => [row.session, row.instance, row.revision, row.state]), handoffs.map(row => [row.id, row.revision])]),
       blockedBy: [...bindings.filter(row => row.state !== "disconnected").map(row => `Close Browser controller ${row.session} before Bot maintenance`),
         ...handoffs.map(row => `Resolve Browser handoff ${row.id} before Bot maintenance`)],
@@ -47,8 +50,13 @@ export const browserHandoffRequest = operation({
   annotations: { title: "Request browser handoff", idempotentHint: true },
   async call(ctx: BrowserContext, input, invocation) { return { ...await ctx.profiles.requestHandoff(input, invocation), subscription: null, observation: null }; },
 });
+export const browserOperatorHandoff = operation({
+  name: "browser_operator_handoff_request", description: "Local operator: hold a ready profile for human control without a Bot Chat. Exact UUID and input are idempotent; admission drains managed automation before awaiting_human. Use existing take/finish operations. Does not launch or navigate. Operator handoffs have no Bot watch.",
+  input: handoffRequestSchema.omit({ subscribe: true }), output: handoffSchema,
+  async call(ctx: BrowserContext, input, invocation) { requireStateOperator(invocation); return ctx.profiles.operatorHandoff(input); },
+});
 export const browserHandoffList = operation({
-  name: "browser_handoff_list", description: "List durable browser handoffs. Verified Bot callers see only their own Bot; local operators see all. Runtime issues are separate from human outcomes.",
+  name: "browser_handoff_list", description: "List durable browser handoffs. Verified Bot callers see their own requests and operator handoffs on their profiles; local operators see all. Runtime issues are separate from human outcomes.",
   input: z.strictObject({}), output: z.strictObject({ handoffs: z.array(handoffSchema) }), annotations: { title: "List browser handoffs", readOnlyHint: true },
   async call(ctx: BrowserContext, _input, invocation) { return { handoffs: ctx.profiles.handoffs(await ctx.profiles.caller(invocation)) }; },
 });
@@ -318,6 +326,8 @@ export const hypemanUninstall = operation({
   async call(ctx: BrowserContext, input) { return { installations: await ctx.system.uninstallHypeman(input.discardData) }; },
 });
 export const topics = {
+  browser_vault_changed: "Managed vault lifecycle or backup observation changed. Read status and receipts; never implies client unlock or credential verification.",
+  browser_extensions_changed: "Extension catalog or per-profile saved/applied observation changed. Re-read; never implies runtime application or vault unlock.",
   browser_handoffs_changed: "A browser handoff changed. For Chat wakeups subscribe with browser_handoff_completion and the originating botId, threadId and requestId; its stable pending value suppresses intermediate turns.",
   browser_standalone_changed: "A named standalone browser was created, started, stopped, deleted or changed health. Re-read browser_standalone_list.",
   browser_profiles_changed: "Durable browser profiles, health observations or controller bindings changed. Re-read browser_profile_list and browser_controller_list.",
@@ -325,25 +335,27 @@ export const topics = {
   browser_sessions_changed: "A disposable browser reservation changed. Re-read browser_session_list; this does not prove a daemon is still driving it.",
 } as const;
 const packageApi: PackageApi<BrowserContext, keyof typeof topics> = {
-  operations: [...browserFactoryOperations, ...browseStateOperations, browseBotDependencies, browserStatus, browserProfileList, browserProfileCreate, browserProfileDelete, browserControllerList, browserControllerSelect, browserControllerLaunch, browserControllerClose, browserBotRelease,
-    browserHandoffRequest, browserHandoffGet, browserHandoffList, browserHandoffCompletion, browserCompletionIdentity, browserHandoffTake, browserHandoffFinish, browserHandoffCancel,
+  operations: [...vaultOperations, ...browserFactoryOperations, ...browseStateOperations, browseBotDependencies, browserStatus, browserProfileList, browserProfileCreate, browserProfileDelete, browserControllerList, browserControllerSelect, browserControllerLaunch, browserControllerClose, browserBotRelease,
+    browserHandoffRequest, browserOperatorHandoff, browserHandoffGet, browserHandoffList, browserHandoffCompletion, browserCompletionIdentity, browserHandoffTake, browserHandoffFinish, browserHandoffCancel,
     browserSessionGet, browserSessionList, browserSessionClose, browserSessionReconcile, browserResearchAcquire,
     browserToolStatus, browserToolDetect, browserToolCheck, browserToolPolicy, browserToolInstall, browserToolAccept, browserToolUninstall,
     hypemanDetect, hypemanLocationSet, hypemanEnable, hypemanInstall, hypemanUninstall, ...standaloneOperations],
   events: { topics, start(ctx, publish) {
+    if (ctx.state.vault) ctx.state.vault.onChange = () => publish("browser_vault_changed");
+    if (ctx.state.extensions) ctx.state.extensions.onChange = () => publish("browser_extensions_changed");
     ctx.system.onChange = () => publish("browser_system_changed");
     ctx.backend.onChange = () => publish("browser_sessions_changed");
     ctx.profiles.onChange = () => { publish("browser_profiles_changed"); publish("browser_standalone_changed"); };
     ctx.profiles.onHandoffChange = () => publish("browser_handoffs_changed");
-    return () => { ctx.system.onChange = undefined; ctx.backend.onChange = undefined; ctx.profiles.onChange = undefined; ctx.profiles.onHandoffChange = undefined; };
+    return () => { if (ctx.state.vault) ctx.state.vault.onChange = undefined; if (ctx.state.extensions) ctx.state.extensions.onChange = undefined; ctx.system.onChange = undefined; ctx.backend.onChange = undefined; ctx.profiles.onChange = undefined; ctx.profiles.onHandoffChange = undefined; };
   } },
   async createContext(env) {
     const system = new BrowserSystem(env); await system.start(); const backend = new Backend(system); const profiles = new Profiles(backend, system, env);
-    const state = new BrowseState(profiles, backend, env, system.root);
-    try { await profiles.start(); return { backend, system, profiles, state }; }
-    catch (error) { state.journal.close(); await backend.closeContext(); await system.close(); throw error; }
+    const state = new BrowseState(profiles, backend, env, system.root, new Extensions(system.root), new Vault(system));
+    try { await state.vault?.recover(); await profiles.start(); return { backend, system, profiles, state }; }
+    catch (error) { state.journal.close(); await state.vault?.close(); await state.extensions?.close(); await backend.closeContext(); await system.close(); throw error; }
   },
   prepareCloseContext(ctx) { ctx.profiles.prepareClose(); },
-  async closeContext(ctx) { try { await ctx.profiles.close(); } finally { ctx.state?.journal.close(); await ctx.backend.closeContext(); await ctx.system.close(); } },
+  async closeContext(ctx) { try { await ctx.profiles.close(); } finally { ctx.state?.journal.close(); await ctx.state.vault?.close(); await ctx.state.extensions?.close(); await ctx.backend.closeContext(); await ctx.system.close(); } },
 };
 export const api = withStateInventory("browse", browseStateCategories, packageApi);

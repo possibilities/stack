@@ -121,11 +121,11 @@ export function FinishForm({ handoff, compact, onDone }: { handoff: BrowserHando
   const finish = (outcome: "completed" | "skipped") => void act("finish", handoff, { outcome, note }).then(onDone);
   return (
     <div className={cn("flex flex-col gap-1.5", compact ? "" : "rounded-lg border p-2")}>
-      <label htmlFor={`${id}-note`} className="sr-only">Note for the Bot</label>
-      <Textarea id={`${id}-note`} value={note} maxLength={4000} disabled={pending} placeholder="Note for the Bot (optional)"
+      <label htmlFor={`${id}-note`} className="sr-only">Handoff note</label>
+      <Textarea id={`${id}-note`} value={note} maxLength={4000} disabled={pending} placeholder="Handoff note (optional)"
         onChange={(event) => setNote(event.target.value)} className={cn("min-h-8 text-[0.74rem]", compact ? "max-h-16" : "max-h-28")} />
       <div className="flex items-center gap-1.5">
-        <span className="min-w-0 flex-1 text-[0.66rem] text-pretty text-muted-foreground">{blocked ?? "Hands the whole profile back. The Bot checks your report with a fresh snapshot."}</span>
+        <span className="min-w-0 flex-1 text-[0.66rem] text-pretty text-muted-foreground">{blocked ?? "Returns the whole profile to automation. Verify the report with a fresh snapshot."}</span>
         <Button type="button" size="sm" variant="outline" disabled={Boolean(blocked) || pending} onClick={() => finish("skipped")}>Skipped</Button>
         <Button type="button" size="sm" disabled={Boolean(blocked) || pending} onClick={() => finish("completed")}>
           {pending ? <Spinner data-icon="inline-start" /> : null}Completed
@@ -169,7 +169,7 @@ function HandoffControls({ handoff, inViewer }: { handoff: BrowserHandoff; inVie
             <span className="min-w-0 flex-1 text-[0.68rem] text-muted-foreground">This page finished it; the return hasn&apos;t completed.</span>
             <Button type="button" size="xs" variant="outline" disabled={Boolean(blocked)} onClick={() => void retry(handoff)}><RotateCcwIcon data-icon="inline-start" />Retry return</Button>
           </div>
-        ) : handoff.issue && !resume ? <p className="text-[0.68rem] text-muted-foreground">The browser or Bot that started this return retries it.</p> : null}
+        ) : handoff.issue && !resume ? <p className="text-[0.68rem] text-muted-foreground">Inspect the retained return action before continuing.</p> : null}
       </>
     );
   }
@@ -216,7 +216,7 @@ function HandoffRow({ handoff, profile }: { handoff: BrowserHandoff; profile: Br
         </div>
         {handoff.contentClearedAt ? <ContentCleared at={handoff.contentClearedAt} /> : <p className="line-clamp-4 text-[0.78rem] whitespace-pre-wrap text-pretty">{handoff.message}</p>}
         <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.68rem] text-muted-foreground">
-          <NodeLink node={{ kind: "bot", id: handoff.botId }} label={`bot ${handoff.botId}`} className="font-mono text-foreground">{handoff.botId}</NodeLink>
+          {handoff.botId ? <NodeLink node={{ kind: "bot", id: handoff.botId }} label={`bot ${handoff.botId}`} className="font-mono text-foreground">{handoff.botId}</NodeLink> : <span>Operator</span>}
           <span aria-hidden>·</span>
           <NodeLink node={{ kind: "browser-profile", id: handoff.profileId }} label={`profile ${profileName(profile, handoff.profileId)}`}>{profileName(profile, handoff.profileId)}</NodeLink>
           {target ? <><span aria-hidden>·</span><span className={cn(handoff.targetStatus === "missing" && "text-warning")}>{target}</span></> : null}
@@ -250,8 +250,8 @@ function HistoryRows({ rows, profiles, selection }: { rows: BrowserHandoff[]; pr
           </div>
           {handoff.contentClearedAt ? <ContentCleared at={handoff.contentClearedAt} /> : null}
           <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.66rem] text-muted-foreground">
-            <span className="font-mono">{handoff.botId}</span>
-            <span className="font-mono" title={`Thread ${handoff.threadId}`}>thread {handoff.threadId.slice(0, 12)}</span>
+            <span className="font-mono">{handoff.botId ?? "Operator"}</span>
+            {handoff.threadId ? <span className="font-mono" title={`Thread ${handoff.threadId}`}>thread {handoff.threadId.slice(0, 12)}</span> : null}
             <span className="font-mono" title={`Request ${handoff.requestId}`}>request {shortId(handoff.requestId)}</span>
             <span className="truncate">{profileName(profiles.get(handoff.profileId), handoff.profileId)}</span>
             {!handoff.contentClearedAt && handoff.note ? <span className="min-w-0 truncate italic" title={handoff.note}>“{handoff.note}”</span> : null}
@@ -273,14 +273,14 @@ export function HandoffWatch({ handoff }: { handoff: BrowserHandoff }) {
   return (
     <div className="flex flex-col gap-2">
       <dl className="flex flex-col">
-        <Row label="Bot" mono>{knownBot ? <NodeLink node={{ kind: "bot", id: handoff.botId }} label={`Bot ${handoff.botId}`}>{handoff.botId}</NodeLink> : handoff.botId}</Row>
-        <Row label="Chat thread" mono copy={handoff.threadId}><span className="break-all whitespace-normal">{handoff.threadId}</span></Row>
+        <Row label="Origin" mono>{knownBot && handoff.botId ? <NodeLink node={{ kind: "bot", id: handoff.botId }} label={`Bot ${handoff.botId}`}>{handoff.botId}</NodeLink> : handoff.botId ?? "Operator"}</Row>
+        <Row label="Chat thread" mono copy={handoff.threadId ?? undefined}><span className="break-all whitespace-normal">{handoff.threadId ?? "No Chat origin"}</span></Row>
         <Row label="Request ID" mono copy={handoff.requestId}><span className="break-all whitespace-normal">{handoff.requestId}</span></Row>
         <Row label="Handoff ID" mono copy={handoff.id}><span className="break-all whitespace-normal">{handoff.id}</span></Row>
       </dl>
-      <BotWatch pkg="browse" recordId={handoff.requestId} origin={{ botId: handoff.botId, threadId: handoff.threadId }} observe={handoff.revision}>
+      {handoff.botId && handoff.threadId ? <BotWatch pkg="browse" recordId={handoff.requestId} origin={{ botId: handoff.botId, threadId: handoff.threadId }} observe={handoff.revision}>
         {() => <HandoffCompletion handoff={handoff} />}
-      </BotWatch>
+      </BotWatch> : null}
     </div>
   );
 }
@@ -350,16 +350,16 @@ export function HandoffsWindow() {
       ) : null}>
       {unavailable ? <Empty icon={LifeBuoyIcon} title={unavailable} />
         : !browserHandoffs.data ? <Empty icon={LifeBuoyIcon} title="Reading handoffs…" />
-        : !handoffs.length ? <Empty icon={LifeBuoyIcon} title="No Bot has asked for browser help" />
+        : !handoffs.length ? <Empty icon={LifeBuoyIcon} title="No browser handoffs" />
         : (
           <>
-            {waiting ? <p className="px-0.5 text-[0.72rem] text-warning">{waiting === 1 ? "A Bot is waiting for you" : `${waiting} Bots are waiting for you`}</p> : null}
+            {waiting ? <p className="px-0.5 text-[0.72rem] text-warning">{waiting === 1 ? "A browser handoff is waiting for you" : `${waiting} browser handoffs are waiting for you`}</p> : null}
             {open.map((group) => (
               <Section key={group.state} title={handoffStates[group.state].label}>
                 <ul className="flex flex-col gap-2">{group.handoffs.map((handoff) => <HandoffRow key={handoff.id} handoff={handoff} profile={profiles.get(handoff.profileId)} />)}</ul>
               </Section>
             ))}
-            {!open.length ? <p className="px-0.5 text-[0.72rem] text-muted-foreground">Nothing waiting. Bots ask here when a page needs a person.</p> : null}
+            {!open.length ? <p className="px-0.5 text-[0.72rem] text-muted-foreground">Nothing waiting. Browser handoffs appear here when a page needs a person.</p> : null}
             {resolved.length ? (
               <Section title="History" aside={<Button type="button" size="xs" variant="ghost" aria-expanded={history} onClick={() => setHistory(!history)}>{history ? "Hide" : `Show ${resolved.length}`}</Button>}>
                 {history ? (
@@ -464,7 +464,7 @@ export function ViewerWindow({ id }: { id: string }) {
               </p>
             ) : handoff ? (
               <div className="flex shrink-0 flex-col gap-1.5 border-b border-warning/40 bg-warning/5 px-3 py-2">
-                <p className="line-clamp-3 text-[0.74rem] whitespace-pre-wrap text-pretty"><span className="font-medium">{handoff.botId} asks:</span> {handoff.message}</p>
+                <p className="line-clamp-3 text-[0.74rem] whitespace-pre-wrap text-pretty"><span className="font-medium">{handoff.botId ?? "Operator"} asks:</span> {handoff.message}</p>
                 <HandoffControls handoff={handoff} inViewer />
               </div>
             ) : (

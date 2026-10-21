@@ -13,6 +13,9 @@ import { handleProvider } from "../src/provider.js";
 import { prepareBrowserConfig } from "../src/config.js";
 import { Profiles } from "../src/profiles.js";
 import { standaloneConfig } from "../cli.js";
+import { Vault, VAULT_IMAGE } from "../src/vault.js";
+import { stateHash } from "@stack/api";
+import { Extensions } from "../src/extensions.js";
 import { BrowseState } from "../src/state.js";
 import type { ManagedGate } from "../src/gate.js";
 const fakeGate = (cdp: string, neko: string): ManagedGate => ({
@@ -213,7 +216,7 @@ test("research runtime binds policy to its receipt and never attaches to an unre
     await backend.close(acquired.cleanup);
   } finally { await backend.closeContext(); await s.close(); }
 });
-async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete?: boolean; failStop?: boolean } = {}) {
+async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete?: boolean; failStop?: boolean; failFlush?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "stack-browser-") );
   const root = join(dir, "local-hypeman");
   await mkdir(join(root, "bin"), { recursive: true, mode: 0o700 });
@@ -256,6 +259,15 @@ async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(output));
     } catch { res.writeHead(500).end(); }
   });
+  const guestCommands: string[] = [];
+  const exec = new WebSocketServer({ server });
+  exec.on("connection", (peer, req) => peer.on("message", raw => {
+    assert.equal(req.headers.authorization, "Bearer test-token");
+    assert.match(req.url!, /^\/instances\/instance-\d+\/exec$/);
+    const command = JSON.parse(String(raw)).command; assert.deepEqual(command.slice(0, 2), ["/bin/sh", "-c"]); assert.match(command[2], /kill -STOP|kill -CONT|sync$/);
+    guestCommands.push(command[2]);
+    peer.send(JSON.stringify({ exitCode: options.failFlush && command[2].endsWith("sync") ? 1 : 0 }));
+  }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("fixture did not bind");
@@ -264,9 +276,28 @@ async function fixture(options: { failInstanceCreate?: boolean; failVolumeDelete
   const system = new BrowserSystem(env);
   await system.start();
   return { dir, root, env, system, counts: () => ({ instances: instances.length, volumes: volumes.length }),
-    instances: () => instances, volumes: () => volumes,
-    async close() { await system.close(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); } };
+    instances: () => instances, volumes: () => volumes, guestCommands,
+    async close() { await system.close(); for (const peer of exec.clients) peer.terminate(); await new Promise<void>(resolve => exec.close(() => resolve())); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); } };
 }
+
+test("extension apply uses fenced receipts, preserves sibling selections and never reruns an unknown restart", async () => {
+  const s = await fixture(), backend = new Backend(s.system, async () => undefined), profiles = new Profiles(backend, s.system, s.env, async () => [], fakeGate);
+  const extensions = new Extensions(s.system.root), state = new BrowseState(profiles, backend, s.env, s.system.root, extensions);
+  let calls = 0, fail = false;
+  backend.configureExtensions = async () => { calls++; if (fail) throw new Error("restart outcome unknown"); return []; };
+  try {
+    await s.system.setHypemanLocation(s.root); await s.system.enableHypeman(s.root); await profiles.start(false);
+    const p = await profiles.create(null, "Extensions"), other = await profiles.create(null, "Other"); await profiles.ensure(p.id); await profiles.ensure(other.id);
+    const before = extensions.configuration(p.id), sibling = extensions.configuration(other.id);
+    const saved = extensions.set(p.id, before.revision, []), plan = await state.plan({ kind: "extensions", profileId: p.id, configurationRevision: saved.revision });
+    const changed = extensions.set(p.id, saved.revision, []); await assert.rejects(state.clear(applyState(plan)), /changed/);
+    const input = applyState(await state.plan({ kind: "extensions", profileId: p.id, configurationRevision: changed.revision }));
+    assert.equal((await state.clear(input)).status, "completed"); await state.clear(input); assert.equal(calls, 1); assert.deepEqual(extensions.configuration(p.id).applied, []); assert.deepEqual(extensions.configuration(other.id), sibling);
+    await profiles.ensure(p.id); fail = true;
+    const unknown = applyState(await state.plan({ kind: "extensions", profileId: p.id, configurationRevision: changed.revision }));
+    assert.equal((await state.clear(unknown)).status, "unknown"); await state.clear(unknown); assert.equal(calls, 2); await assert.rejects(profiles.ensure(p.id), /fenced/); assert.equal(extensions.configuration(p.id).observed, null);
+  } finally { profiles.prepareClose(); state.journal.close(); await extensions.close(); await backend.closeContext(); await s.close(); }
+});
 
 test("local Hypeman detection, selection and durable update policy are read independently of Artbird", async () => {
   const s = await fixture();
@@ -809,14 +840,21 @@ test("completion identity resolves the exact Chat-bound handoff for the local op
   }
 });
 
-async function standaloneFixture(options: { failStop?: boolean; botId?: string } = {}) {
+async function standaloneFixture(options: { failStop?: boolean; botId?: string; failManagementPage?: boolean; failFlush?: boolean } = {}) {
   const s = await fixture(options);
   const backend = new Backend(s.system, async () => undefined);
-  let closes = 0;
+  let closes = 0, navigations = 0;
   const cdp = createServer((_req, res) => res.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${(cdp.address() as { port: number }).port}/devtools/browser/fixture` })));
   const ws = new WebSocketServer({ server: cdp });
   ws.on("connection", peer => peer.on("message", raw => {
-    const request = JSON.parse(String(raw)); assert.equal(request.method, "Browser.close"); closes++;
+    const request = JSON.parse(String(raw));
+    if (request.method === "Target.createTarget") {
+      navigations++;
+      if (options.failManagementPage) peer.terminate();
+      else peer.send(JSON.stringify({ id: request.id, result: { targetId: "management-page" } }));
+      return;
+    }
+    assert.equal(request.method, "Browser.close"); closes++;
     peer.send(JSON.stringify({ id: request.id, result: {} }));
   }));
   await new Promise<void>(resolve => cdp.listen(0, "127.0.0.1", resolve));
@@ -827,7 +865,7 @@ async function standaloneFixture(options: { failStop?: boolean; botId?: string }
   relay.stopRelay = async () => {};
   const profiles = new Profiles(backend, s.system, s.env, async () => options.botId ? [{ id: options.botId, url: "unix:///bot", state: "running", recoveryIssue: null }] : [], fakeGate);
   await s.system.setHypemanLocation(s.root); await s.system.enableHypeman(s.root); await profiles.start(false);
-  return { ...s, backend, profiles, closes: () => closes,
+  return { ...s, backend, profiles, closes: () => closes, navigations: () => navigations,
     async close() {
       profiles.prepareClose(); await backend.closeContext();
       for (const peer of ws.clients) peer.terminate();
@@ -892,6 +930,17 @@ test("standalone stop flushes Chrome, retains its volume, survives owner reconst
     assert.deepEqual(await restored.standaloneDelete("persistent"), { deleted: true });
     await assert.rejects(restored.standaloneAttach("persistent", "gone"), /unknown standalone/);
     restored.prepareClose();
+  } finally { await s.close(); }
+});
+
+test("unconfirmed guest flush leaves the VM running and resumes its supervisor without forcing stop", async () => {
+  const s = await standaloneFixture({ failFlush: true });
+  try {
+    const profile = await s.profiles.standaloneCreate("unconfirmed-flush"); await s.profiles.ensure(profile.id);
+    await assert.rejects(s.profiles.standaloneStop("unconfirmed-flush"), /Guest command failed/);
+    assert.equal(s.instances()[0]!.state, "Running"); assert.equal(s.closes(), 1);
+    assert.equal(s.profiles.standaloneGet("unconfirmed-flush")!.state, "failed");
+    assert.match(s.guestCommands[0]!, /kill -STOP/); assert.match(s.guestCommands.at(-1)!, /kill -CONT/);
   } finally { await s.close(); }
 });
 
@@ -966,4 +1015,97 @@ test("standalone drive configs isolate session namespaces by owner and name and 
     assert.equal(a.plugins[0].args[1], "browser=a");
     await assert.rejects(standaloneConfig("../escape", s.env));
   } finally { await s.close(); }
+});
+
+test("operator handoff has no invented Bot origin, reuses exact intent and returns through existing human controls", async () => {
+  const s = await standaloneFixture();
+  try {
+    const p = await s.profiles.standaloneCreate("vault-browser"); await s.profiles.ensure(p.id);
+    await s.profiles.standaloneAttach("vault-browser", "proof-controller");
+    const oldEndpoint = s.profiles.list().find(row => row.id === p.id)!.cdpUrl;
+    const input = { profileId: p.id, requestId: randomUUID(), message: "Manage agent passwords" };
+    const handoff = await s.profiles.operatorHandoff(input);
+    assert.equal(handoff.origin, "operator"); assert.equal(handoff.botId, null); assert.equal(handoff.threadId, null); assert.equal(handoff.state, "awaiting_human");
+    assert.deepEqual(await s.profiles.operatorHandoff(input), handoff);
+    await assert.rejects(s.profiles.operatorHandoff({ ...input, message: "Different" }), /conflicts/);
+    assert.equal(s.profiles.handoffs({ botId: "unrelated", instance: "x" }).length, 0);
+    const taken = await s.profiles.actHandoff("take", { id: handoff.id, expectedRevision: handoff.revision, requestId: randomUUID() }); assert.ok(taken.controlUrl);
+    const finished = await s.profiles.actHandoff("finish", { id: handoff.id, expectedRevision: taken.handoff.revision, requestId: randomUUID(), outcome: "completed" }); assert.equal(finished.handoff.state, "resolved");
+    assert.equal(s.profiles.list().find(row => row.id === p.id)!.cdpUrl, null); assert.ok(oldEndpoint);
+    assert.ok(!(await s.profiles.stateObservation(p.id)).blockedBy.some(s => s.includes("controllers")));
+  } finally { await s.close(); }
+});
+
+test("management page uncertainty never reopens a tab, including after owner recovery or missing configuration", async () => {
+  const s = await standaloneFixture({ failManagementPage: true });
+  try {
+    const profile = await s.profiles.standaloneCreate("management-proof"); await s.profiles.ensure(profile.id);
+    const handoff = await s.profiles.operatorHandoff({ profileId: profile.id, requestId: randomUUID(), message: "Manage extension" });
+    const input = { handoffId: handoff.id, expectedRevision: handoff.revision, requestId: randomUUID(), page: { kind: "extension" as const, id: "fixture", entry: "popup" as const } };
+    const result = await s.profiles.openManagementPage(input, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup.html");
+    assert.match(result.issue!, /unknown/); assert.equal(s.navigations(), 1);
+    assert.deepEqual(await s.profiles.openManagementPage(input, "unused"), result); assert.equal(s.navigations(), 1);
+    assert.throws(() => s.profiles.managementPagePrior({ ...input, page: { kind: "vault" } }), /conflicts/);
+    const restored = new Profiles(s.backend, s.system, s.env, async () => [], fakeGate); await restored.start(false);
+    const operation = api.operations.find(op => op.name === "browser_management_page_open")!;
+    // No catalog or vault is available: a retained admission must resolve before either is accessed.
+    const ctx = { backend: s.backend, system: s.system, profiles: restored, state: {} as BrowseState };
+    const recovered = await operation.call(ctx, input);
+    assert.equal((recovered as Handoff).id, handoff.id); assert.match((recovered as Handoff).issue!, /Owner restarted/);
+    assert.equal(s.navigations(), 1); restored.prepareClose();
+  } finally { await s.close(); }
+});
+
+test("operator handoffs on Bot profiles block Bot maintenance and remain visible to their owner", async () => {
+  const s = await standaloneFixture({ botId: "agent" });
+  try {
+    const profile = await s.profiles.create("agent", "Agent vault", true); await s.profiles.ensure(profile.id);
+    const handoff = await s.profiles.operatorHandoff({ profileId: profile.id, requestId: randomUUID(), message: "Set up agent vault" });
+    assert.equal(s.profiles.handoffs({ botId: "agent", instance: "launch" })[0]!.id, handoff.id);
+    const operation = api.operations.find(op => op.name === "browse_bot_dependencies")!;
+    const dependencies = await operation.call({ backend: s.backend, system: s.system, profiles: s.profiles, state: {} as BrowseState }, { botId: "agent", cwd: s.root }) as { blockedBy: string[] };
+    assert.ok(dependencies.blockedBy.some(reason => reason.includes(handoff.id)));
+  } finally { await s.close(); }
+});
+
+test("vault lifecycle rejects foreign mounts, retains partial deletion receipts and never replays provider effects", async () => {
+  const options = { failVolumeDelete: true }, s = await fixture(options), vault = new Vault(s.system);
+  try {
+    await s.system.setHypemanLocation(s.root); await s.system.enableHypeman(s.root);
+    assert.equal((await vault.status()).state, "absent"); assert.deepEqual(s.counts(), { instances: 0, volumes: 0 });
+    const id = randomUUID(), connection = await s.system.connection();
+    const record = { id, provider: stateHash([s.system.selectedHypemanRoot(), connection.baseUrl]), instanceId: "vault-instance", volumeId: "vault-volume", certificate: null, signupsAllowed: false, fence: null };
+    await writeFile(join(s.system.root, "vaultwarden.json"), JSON.stringify(record));
+    const volume = { id: record.volumeId, name: `stack-vault-volume-${id}`, tags: { "dev.stack.vault": id } };
+    const instance = { id: record.instanceId, name: `stack-vault-instance-${id}`, tags: { "dev.stack.vault": id }, image: VAULT_IMAGE, state: "Stopped", network: { ip: "192.168.64.2" }, volumes: [{ volume_id: volume.id, mount_path: "/data", readonly: false }] };
+    s.volumes().push(volume); s.instances().push(instance);
+    await assert.rejects(s.system.enableHypeman(null), /Vaultwarden/);
+    const foreign = { id: "foreign", volumes: [{ volume_id: volume.id }] }; s.instances().push(foreign);
+    const blocked = await vault.plan({ action: "delete", signupsAllowed: false }); assert.ok(blocked.blockedBy.length); await assert.rejects(vault.apply(applyState(blocked)), /unavailable/); s.instances().pop();
+    const plan = await vault.plan({ action: "delete", signupsAllowed: false }), input = applyState(plan);
+    const partial = await vault.apply(input); assert.equal(partial.status, "partial"); assert.equal(s.instances().length, 0); assert.equal(s.volumes().length, 1);
+    assert.equal((await vault.status()).fence, input.requestId); options.failVolumeDelete = false;
+    assert.deepEqual(await vault.apply(input), partial); assert.equal(s.volumes().length, 1, "same request never retries failed delete");
+    const status = await vault.status(); await assert.rejects(vault.release(input.requestId, "stale"), /revision/);
+    await vault.release(input.requestId, status.revision);
+    const finish = await vault.plan({ action: "delete", signupsAllowed: false }); assert.deepEqual(finish.blockedBy, []);
+    assert.equal((await vault.apply(applyState(finish))).status, "completed"); assert.equal((await vault.status()).state, "absent"); assert.deepEqual(s.counts(), { instances: 0, volumes: 0 });
+    assert.deepEqual(await vault.apply(input), partial, "historical failure remains truthful after later cleanup");
+  } finally { await vault.close(); await s.close(); }
+});
+
+test("vault restore refuses corrupted artifacts and destination changes before provider effects", async () => {
+  const s = await fixture(), vault = new Vault(s.system);
+  try {
+    await s.system.setHypemanLocation(s.root); await s.system.enableHypeman(s.root);
+    const id = randomUUID(), vaultId = randomUUID(), dir = join(s.system.root, "vault-backups"), path = join(dir, id + ".tar.gz"); await mkdir(dir);
+    const bytes = Buffer.from("fixture backup"), metadata = { id, vaultId, createdAt: new Date().toISOString(), bytes: bytes.length, sha256: "0".repeat(64), path };
+    await writeFile(path, bytes); await writeFile(join(dir, id + ".json"), JSON.stringify(metadata));
+    const record = { id: vaultId, provider: "another-destination", instanceId: null, volumeId: null, certificate: "fixture public certificate", ingress: { ip: "192.168.64.1", port: 12345 }, signupsAllowed: false, fence: null };
+    await writeFile(join(dir, id + ".record.json"), JSON.stringify(record));
+    const corrupted = await vault.plan({ action: "restore", signupsAllowed: false, backupId: id }); assert.ok(corrupted.blockedBy.length); await assert.rejects(vault.apply(applyState(corrupted)));
+    const { createHash } = await import("node:crypto"); metadata.sha256 = createHash("sha256").update(bytes).digest("hex"); await writeFile(join(dir, id + ".json"), JSON.stringify(metadata));
+    const foreign = await vault.plan({ action: "restore", signupsAllowed: false, backupId: id }); assert.ok(foreign.blockedBy.some(s => s.includes("destination"))); await assert.rejects(vault.apply(applyState(foreign)), /destination/);
+    assert.deepEqual(s.counts(), { instances: 0, volumes: 0 }); assert.equal((await vault.status()).state, "absent");
+  } finally { await vault.close(); await s.close(); }
 });

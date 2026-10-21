@@ -18,6 +18,11 @@ export const forwardTimeouts = new Map<string, number>([
   ["scrape/scrape_queue_process", 600_000],
   // Take drains and grants input; finish closes each bound controller.
   ["browse/browser_handoff_take", 60_000],
+  ["browse/browser_operator_handoff_request", 60_000],
+  ["browse/browser_management_page_open", 60_000],
+  ["browse/browser_extension_install_bitwarden", 180_000],
+  ["browse/browser_profile_extensions_apply", 240_000],
+  ["browse/browser_vault_apply", 360_000],
   ["browse/browser_handoff_finish", 180_000],
   ["browse/browser_profile_delete", 60_000],
   // Named browser start waits for its VM (30s) and CDP readiness (35s); stop drains, closes Chrome and confirms the VM stopped.

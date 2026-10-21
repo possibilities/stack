@@ -6,6 +6,10 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { BrowserSystem } from "./system.js";
+import { browserCommand } from "./cdp.js";
+import { vaultConnection, type VaultConnection } from "./vault.js";
+import { guestExec } from "./guest-exec.js";
+import type { Extensions, ExtensionRef } from "./extensions.js";
 import { egressPolicy, type EgressPolicy } from "@stack/scrape/network";
 import { researchFirewall, researchPolicyId } from "./research-egress.js";
 import { prepareResearchRuntime, RESEARCH_IMAGE } from "./research-runtime.js";
@@ -20,6 +24,8 @@ const nativeSchema = z.strictObject({ instanceName: z.string(), instanceId: z.st
 const recordSchema = z.strictObject({ version: z.literal(1), session: z.string(), profile: z.string(), persistent: z.boolean(),
   lease: z.string(), createdAt: z.string(), target: targetSchema.nullable(), native: nativeSchema.nullable(),
   egress: egressPolicy.optional(),
+  extensionFlags: z.array(z.string()).optional(),
+  vaultTrust: vaultConnection.nullable().optional(),
 });
 type NativeRecord = z.infer<typeof recordSchema>;
 export type Receipt = Omit<NativeRecord, "native">;
@@ -31,6 +37,8 @@ export type Cleanup = z.infer<typeof cleanupSchema>;
 export function backendSession(session: string): string {
   return `ast-${createHash("sha256").update(session).digest("hex").slice(0, 28)}`;
 }
+
+function shellQuote(value: string): string { return "'" + value.replaceAll("'", "'\"'\"'") + "'"; }
 
 function row(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Hypeman returned an invalid record");
@@ -124,6 +132,7 @@ export class Backend {
   /** Inspection never starts a provider, VM or browser. Only recorded exact
    * incarnations belong to this installation; similar orphan tags aren't adopted. */
   async factoryResetSnapshot(): Promise<BrowserResetSnapshot> {
+    try { await readFile(join(this.system.root, "vaultwarden.json")); throw new Error("Delete the managed Vaultwarden service through its exact lifecycle before installation reset"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const ledger = await this.read(), claims = ledger.map(({ session, lease, profile, persistent }) => ({ session, lease, profile, persistent })).sort((a, b) => a.session.localeCompare(b.session));
     if (!ledger.length) return { provider: null, claims, resources: [], blockedBy: [], revision: stateHash([null, claims, [], []]) };
     const connection = this.maintenanceConnection ?? await this.system.connection();
@@ -190,7 +199,7 @@ export class Backend {
         removed.push({ resource, outcome: "removed", detail: "Exact old profile provider resource absent" });
         progress(removed);
       });
-      const next: NativeRecord = { ...old, native: null, target: null, lease: randomBytes(16).toString("hex"), createdAt: new Date().toISOString() };
+      const next: NativeRecord = { ...old, extensionFlags: undefined, vaultTrust: null, native: null, target: null, lease: randomBytes(16).toString("hex"), createdAt: new Date().toISOString() };
       all[all.findIndex(row => row.session === old.session)] = next; await this.save(all);
       const provisioned = await this.provision(next);
       all[all.findIndex(row => row.session === old.session)] = provisioned; await this.save(all);
@@ -326,6 +335,10 @@ export class Backend {
     throw new Error("Kernel Chrome did not expose CDP within 35 seconds; receipt retained. Kernel supervises Chrome; Stack does not force-reboot a Running VM with unflushed profile data");
   }
 
+  private bootCommand(receipt: NativeRecord): string {
+    return `set -e; sed -i '/ # stack-vault$/d' /etc/hosts; ${receipt.vaultTrust ? `printf '%s\\n' ${shellQuote(receipt.vaultTrust.ip + " " + receipt.vaultTrust.hostname + " # stack-vault")} >> /etc/hosts; ` : ""}${receipt.extensionFlags ? `export CHROMIUM_FLAGS=${shellQuote("--start-fullscreen --disable-infobars " + receipt.extensionFlags.join(" "))}; ` : ""}${receipt.egress ? `${prepareResearchRuntime()}; ${researchFirewall(receipt.egress)}; printf 'nameserver 1.1.1.1\\n' > /etc/resolv.conf; ( sleep 300; iptables -F OUTPUT; research_ip6tables -F OUTPUT ) >/dev/null 2>&1 & ` : ""}mkdir -p /home/kernel/user-data; chown kernel:kernel /home/kernel/user-data; rm -f /var/run/supervisor.sock /var/run/supervisord.pid /run/dbus/system_bus_socket /tmp/pulse/native; chown 0:0 /usr/bin/mount /opt/chrome-for-testing/chrome_sandbox; chmod 4755 /opt/chrome-for-testing/chrome_sandbox; ln -sfn chrome_sandbox /opt/chrome-for-testing/chrome-sandbox; export CHROME_DEVEL_SANDBOX=/opt/chrome-for-testing/chrome_sandbox; export NEKO_WEBRTC_NAT1TO1=$(hostname -I | awk '{print $1}'); mountpoint -q /dev/shm || mount -t tmpfs -o mode=1777 tmpfs /dev/shm; exec /wrapper`;
+  }
+
   private async provision(receipt: NativeRecord): Promise<NativeRecord> {
     const session = receipt.session;
     const lease = receipt.lease;
@@ -361,7 +374,7 @@ export class Backend {
           ENABLE_WEBRTC: receipt.egress ? "false" : "true", NEKO_WEBRTC_UDPMUX: String(56000 + slot) },
         volumes: [{ volume_id: volume.id, mount_path: "/home/kernel", readonly: false }],
         entrypoint: ["/bin/sh", "-c"],
-        cmd: [`set -e; ${receipt.egress ? `${prepareResearchRuntime()}; ${researchFirewall(receipt.egress)}; printf 'nameserver 1.1.1.1\\n' > /etc/resolv.conf; ( sleep 300; iptables -F OUTPUT; research_ip6tables -F OUTPUT ) >/dev/null 2>&1 & ` : ""}mkdir -p /home/kernel/user-data; chown kernel:kernel /home/kernel/user-data; rm -f /var/run/supervisor.sock /var/run/supervisord.pid /run/dbus/system_bus_socket /tmp/pulse/native; chown 0:0 /usr/bin/mount /opt/chrome-for-testing/chrome_sandbox; chmod 4755 /opt/chrome-for-testing/chrome_sandbox; ln -sfn chrome_sandbox /opt/chrome-for-testing/chrome-sandbox; export CHROME_DEVEL_SANDBOX=/opt/chrome-for-testing/chrome_sandbox; export NEKO_WEBRTC_NAT1TO1=$(hostname -I | awk '{print $1}'); mountpoint -q /dev/shm || mount -t tmpfs -o mode=1777 tmpfs /dev/shm; exec /wrapper`],
+        cmd: [this.bootCommand(receipt)],
         skip_kernel_headers: true,
       });
       instance = row(await this.request("GET", `/instances/${encodeURIComponent(instanceName)}`));
@@ -417,7 +430,7 @@ export class Backend {
       if (!volume || volume.name !== native.volumeName || !owned(volume, name, current.lease, current.persistent ? "durable-profile" : "disposable-profile")) throw new Error("browser profile changed; refusing to attach to another volume");
       if (persistent && instance.state === "Stopped") {
         await this.onRecover?.(name);
-        await this.request("POST", `/instances/${encodeURIComponent(native.instanceId)}/start`, {});
+        await this.request("POST", `/instances/${encodeURIComponent(native.instanceId)}/start`, current.extensionFlags ? { entrypoint: ["/bin/sh", "-c"], cmd: [this.bootCommand(current)] } : {});
         instance = row(await this.request("GET", `/instances/${encodeURIComponent(native.instanceName)}`));
       }
       const deadline = Date.now() + 30_000;
@@ -497,6 +510,54 @@ export class Backend {
     });
   }
 
+  /** Reads and file effects verify the exact receipt and mount before using the guest API. */
+  async guestRequest(session: string, path: string, init: RequestInit = {}): Promise<Response> {
+    const state = await this.stateProfile(session), receipt = state.receipt;
+    if (state.blockedBy.length || !receipt || state.instances.length !== 1) throw new Error("Owned guest identity unavailable");
+    const instance = state.instances[0]!;
+    if (!receipt.native || !Array.isArray(instance.volumes) || !instance.volumes.some(mount => row(mount).volume_id === receipt.native!.volumeId && row(mount).mount_path === "/home/kernel" && row(mount).readonly === false)) throw new Error("Owned guest mount changed");
+    const ip = row(instance.network).ip;
+    if (instance.state !== "Running" || typeof ip !== "string" || !(await this.system.guestSubnet())(ip)) throw new Error("Owned guest is not running");
+    const response = await fetch(`http://${ip}:10001${path}`, { ...init, redirect: "error", signal: AbortSignal.timeout(60000) });
+    if (!response.ok) { await response.body?.cancel(); throw new Error(`Browser guest operation failed (HTTP ${response.status})`); }
+    return response;
+  }
+
+  async configureExtensions(session: string, extensions: Extensions, refs: ExtensionRef[], vault: VaultConnection | null = null) {
+    for (const ref of refs) {
+      const data = await extensions.archive(ref), form = new FormData();
+      form.set("zip_file", new Blob([new Uint8Array(data)]), "extension.zip");
+      form.set("dest_path", `/home/kernel/extensions/stack-${ref.id}-${ref.digest}`);
+      await (await this.guestRequest(session, "/fs/upload_zip", { method: "POST", body: form })).body?.cancel();
+    }
+    const paths = refs.map(ref => `/home/kernel/extensions/stack-${ref.id}-${ref.digest}`);
+    const extensionFlags = ["--enable-unsafe-extension-debugging", ...(paths.length ? [`--load-extension=${paths.join(",")}`, `--disable-extensions-except=${paths.join(",")}`] : ["--disable-extensions"]), ...(vault ? [`--ignore-certificate-errors-spki-list=${vault.spki}`] : [])];
+    await this.serial(async () => {
+      const all = await this.read(), current = all.find(row => row.session === backendSession(session));
+      if (!current?.persistent || current.egress) throw new Error("Extensions require a durable Browser profile");
+      current.extensionFlags = extensionFlags; current.vaultTrust = vault; await this.save(all);
+    });
+    await this.suspend(session, true);
+    const launched = await this.launch(session, true);
+    const observed = await this.extensionsObserved(launched.cdpUrl);
+    const expected = refs.map(ref => extensions.get(ref));
+    if (observed.length !== expected.length || expected.some(ref => !observed.some(item => item.id === ref.chromeId && item.version === ref.version))) throw new Error("Loaded extensions differ from the selected versions");
+    return observed;
+  }
+
+  async inspectExtensions(session: string) {
+    const state = await this.stateProfile(session), receipt = state.receipt, instance = state.instances[0];
+    if (state.blockedBy.length || !receipt?.native || !instance || instance.state !== "Running" || !Array.isArray(instance.volumes)
+      || !instance.volumes.some(m => row(m).volume_id === receipt.native!.volumeId && row(m).mount_path === "/home/kernel" && row(m).readonly === false)) throw new Error("Exact running profile unavailable");
+    const ip = row(instance.network).ip; if (typeof ip !== "string") throw new Error("Guest address unavailable");
+    return this.extensionsObserved(`http://127.0.0.1:${await this.relay(receipt.session, ip)}`);
+  }
+
+  async extensionsObserved(source: string): Promise<Array<{ id: string; name: string; version: string }>> {
+    const result = await browserCommand(source, "Extensions.getExtensions");
+    return z.array(z.object({ id: z.string(), name: z.string(), version: z.string() })).parse(result.extensions);
+  }
+
   async status(): Promise<{ provider: "hypeman"; mode: "disposable"; sessions: number }> {
     return { provider: "hypeman", mode: "disposable", sessions: (await this.read()).length };
   }
@@ -527,31 +588,36 @@ export class Backend {
       const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(3000) });
       const url = row(await response.json()).webSocketDebuggerUrl;
       if (!response.ok || typeof url !== "string") throw new Error("cannot cleanly close Chrome; VM left running");
-      await new Promise<void>((resolve, reject) => {
-        const socket = new WebSocket(url);
-        let sent = false;
-        const timer = setTimeout(() => { socket.close(); reject(new Error("Chrome close timed out; VM left running")); }, 10_000);
-        const done = (error?: Error) => { clearTimeout(timer); socket.close(); error ? reject(error) : resolve(); };
-        socket.onopen = () => { sent = true; socket.send(JSON.stringify({ id: 1, method: "Browser.close" })); };
-        socket.onmessage = (event) => { const message = JSON.parse(String(event.data)); if (message.id === 1) done(message.error ? new Error("Chrome refused clean close") : undefined); };
-        socket.onclose = () => done(sent ? undefined : new Error("Chrome disconnected before close"));
-        socket.onerror = () => done(new Error("Chrome close connection failed"));
-      });
-      // Chrome flushes profile databases during orderly exit. Give its child
-      // processes time to drain before asking Hypeman to stop the guest.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await this.request("POST", `/instances/${encodeURIComponent(native.instanceId)}/stop`, {});
-      if (confirmStopped) {
-        const deadline = Date.now() + 30_000;
-        for (;;) {
-          const observed = row(await this.request("GET", `/instances/${encodeURIComponent(native.instanceName)}`));
-          if (observed.id !== native.instanceId || !owned(observed, current.session, current.lease, "browser")) throw new Error("browser target changed during stop");
-          if (observed.state === "Stopped") break;
-          if (Date.now() >= deadline) throw new Error("browser VM stop was not confirmed");
-          await new Promise(resolve => setTimeout(resolve, 500));
+      const connection = this.maintenanceConnection ?? await this.system.connection();
+      let stopped = false;
+      try {
+        // Freeze the supervisor, not Chrome, so Browser.close cannot race an automatic relaunch.
+        await guestExec(connection, native.instanceId, ["/bin/sh", "-c", "set -eu; pid=$(cat /var/run/supervisord.pid); test -d /proc/$pid; kill -STOP $pid"]);
+        await new Promise<void>((resolve, reject) => {
+          const socket = new WebSocket(url);
+          let sent = false;
+          const timer = setTimeout(() => { socket.close(); reject(new Error("Chrome close timed out; VM left running")); }, 10_000);
+          const done = (error?: Error) => { clearTimeout(timer); socket.close(); error ? reject(error) : resolve(); };
+          socket.onopen = () => { sent = true; socket.send(JSON.stringify({ id: 1, method: "Browser.close" })); };
+          socket.onmessage = (event) => { const message = JSON.parse(String(event.data)); if (message.id === 1) done(message.error ? new Error("Chrome refused clean close") : undefined); };
+          socket.onclose = () => done(sent ? undefined : new Error("Chrome disconnected before close"));
+          socket.onerror = () => done(new Error("Chrome close connection failed"));
+        });
+        await guestExec(connection, native.instanceId, ["/bin/sh", "-c", "set -eu; n=0; while :; do live=0; for p in /proc/[0-9]*/exe; do exe=$(readlink $p 2>/dev/null || true); if [ \"$exe\" = /opt/chrome-for-testing/chrome ]; then live=1; fi; done; test $live = 1 || break; n=$((n+1)); test $n -lt 20; sleep 1; done; sync"]);
+        await this.request("POST", `/instances/${encodeURIComponent(native.instanceId)}/stop`, {});
+        if (confirmStopped) {
+          const deadline = Date.now() + 30_000;
+          for (;;) {
+            const observed = row(await this.request("GET", `/instances/${encodeURIComponent(native.instanceName)}`));
+            if (observed.id !== native.instanceId || !owned(observed, current.session, current.lease, "browser")) throw new Error("browser target changed during stop");
+            if (observed.state === "Stopped") break;
+            if (Date.now() >= deadline) throw new Error("browser VM stop was not confirmed");
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         }
-      }
-      await this.stopRelay(current.session);
+        stopped = true;
+        await this.stopRelay(current.session);
+      } finally { if (!stopped) await guestExec(connection, native.instanceId, ["/bin/sh", "-c", "kill -CONT $(cat /var/run/supervisord.pid)"], 5).catch(() => undefined); }
   }
 
   async closeContext(): Promise<void> {

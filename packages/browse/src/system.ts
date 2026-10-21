@@ -348,6 +348,7 @@ export class BrowserSystem {
 
   async enableHypeman(root: string | null): Promise<HypemanInstallation[]> {
     return this.serial(async () => {
+      if (root !== this.record.hypemanRoot && existsSync(join(this.root, "vaultwarden.json"))) throw new Error("Managed Vaultwarden still owns this provider; delete its exact resources before changing provider selection");
       if (root !== null) {
         if (!this.candidateRoots().some((candidate) => candidate.root === root) || !safeFile(join(root, "bin", "hypeman-api"))) throw new Error("selected Hypeman root is not a detected installation");
         await this.connection(root);
@@ -430,6 +431,7 @@ export class BrowserSystem {
       if (!safeDirectory(root) || !safeFile(join(root, "stack-install.json"))) throw new Error("only Stack-owned Hypeman can be uninstalled through this operation");
       if (this.record.hypemanRoot === root) throw new Error("disable this Hypeman installation before uninstalling it");
       if (!discardData) throw new Error("managed Hypeman stores its images and state under this root; confirm data disposal to uninstall");
+      if (existsSync(join(this.root, "vaultwarden.json"))) throw new Error("Managed Vaultwarden resources remain");
       const sessions = join(this.root, "sessions.json");
       if (existsSync(sessions) && (JSON.parse(await readFile(sessions, "utf8")) as unknown[]).length)
         throw new Error("browser reservations remain; close or reconcile them before uninstalling Hypeman");

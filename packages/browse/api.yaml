@@ -4,9 +4,10 @@ socket:
   description: Owner-local provider lifecycle, constrained disposable research browsers and system management, including exact parent-fenced installation-reset inspection/callbacks; not an agent-facing browser transport.
 mcp:
   workerOperations: [browser_standalone_list, browser_standalone_get]
-  events: [browser_handoffs_changed, browser_standalone_changed]
+  events: [browser_handoffs_changed, browser_standalone_changed, browser_extensions_changed]
   description: Verified live Bots manage only their own profiles and current-launch controllers. Any MCP caller may manage named standalone browsers (browser_standalone_*). Page actions remain in agent-browser.
   operations:
+    - browser_profile_extensions_get
     - browser_profile_list
     - browser_profile_create
     - browser_profile_delete
@@ -29,6 +30,21 @@ websocket:
   events: all
   description: Loopback management operations and change notices for future operator clients.
   operations:
+    - browser_vault_status
+    - browser_vault_plan
+    - browser_vault_apply
+    - browser_vault_receipt_get
+    - browser_vault_fence_release
+    - browser_vault_backup_list
+    - browser_management_page_open
+    - browser_extension_list
+    - browser_extension_import
+    - browser_extension_install_bitwarden
+    - browser_profile_extensions_get
+    - browser_profile_extensions_inspect
+    - browser_profile_extensions_set
+    - browser_profile_extensions_plan
+    - browser_profile_extensions_apply
     - browse_state_read
     - browser_profile_reset_plan
     - browser_profile_reset_clear
@@ -42,6 +58,7 @@ websocket:
     - browse_state_receipt_get
     - browse_state_fence_release
     - browser_handoff_get
+    - browser_operator_handoff_request
     - browser_handoff_list
     - browser_handoff_completion
     - browser_handoff_take

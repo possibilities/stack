@@ -3,7 +3,8 @@ import { completionReceipt, type CompletionWatch } from "@stack/api";
 
 export const handoffSchema = z.strictObject({
   contentClearedAt: z.iso.datetime().nullable().default(null), requestDigest: z.string().nullable().default(null),
-  id: z.uuid(), profileId: z.uuid(), botId: z.string(), threadId: z.string(), instance: z.string(), requestId: z.uuid(),
+  origin: z.enum(["bot", "operator"]).default("bot"),
+  id: z.uuid(), profileId: z.uuid(), botId: z.string().nullable(), threadId: z.string().nullable(), instance: z.string().nullable(), requestId: z.uuid(),
   targetId: z.string().nullable(), targetStatus: z.enum(["unspecified", "present", "missing", "unknown"]), message: z.string(),
   state: z.enum(["preparing", "awaiting_human", "human_controlling", "returning", "resolved"]),
   outcome: z.enum(["completed", "skipped", "cancelled"]).nullable(), note: z.string().nullable(),

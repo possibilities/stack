@@ -1,3 +1,4 @@
+import { browserCommand } from "./cdp.js";
 import { execFile as execFileCallback } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -163,6 +164,12 @@ export class Profiles {
     profile.maintenanceRequestId = requestId; await this.save();
     const managed = this.gates.get(id); if (managed) { managed.gate.hold(); await managed.gate.drain(); await managed.gate.revokeHuman(); }
   }
+  async stateRuntimeChanged(id: string) {
+    const profile = this.ledger.profiles.find(row => row.id === id)!;
+    await this.gates.get(id)?.gate.close(); this.gates.delete(id);
+    profile.state = profile.stopped ? "stopped" : "recovering"; profile.cdpUrl = null; profile.observation = null;
+    await this.save();
+  }
   async stateResetMark(id: string) {
     const profile = this.ledger.profiles.find(row => row.id === id)!;
     profile.generation++; profile.state = profile.stopped ? "stopped" : "recovering"; profile.cdpUrl = null; profile.observation = null; profile.error = null;
@@ -192,7 +199,7 @@ export class Profiles {
     return { ...caller, threadId: invocation.threadId };
   }
 
-  handoffs(caller: BrowserCaller | null): Handoff[] { return structuredClone(this.ledger.handoffs.filter((h) => !caller || h.botId === caller.botId)); }
+  handoffs(caller: BrowserCaller | null): Handoff[] { return structuredClone(this.ledger.handoffs.filter((h) => !caller || h.botId === caller.botId || h.origin === "operator" && this.ledger.profiles.some(p => p.id === h.profileId && p.botId === caller.botId))); }
 
   /** Exact Chat-bound handoff identity in any state; identifiers only. */
   completionIdentity(input: { botId: string; threadId: string; requestId: string }) {
@@ -220,7 +227,7 @@ export class Profiles {
       if (this.held(input.profileId)) throw new OperationRejected("profile already has an unresolved handoff");
       await requireCompletionCoordination(this.env, "browse", "browser_handoff_request", handoffWatch, input, invocation);
       if (this.closing) throw new OperationRejected("browser is shutting down");
-      const handoff: Handoff = { id: randomUUID(), ...origin, profileId: input.profileId, requestId: input.requestId,
+      const handoff: Handoff = { id: randomUUID(), origin: "bot", ...origin, profileId: input.profileId, requestId: input.requestId,
         targetId: input.targetId ?? null, targetStatus: input.targetId ? "unknown" : "unspecified", message: input.message,
         state: "preparing", outcome: null, note: null, revision: 1, createdAt: new Date().toISOString(), resolvedAt: null, issue: null, quiesced: false,
         contentClearedAt: null, requestDigest: stateHash([input.profileId, input.targetId ?? null, input.message]) };
@@ -230,6 +237,52 @@ export class Profiles {
       await this.prepareHandoff(handoff);
       return structuredClone(handoff);
     }));
+  }
+
+  /** Local operator can hand off an unassigned or Bot profile without inventing a Chat. */
+  async operatorHandoff(input: Omit<HandoffRequest, "subscribe">): Promise<Handoff> {
+    return this.serial(`operator-request:${input.requestId}`, () => this.serial(`handoff:${input.profileId}`, async () => {
+      const digest = stateHash([input.profileId, input.targetId ?? null, input.message]);
+      const previous = this.ledger.handoffs.find(h => h.origin === "operator" && h.requestId === input.requestId);
+      if (previous) {
+        if (previous.requestDigest !== digest) throw new OperationRejected("handoff requestId conflicts with existing intent");
+        if (previous.state === "preparing" && !previous.issue?.startsWith("Owner restarted")) await this.prepareHandoff(previous);
+        return structuredClone(previous);
+      }
+      const profile = this.ledger.profiles.find(p => p.id === input.profileId);
+      if (this.closing || !profile || profile.state !== "ready" || !this.gates.has(profile.id)) throw new OperationRejected("Start the profile and wait for readiness before handoff");
+      if (profile.maintenanceRequestId || this.held(profile.id)) throw new OperationRejected("Profile already held or fenced");
+      const handoff: Handoff = { origin: "operator", id: randomUUID(), botId: null, threadId: null, instance: null,
+        profileId: input.profileId, requestId: input.requestId, targetId: input.targetId ?? null, targetStatus: input.targetId ? "unknown" : "unspecified", message: input.message,
+        state: "preparing", outcome: null, note: null, revision: 1, createdAt: new Date().toISOString(), resolvedAt: null, issue: null, quiesced: false,
+        contentClearedAt: null, requestDigest: digest };
+      this.ledger.handoffs.push(handoff); this.gates.get(profile.id)!.gate.hold();
+      await this.changed(); await this.prepareHandoff(handoff); return structuredClone(handoff);
+    }));
+  }
+
+  managementPagePrior(input: { handoffId: string; expectedRevision: number; requestId: string; page: unknown }): Handoff | null {
+    const item = this.ledger.handoffs.find(h => h.id === input.handoffId);
+    const prior = this.ledger.actions.find(a => a.id === input.handoffId && a.requestId === input.requestId);
+    if (!prior) return null;
+    if (prior.digest !== stateHash(["management-page", input]) || !item) throw new Error("Request ID conflicts with another action");
+    return structuredClone(item);
+  }
+  async openManagementPage(input: { handoffId: string; expectedRevision: number; requestId: string; page: unknown }, url: string): Promise<Handoff> {
+    const item = this.ledger.handoffs.find(h => h.id === input.handoffId); if (!item) throw new Error("Unknown handoff");
+    return this.serial(`handoff:${item.profileId}`, async () => {
+      const digest = stateHash(["management-page", input]);
+      const prior = this.ledger.actions.find(a => a.id === item.id && a.requestId === input.requestId);
+      if (prior) { if (prior.digest !== digest) throw new Error("Request ID conflicts with another action"); return structuredClone(item); }
+      if (item.state !== "awaiting_human" || item.revision !== input.expectedRevision) throw new Error("Awaiting handoff and exact revision required");
+      const managed = this.gates.get(item.profileId); if (!managed) throw new Error("Profile runtime unavailable");
+      await managed.gate.drain(); await managed.gate.revokeHuman();
+      this.ledger.actions.push({ id: item.id, requestId: input.requestId, digest, revision: item.revision });
+      item.issue = "Management page navigation admitted; outcome not yet verified"; item.revision++; await this.changed();
+      try { const result = await browserCommand(managed.source, "Target.createTarget", { url }); if (typeof result.targetId !== "string") throw new Error("Invalid target"); item.targetId = result.targetId; item.targetStatus = "present"; item.issue = null; }
+      catch { item.issue = "Management page navigation outcome unknown; inspect the existing browser, do not replay this request"; }
+      item.revision++; await this.changed(); return structuredClone(item);
+    });
   }
 
   private async prepareHandoff(handoff: Handoff): Promise<void> {
@@ -327,7 +380,15 @@ export class Profiles {
           // If persistence fails after admission reopens, newly admitted work
           // must drain again; a replacement gate cannot inherit old quiescence.
           item.quiesced = false;
-          gate.resume();
+          const standalone = this.ledger.standaloneBindings.filter(b => b.profileId === item.profileId && b.state !== "disconnected");
+          if (standalone.length) {
+            // External standalone daemons cannot be safely addressed as Bot controllers.
+            // Retire their endpoint so old native references cannot reconnect after handback.
+            await this.serial(`profile:${item.profileId}`, async () => {
+              await this.stateRuntimeChanged(item.profileId);
+              for (const binding of standalone) { binding.state = "disconnected"; binding.revision++; binding.observedAt = new Date().toISOString(); }
+            });
+          } else gate.resume();
           // Keep completion invisible until both runtime admission and the
           // durable transition succeed. A failed write restores the hold.
           await this.save({ ...item, quiesced: true, state: "resolved", resolvedAt: new Date().toISOString(), issue: null, revision: item.revision + 1 });
