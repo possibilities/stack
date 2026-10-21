@@ -43,6 +43,7 @@ import { accountLabels, addableWorkerProviders, botsFor, histogram, pairedWorker
 import type { Account, Bot, BrowserHandoff, Login, OperationDoc, PackageDoc, WorkerAccount, WorkerLogin } from "@/lib/stack/types";
 import { botHandoff } from "@/lib/stack/browse";
 import { orientationChip, orientationMeaning, orientationPhase } from "@/lib/stack/orientation";
+import { shellWord } from "@/lib/stack/shims";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "./auth-actions";
 import { BotTile, CopyButton, Empty, NodeCard, NodeLink, NodeTitle, Orb, Row, Sparkline, StatusDot, Time } from "./primitives";
@@ -592,6 +593,23 @@ function workspaceName(cwd: string): string {
   return cwd.split("/").filter(Boolean).at(-1) ?? cwd;
 }
 
+function BotCliCommand({ bot }: { bot: Bot }) {
+  if (bot.state !== "running" || bot.recoveryIssue || !bot.url || !bot.mainThreadId) return null;
+  const command = ["codex", "--remote", bot.url, "resume", bot.mainThreadId].map(shellWord).join(" ");
+  return (
+    <Button size="xs" variant="secondary" title={`Continue this Bot's main thread on the Stack host: ${command}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        void navigator.clipboard.writeText(command)
+          .then(() => toast.success("CLI command copied — resumes this Bot's main thread"))
+          .catch(() => toast.error("Could not copy the CLI command"));
+      }}>
+      <TerminalIcon aria-hidden data-icon="inline-start" />
+      Copy CLI command
+    </Button>
+  );
+}
+
 /** A Bot's Browser handoff that needs a person, linking to it in Browse. */
 function BrowserHelpLink({ handoff }: { handoff: BrowserHandoff | null }) {
   if (!handoff) return null;
@@ -663,7 +681,8 @@ export function BotsWindow() {
                   <BotChip icon={SparklesIcon} title="Saved model · effort">{model ?? "Codex default"}</BotChip>
                   <BotChip icon={FolderIcon} title={bot.cwd} copy={bot.cwd} label="workspace">{workspaceName(bot.cwd)}</BotChip>
                   <BotChip icon={MessageSquareIcon} title={bot.mainThreadId ?? "No main thread yet"} copy={bot.mainThreadId} label="main thread">{bot.mainThreadId ? shortId(bot.mainThreadId) : "No thread"}</BotChip>
-                  {bot.url ? <BotChip icon={LinkIcon} title={bot.url} copy={bot.url} label="endpoint">{bot.url.replace(/^\w+:\/\//, "")}</BotChip> : null}
+                  {bot.url ? <BotChip icon={LinkIcon} title={bot.url} copy={bot.url} label="socket">{bot.url.replace(/^\w+:\/\//, "")}</BotChip> : null}
+                  <BotCliCommand bot={bot} />
                   <WorkersLink filter={{ botId: bot.id }} />
                   <ProcSchedulesLink botId={bot.id} />
                   <BotStateLink botId={bot.id} />
