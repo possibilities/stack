@@ -79,14 +79,18 @@ revocable. Exposure and authority are rechecked at execution boundaries.
 
 Internal operator launch authority must survive routine Server startup to make
 same-connection recovery real, while explicit local revocation must still fence
-it. External operator bearer credentials and browser sessions retain their
-startup rotation. A revoked stdio connection never silently reacquires authority.
+it. External operator bearer credentials retain their startup rotation.
+[ADR 0188](0188-local-browser-sessions-survive-server-restart.md) later preserves
+unexpired browser sessions across ordinary Server startup. A revoked stdio
+connection never silently reacquires authority.
 
 The existing permission-checked LocalAuth database holds separate HTTP and stdio
 operator secrets in one authority row. Opening legacy state adds the missing
 stdio secret transactionally without rotating HTTP authority or capabilities.
-`rotateForStartup()` changes only the HTTP secret and deletes browser capabilities
-after the Server socket is claimed. Explicit `serve_local_revoke` uses `rotate()`
+`rotateForStartup()` changes only the HTTP secret after the Server socket is
+claimed. Under ADR 0188, the Server explicitly preserves unexpired browser sessions
+and discards pending bootstraps/tickets; other callers retain full capability
+invalidation by default. Explicit `serve_local_revoke` uses `rotate()`
 to change both secrets and delete capabilities. Audience-specific validation
 prevents either bearer from authorizing the other transport. A fresh operator
 launch after revocation is a new authorization; an existing pipe keeps its captured

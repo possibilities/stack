@@ -62,6 +62,43 @@ test("single-use browser capabilities and HTTP authority rotate on startup; priv
   } finally { secondProcess.close(); }
 });
 
+test("Server startup preserves origin-bound browser sessions without extending expiry or restoring revoked sessions", t => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { auth, env } = fixture(t);
+  const session = auth.redeem(auth.bootstrap(origin, "ui"), origin, "ui");
+  const inspector = auth.redeem(auth.bootstrap(origin, "inspector"), origin, "inspector");
+  const loggedOut = auth.redeem(auth.bootstrap(origin, "ui"), origin, "ui");
+  const record = auth.session(session.token, origin, "ui");
+  auth.revokeSession(loggedOut.token, origin, "ui");
+  const http = auth.credential(), stdio = auth.credential("stdio");
+  t.mock.timers.tick(4 * 60 * 60_000);
+  const pendingBootstrap = auth.bootstrap(origin, "ui"), pendingTicket = auth.ticket(session.token, origin);
+  const owner = new LocalAuth(env);
+  try { owner.rotateForStartup({ preserveBrowserSessions: true }); } finally { owner.close(); }
+  const reopened = new LocalAuth(env);
+  try {
+    assert.deepEqual(reopened.session(session.token, origin, "ui"), record);
+    assert.equal(reopened.sessionDigest(record.digest, origin).expires, session.expiresAt);
+    assert.equal(reopened.session(inspector.token, origin, "inspector").expires, inspector.expiresAt);
+    assert.throws(() => reopened.session(session.token, "http://localhost:8745", "ui"));
+    assert.throws(() => reopened.session(session.token, origin, "inspector"));
+    assert.throws(() => reopened.session(loggedOut.token, origin, "ui"));
+    assert.throws(() => reopened.redeem(pendingBootstrap, origin, "ui"));
+    assert.throws(() => reopened.consumeTicket(pendingTicket, origin));
+    assert.throws(() => reopened.operator(`Bearer ${http}`));
+    assert.equal(reopened.operator(`Bearer ${stdio}`, "stdio"), stdio);
+    assert.equal(reopened.consumeTicket(reopened.ticket(session.token, origin), origin).digest, record.digest);
+    t.mock.timers.tick(4 * 60 * 60_000);
+    reopened.rotateForStartup({ preserveBrowserSessions: true });
+    assert.throws(() => reopened.session(session.token, origin, "ui"), "restart does not renew eight-hour expiry");
+    assert.throws(() => reopened.session(inspector.token, origin, "inspector"));
+    const fresh = reopened.redeem(reopened.bootstrap(origin, "ui"), origin, "ui");
+    reopened.rotate(); reopened.rotateForStartup({ preserveBrowserSessions: true });
+    assert.throws(() => reopened.session(fresh.token, origin, "ui"), "explicit revocation survives restart");
+    assert.throws(() => reopened.operator(`Bearer ${stdio}`, "stdio"));
+  } finally { reopened.close(); }
+});
+
 test("existing single-secret local authority upgrades in place without rotating HTTP credentials or browser capabilities", t => {
   const root = mkdtempSync(join(tmpdir(), "as-local-auth-upgrade-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

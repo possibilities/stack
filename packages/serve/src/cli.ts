@@ -155,9 +155,9 @@ for (const [transport, port, setting, host] of listeners) {
 let events: Awaited<ReturnType<typeof serveApi>>;
 try {
   events = await startWithServerSocketRecovery(socketPath("serve"), () => serveApi({ name: "serve", transport: "socket", env: process.env }));
-  // Rotate only after successfully claiming the server socket; duplicate starts
-  // must never invalidate the live server's sessions.
-  withLocalAuth(process.env, auth => auth.rotateForStartup());
+  // Rotate HTTP authority and discard pending links/tickets only after claiming
+  // the socket. Existing browser sessions retain their original expiry.
+  withLocalAuth(process.env, auth => auth.rotateForStartup({ preserveBrowserSessions: true }));
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

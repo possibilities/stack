@@ -48,9 +48,17 @@ export class LocalAuth {
     const authority = this.db.prepare("SELECT secret,stdio_secret FROM authority WHERE id=1").get() as { secret: string; stdio_secret: string };
     return audience === "stdio" ? authority.stdio_secret : authority.secret;
   }
-  /** Routine Server startup fences external HTTP/browser authority, not private
-   * stdio launch credentials. Call only after claiming the Server socket. */
-  rotateForStartup(): void { this.transaction(() => { this.db.prepare("UPDATE authority SET secret=? WHERE id=1").run(fresh()); this.db.exec("DELETE FROM capabilities"); }); }
+  /** Startup rotates HTTP authority without renewing private stdio launches.
+   * The Server preserves unexpired browser sessions; independent owners retain
+   * full browser invalidation unless they explicitly select that policy.
+   * Call only after claiming owner identity. Never renew session expiry here. */
+  rotateForStartup({ preserveBrowserSessions = false }: { preserveBrowserSessions?: boolean } = {}): void {
+    this.transaction(() => {
+      this.db.prepare("UPDATE authority SET secret=? WHERE id=1").run(fresh());
+      if (preserveBrowserSessions) this.db.prepare("DELETE FROM capabilities WHERE kind <> 'session' OR expires <= ?").run(Date.now());
+      else this.db.exec("DELETE FROM capabilities");
+    });
+  }
   /** Explicit local revocation fences all operator audiences and capabilities. */
   rotate(): void { this.transaction(() => { this.db.prepare("UPDATE authority SET secret=?,stdio_secret=? WHERE id=1").run(fresh(), fresh()); this.db.exec("DELETE FROM capabilities"); }); }
   operator(header: string | undefined | null, audience: LocalOperatorAudience = "http"): string {

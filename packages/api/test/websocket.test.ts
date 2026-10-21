@@ -10,6 +10,7 @@ import { serveSocket } from "../src/socket.js";
 import { serveWebSocket } from "../src/websocket.js";
 import { socketPath, websocketPort } from "../src/workspace.js";
 import { operatorHeaders, withLocalAuth } from "../src/local-auth.js";
+import { localBrowserResponse } from "../src/local-browser.js";
 
 type Frame = { id?: number; result?: any; error?: { message: string }; method?: string; params?: { topic: string } };
 
@@ -327,6 +328,40 @@ test("anonymous sockets, replayed tickets and revoked operator/browser connectio
     await assert.rejects(raw([], headers), /403/);
     assert.throws(() => withLocalAuth(setup.env, auth => auth.ticket(token, origin)));
   } finally { native?.terminate(); browser?.terminate(); await setup.close(); }
+});
+
+test("an existing browser cookie reconnects after gateway restart with a fresh ticket, while old tickets and explicit revocation stay fenced", async () => {
+  const setup = await fixture(), origin = "http://127.0.0.1:8745";
+  const post = (path: string, body: object, cookie = "") => localBrowserResponse(new Request(`${origin}/connect/local/${path}`, {
+    method: "POST", headers: { origin, cookie, "content-type": "application/json" }, body: JSON.stringify(body),
+  }), setup.env, "ui");
+  let restarted: Awaited<ReturnType<typeof serveWebSocket>> | undefined, browser: WebSocket | undefined;
+  try {
+    const token = withLocalAuth(setup.env, auth => auth.bootstrap(origin, "ui"));
+    const connected = await post("session", { token }); assert.equal(connected.status, 200);
+    const cookie = connected.headers.get("set-cookie")!.split(";")[0]!;
+    const pending = await post("ticket", {}, cookie); assert.equal(pending.status, 200);
+    const oldTicket = (await pending.json() as { ticket: string }).ticket;
+    const oldHeaders = operatorHeaders(setup.env);
+    await setup.served.close();
+    withLocalAuth(setup.env, auth => auth.rotateForStartup({ preserveBrowserSessions: true }));
+    restarted = await serveWebSocket({ root: setup.root, env: setup.env });
+    const raw = (protocols: string[], headers: Record<string, string>) => new Promise<WebSocket>((resolve, reject) => {
+      const socket = new WebSocket(restarted!.url, protocols, { headers });
+      socket.once("open", () => resolve(socket)); socket.once("error", reject);
+    });
+    await assert.rejects(raw([`stack-local.${oldTicket}`], { origin }), /403/);
+    await assert.rejects(raw([], oldHeaders), /403/);
+    const next = await post("ticket", {}, cookie); assert.equal(next.status, 200, "original cookie needs no new CLI bootstrap");
+    const ticket = (await next.json() as { ticket: string }).ticket;
+    browser = await raw([`stack-local.${ticket}`], { origin });
+    const response = nextMessage(browser);
+    browser.send(JSON.stringify({ id: 1, method: "tools/call", params: { package: "demo", name: "greet", arguments: { name: "Returning browser" } } }));
+    assert.deepEqual(await response, { id: 1, result: { greeting: "Hello Returning browser" } });
+    const closed = new Promise<void>(resolve => browser!.once("close", () => resolve()));
+    withLocalAuth(setup.env, auth => auth.rotate()); await closed;
+    assert.equal((await post("ticket", {}, cookie)).status, 401);
+  } finally { browser?.terminate(); await restarted?.close(); await setup.close(); }
 });
 
 test("WebSocket explicit development origin replaces the default UI origins", async () => {

@@ -6,7 +6,12 @@ The subsequent [ADR 0114](0114-explicit-worker-disclosure.md) replaces the Worke
 
 [ADR 0146](0146-server-independent-internal-mcp.md) separates private stdio launch
 credentials from startup-rotated HTTP operator authority in the same LocalAuth
-store. Explicit local revocation invalidates both; browser startup fencing remains.
+store. Explicit local revocation invalidates both.
+
+[ADR 0188](0188-local-browser-sessions-survive-server-restart.md) supersedes browser
+session invalidation on ordinary Server startup: unexpired UI/Inspector sessions
+retain their original expiry, while pending bootstrap links and WebSocket tickets
+are discarded and HTTP operator authority still rotates.
 
 ## Decision
 
@@ -24,7 +29,7 @@ Inspector 2.7 embeds its API token in HTML. An owner-scoped preloader gates ever
 
 ## Consequences
 
-Existing anonymous TCP clients must migrate. Native operator tooling imports `operatorHeaders(env)` from `@stack/api` and reloads it after restart or `stack revoke-local`; Bot/Worker launch URLs already supply independent credentials. Local browsers require the CLI again after eight hours, restart or revocation. A development UI origin must exactly match the owner's `STACK_WEBSOCKET_ORIGIN`; `stack open uix <configured-origin>` bootstraps it using the same state directory.
+Existing anonymous TCP clients must migrate. Native operator tooling imports `operatorHeaders(env)` from `@stack/api` and reloads it after restart or `stack revoke-local`; Bot/Worker launch URLs already supply independent credentials. Local browsers require the CLI again after eight hours, logout, revocation or installation reset; ordinary Server restart preserves unexpired sessions under ADR 0188. A development UI origin must exactly match the owner's `STACK_WEBSOCKET_ORIGIN`; `stack serve open ui <configured-origin>` bootstraps it using the same state directory.
 
 UIX build scheduling explicitly depends on its workspace dependencies. Otherwise Turbo can reuse a Next bundle containing older shared authentication code while rebuilding the API package. Verification uses a separate checkout and disposable state; deployment requires an authorized coordinated rebuild/restart.
 
