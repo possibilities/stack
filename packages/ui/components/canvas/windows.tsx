@@ -594,7 +594,9 @@ function workspaceName(cwd: string): string {
 
 function BotCliCommand({ bot }: { bot: Bot }) {
   if (bot.state !== "running" || bot.recoveryIssue || !bot.url || !bot.mainThreadId) return null;
-  const command = ["codex", "--remote", bot.url, "resume", bot.mainThreadId].map(shellWord).join(" ");
+  // Remote resume uses the server's permissions; local permission shims must
+  // not inject overrides that Codex rejects for an existing remote thread.
+  const command = ["env", "AGENTSTART_SHIM_BYPASS=1", "codex", "--remote", bot.url, "resume", bot.mainThreadId].map(shellWord).join(" ");
   return (
     <Button size="xs" variant="secondary" title={`Continue this Bot's main thread on the Stack host: ${command}`}
       onClick={(event) => {
