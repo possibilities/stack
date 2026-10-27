@@ -15,9 +15,17 @@ export type HypemanArtifact = {
 // Updated only after the exact hosted build and its archive digest are verified.
 export const HYPEMAN_ARTIFACTS: Record<string, HypemanArtifact> = {
   darwin_arm64: {
-    version: "0.3.0",
-    url: "https://github.com/kernel/hypeman/releases/download/v0.3.0/hypeman_0.3.0_darwin_arm64.tar.gz",
-    digest: "85d3e51bab7c75df045ccbbab4b21da0c026fd1f87ecc97058fdec33c87c6d1d",
+    "version": "source-567335f2effa-4e412b3",
+    "url": "https://github.com/possibilities/hypeman/releases/download/source-567335f2effa-4e412b3/hypeman-source-567335f2effa-darwin_arm64.tar.gz",
+    "digest": "7c741e923633235d9361f7535f1faddd13b0192a1ae5a30accff2b2d9fb23fb4",
+    "source": {
+      "sourceRepository": "kernel/hypeman",
+      "sourceRevision": "567335f2effa35c9bea6721767b2960ae6609d20",
+      "buildRepository": "possibilities/hypeman",
+      "buildRevision": "4e412b332c1c67b86e9ea766261afa873879c6ea",
+      "buildRun": "40554826201",
+      "platform": "darwin_arm64"
+    }
   },
   linux_amd64: {
     version: "0.3.0",

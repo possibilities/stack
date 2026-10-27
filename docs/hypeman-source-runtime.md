@@ -25,6 +25,20 @@ for another build requires an explicit upgrade; it never silently downgrades or
 overwrites an independently installed runtime. Installation does not select or
 start Hypeman.
 
+## Current macOS pin
+
+- Upstream application source: `kernel/hypeman@567335f2effa35c9bea6721767b2960ae6609d20`, including the transient VZ connection fix from PR 482.
+- Fork build revision: `4e412b332c1c67b86e9ea766261afa873879c6ea`; only CI configuration differs from upstream.
+- [Successful macOS 15 ARM64 build and regression evidence](https://github.com/possibilities/hypeman/actions/runs/40554826201).
+- [Versioned source-build distribution](https://github.com/possibilities/hypeman/releases/tag/source-567335f2effa-4e412b3), clearly marked as a fork prerelease.
+- Archive SHA-256: `7c741e923633235d9361f7535f1faddd13b0192a1ae5a30accff2b2d9fb23fb4`.
+
+The temporary source pin applies to macOS ARM64. Linux keeps its previously
+reviewed v0.3.0 artifact; this VZ repair does not change Linux installation.
+Updating the Hypeman binary does not require restarting the whole Stack server
+or rebuilding its live UI. The updated installer source takes effect when that
+Stack package is next built and loaded.
+
 ## Existing installation and rollback
 
 An upgrade is separate from fresh installation. Record the running API and VM
