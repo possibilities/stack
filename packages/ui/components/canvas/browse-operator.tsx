@@ -411,7 +411,7 @@ export function ToolchainWindow() {
             <WriteError error={hypemanInstall.error ?? locate.error} />
             <div className="flex flex-wrap items-center gap-1">
               {data.hypeman.some((item) => item.source === "stack" && item.installed) ? null : (
-                <Button type="button" size="xs" variant="outline" disabled={Boolean(blocked) || hypemanInstall.pending} title="Install the checksum-verified release in Stack state; it is not selected"
+                <Button type="button" size="xs" variant="outline" disabled={Boolean(blocked) || hypemanInstall.pending} title="Install the checksum-verified pinned build in Stack state; it is not selected"
                   onClick={() => void hypemanInstall.run()}><PendingLabel since={hypemanInstall.since}>Install Hypeman</PendingLabel></Button>
               )}
               <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); if (root.trim()) void locate.run({ root: root.trim() }).then((result) => { if (result) setRoot(""); }); }}>

@@ -6,16 +6,12 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { stateDir } from "@stack/api";
+import { HYPEMAN_ARTIFACTS, hypemanFileDigest, verifyHypemanSourcePackage, type HypemanSource } from "./hypeman-artifact.js";
 
 const execFile = promisify(execFileCallback);
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60_000;
 const MAX_COMMAND_OUTPUT = 1024 * 1024;
-const HYPEMAN_VERSION = "0.3.0";
-const HYPEMAN_ARCHIVES: Record<string, string> = {
-  darwin_arm64: "85d3e51bab7c75df045ccbbab4b21da0c026fd1f87ecc97058fdec33c87c6d1d",
-  linux_amd64: "0e704787082e2f5744f55e59b6858085c952f695b5e3cf3d5ea081b1d655c15b",
-};
 
 export type BrowserUpdatePolicy = "manual" | "automatic";
 export type BrowserToolStatus = {
@@ -366,36 +362,45 @@ export class BrowserSystem {
       if (existsSync(root) && (!safeDirectory(root) || !safeFile(receiptPath)))
         throw new Error("refusing to replace an independent Hypeman installation");
       const platform = `${process.platform}_${process.arch === "x64" ? "amd64" : process.arch}`;
-      const digest = HYPEMAN_ARCHIVES[platform];
-      if (!digest) throw new Error("Hypeman has no reviewed release for this platform");
+      const artifact = HYPEMAN_ARTIFACTS[platform];
+      if (!artifact) throw new Error("Hypeman has no reviewed build for this platform");
+      const { digest } = artifact;
       if (existsSync(receiptPath)) {
-        const existing = JSON.parse(await readFile(receiptPath, "utf8")) as { version?: string; digest?: string };
-        if (existing.version !== HYPEMAN_VERSION || existing.digest !== digest) throw new Error("Hypeman installation receipt differs from the reviewed release");
+        const existing = JSON.parse(await readFile(receiptPath, "utf8")) as { version?: string; digest?: string; source?: HypemanSource; installedDigests?: Record<string, string> };
+        if (existing.version !== artifact.version || existing.digest !== digest ||
+            (artifact.source && Object.entries(artifact.source).some(([key, value]) => existing.source?.[key as keyof HypemanSource] !== value)))
+          throw new Error("Hypeman installation receipt differs from the reviewed build; an explicit runtime upgrade is required");
+        if (artifact.source) {
+          for (const name of ["hypeman-api", "hypeman-token"]) {
+            const path = join(root, "bin", name);
+            if (!safeFile(path) || await hypemanFileDigest(path) !== existing.installedDigests?.[name])
+              throw new Error("Hypeman installed binary differs from its source-build receipt");
+          }
+        }
         return this.detectHypeman();
       }
       const staged = join(this.root, `hypeman-staging-${randomUUID()}`);
       await mkdir(staged, { mode: 0o700 });
       try {
         const archive = join(staged, "release.tar.gz");
-        const url = `https://github.com/kernel/hypeman/releases/download/v${HYPEMAN_VERSION}/hypeman_${HYPEMAN_VERSION}_${platform}.tar.gz`;
-        await execFile("curl", ["--fail", "--location", "--retry", "2", "--output", archive, url], { timeout: 180_000, maxBuffer: MAX_COMMAND_OUTPUT });
-        const { createReadStream } = await import("node:fs");
-        const { createHash } = await import("node:crypto");
-        const hash = createHash("sha256");
-        for await (const chunk of createReadStream(archive)) hash.update(chunk);
-        if (hash.digest("hex") !== digest) throw new Error("Hypeman release checksum mismatch");
+        await execFile("curl", ["--fail", "--location", "--retry", "2", "--output", archive, artifact.url], { timeout: 180_000, maxBuffer: MAX_COMMAND_OUTPUT });
+        if (await hypemanFileDigest(archive) !== digest) throw new Error("Hypeman build checksum mismatch");
         const { stdout } = await execFile("tar", ["-tzf", archive], { timeout: 10_000, maxBuffer: MAX_COMMAND_OUTPUT });
         const entries = stdout.trim().split("\n").map((name) => name.replace(/^\.\//, ""));
-        if (entries.some((name) => !["", "hypeman-api", "hypeman-token", "hypeman-uffd-pager", "config.example.darwin.yaml", "config.example.linux.yaml"].includes(name)) || !entries.includes("hypeman-api") || !entries.includes("hypeman-token"))
-          throw new Error("Hypeman release archive has unexpected entries");
+        const allowed = ["", "hypeman-api", "hypeman-token", "hypeman-uffd-pager", "config.example.darwin.yaml", "config.example.linux.yaml", ...(artifact.source ? ["source-provenance.json"] : [])];
+        if (entries.some((name) => !allowed.includes(name)) || !entries.includes("hypeman-api") || !entries.includes("hypeman-token") ||
+            (artifact.source && !entries.includes("source-provenance.json")))
+          throw new Error("Hypeman build archive has unexpected entries");
         const binaries = join(staged, "bin");
         await mkdir(binaries, { mode: 0o700 });
         const names = ["hypeman-api", "hypeman-token", ...(entries.includes("hypeman-uffd-pager") ? ["hypeman-uffd-pager"] : [])];
-        await execFile("tar", ["-xzf", archive, "-C", binaries, ...names.map((name) => `./${name}`)], { timeout: 30_000, maxBuffer: MAX_COMMAND_OUTPUT });
+        const extractedNames = [...names, ...(artifact.source ? ["source-provenance.json"] : [])];
+        await execFile("tar", ["-xzf", archive, "-C", binaries, ...extractedNames.map((name) => `./${name}`)], { timeout: 30_000, maxBuffer: MAX_COMMAND_OUTPUT });
         for (const name of names) {
           if (!safeFile(join(binaries, name))) throw new Error("Hypeman archive contains a nonregular binary");
           await chmod(join(binaries, name), 0o755);
         }
+        if (artifact.source) await verifyHypemanSourcePackage(binaries, artifact.source);
         if (process.platform === "darwin") {
           const entitlements = join(staged, "entitlements.plist");
           await writeFile(entitlements, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.virtualization</key><true/><key>com.apple.security.network.server</key><true/><key>com.apple.security.network.client</key><true/></dict></plist>`, { mode: 0o600 });
@@ -415,7 +420,8 @@ export class BrowserSystem {
         const { stdout: token } = await execFile(join(binaries, "hypeman-token"), ["-user-id", "stack", "-duration", "8760h"], { env: { ...this.env, JWT_SECRET: jwt }, timeout: 5_000, maxBuffer: 10_000 });
         await writeFile(join(staged, "token"), `${token.trim()}\n`, { mode: 0o600 });
         await writeFile(join(staged, "connection.json"), `${JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, tokenFile: join(root, "token") })}\n`, { mode: 0o600 });
-        await writeFile(join(staged, "stack-install.json"), `${JSON.stringify({ version: HYPEMAN_VERSION, digest, installedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
+        const installedDigests = artifact.source ? Object.fromEntries(await Promise.all(names.map(async (name) => [name, await hypemanFileDigest(join(binaries, name))]))) : undefined;
+        await writeFile(join(staged, "stack-install.json"), `${JSON.stringify({ version: artifact.version, digest, artifactUrl: artifact.url, source: artifact.source, installedDigests, installedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
         await rm(archive);
         await mkdir(join(staged, "logs"), { mode: 0o700 });
         await rename(staged, root);

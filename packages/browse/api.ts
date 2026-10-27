@@ -314,7 +314,7 @@ export const hypemanEnable = operation({
   },
 });
 export const hypemanInstall = operation({
-  name: "hypeman_install", description: "Install the checksum-verified local Hypeman release in Stack state. Does not select it or modify the legacy Mac installation.",
+  name: "hypeman_install", description: "Install the checksum-verified pinned Hypeman build in Stack state. Does not select it or modify the legacy Mac installation.",
   input: z.strictObject({}), output: hypemanInstallations,
   annotations: { title: "Install local Hypeman" },
   async call(ctx: BrowserContext) { return { installations: await ctx.system.installHypeman() }; },
