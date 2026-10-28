@@ -221,6 +221,32 @@ async function populate(f: Awaited<ReturnType<typeof setup>>) {
   return roleId;
 }
 
+test("isolated Codex receives saved model defaults while native flags keep precedence", async () => {
+  const f = await setup({ serve: false });
+  try {
+    await mkdir(f.state, { recursive: true });
+    const db = new DatabaseSync(join(f.state, "configuration.sqlite"));
+    try {
+      db.exec("CREATE TABLE managed_settings(subject TEXT PRIMARY KEY, values_json TEXT NOT NULL)");
+      db.prepare("INSERT INTO managed_settings VALUES (?,?)").run("bot-defaults", JSON.stringify({
+        model: "gpt-6.1-sol", model_reasoning_effort: "high", service_tier: "default",
+        sandbox_mode: "danger-full-access", approval_policy: "never", "voice.prompt": "unrelated-default",
+      }));
+    } finally { db.close(); }
+    const plain = await f.run(["inject", "--", "codex"]);
+    assert.equal(plain.code, 0, plain.stderr);
+    const config = JSON.parse(plain.stdout).config as string;
+    assert.match(config, /^model = "gpt-6\.1-sol"$/m);
+    assert.match(config, /^model_reasoning_effort = "high"$/m);
+    assert.match(config, /^service_tier = "default"$/m);
+    assert.doesNotMatch(config, /danger-full-access|approval_policy|unrelated-default/);
+    const flags = ["--model", "test/explicit-model", "-c", 'model_reasoning_effort="low"', "-c", 'service_tier="priority"'];
+    const explicit = await f.run(["inject", "--", "codex", ...flags]);
+    assert.equal(explicit.code, 0, explicit.stderr);
+    assert.deepEqual(JSON.parse(explicit.stdout).argv, ["--no-daemon", ...flags]);
+  } finally { await f.close(); }
+});
+
 test("inject launches each native boundary with the selected bytes, private credentials, argv and stdio; ordinary launch stays unchanged", async () => {
   const f = await setup();
   try {

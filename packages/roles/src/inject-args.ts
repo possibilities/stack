@@ -30,7 +30,11 @@ OpenCode command capabilities are checked when invoked; no exact CLI release is 
 Authentication is orthogonal to Role selection: Claude uses native auth;
 OpenCode uses its ordinary native database, credential selection and refresh.
 Settings-based Claude auth helpers are not imported; native keychain/env auth remains.
-Codex reuses only CODEX_HOME/auth.json via symlink (file credential stores);
+Codex copies only model, reasoning effort and service tier from saved Stack Bot
+launch defaults into its private config; explicit native flags override them.
+Other Bot settings, including permissions, are not imported. Missing saved
+selections retain native defaults. Authentication reuses only CODEX_HOME/auth.json
+via symlink (file credential stores);
 keyring-only login is not supported. Its private HOME also changes ~ expansion
 and home-based tool configuration. Project/built-in Codex resources may still load.
 Claude/OpenCode retain ordinary native history. Codex history stays under

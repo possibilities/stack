@@ -108,6 +108,18 @@ replacement avoids both problems without an upstream patch or credential
 synchronization service. Its tradeoff is a substantial pinned native dependency
 tree and a private server lifecycle owned by the launcher.
 
+## Codex launch defaults
+
+Isolated Codex role launches copy only `model`, `model_reasoning_effort` and
+`service_tier` from the saved managed Bot defaults in the existing public
+`configuration.sqlite`. The launcher reads these selections without a Server,
+without initializing or changing the settings store, and without opening its
+separate credential store. No ordinary home configuration is imported. Missing
+saved selections retain native resolution; explicit native model, effort and
+speed flags retain higher precedence. Permission, feature, voice and other Bot
+settings remain outside this projection. Claude and OpenCode are unchanged.
+These defaults affect new isolated launches, not running sessions or Bots.
+
 ## Verification boundary
 
 Disposable native probes establish Role resources present, synthetic ambient

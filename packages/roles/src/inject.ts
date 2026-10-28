@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { access, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -83,10 +84,32 @@ async function skills(path: string, snapshot: RoleSnapshot): Promise<void> {
   }
 }
 
-function tomlConfig(instructions: string, servers: Record<string, Mcp>): string {
+/** Read only launch selections from public settings; never attach the credential store. */
+function codexLaunchDefaults(): Record<string, string> {
+  const path = join(stateDir(), "configuration.sqlite");
+  if (!existsSync(path)) return {};
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_settings'").get()) return {};
+    const row = db.prepare(`SELECT json_extract(values_json, '$.model') AS model,
+      json_extract(values_json, '$.model_reasoning_effort') AS model_reasoning_effort,
+      json_extract(values_json, '$.service_tier') AS service_tier
+      FROM managed_settings WHERE subject='bot-defaults'`).get();
+    const defaults: Record<string, string> = {};
+    for (const [key, value] of Object.entries(row ?? {})) {
+      if (value === null) continue;
+      if (typeof value !== "string" || !value.trim()) throw new Error(`Invalid saved Codex launch default: ${key}`);
+      defaults[key] = value;
+    }
+    return defaults;
+  } finally { db.close(); }
+}
+
+function tomlConfig(instructions: string, servers: Record<string, Mcp>, defaults: Record<string, string>): string {
   const quote = JSON.stringify;
   const map = (values: Record<string, string>) => `{ ${Object.entries(values).map(([key, value]) => `${quote(key)} = ${quote(value)}`).join(", ")} }`;
-  const lines = [`developer_instructions = ${quote(instructions)}`, ""];
+  const lines = [...Object.entries(defaults).map(([key, value]) => `${key} = ${quote(value)}`),
+    `developer_instructions = ${quote(instructions)}`, ""];
   for (const [name, server] of Object.entries(servers)) {
     lines.push(`[mcp_servers.${quote(name)}]`);
     if (server.type === "http") lines.push(`url = ${quote(server.url)}`, `http_headers = ${map(server.headers)}`);
@@ -198,7 +221,7 @@ async function launch(args: string[], signal: AbortSignal): Promise<Exit> {
       env.XDG_CONFIG_HOME = join(home, ".config"); env.XDG_DATA_HOME = join(home, ".local", "share");
       delete env.CODEX_MANAGED_CONFIG_PATH;
       await skills(join(codexHome, "skills"), snapshot);
-      await file(join(codexHome, "config.toml"), tomlConfig(instructions, servers));
+      await file(join(codexHome, "config.toml"), tomlConfig(instructions, servers, codexLaunchDefaults()));
       cleanup.push(join(codexHome, "config.toml"), join(codexHome, "skills"), join(codexHome, "auth.json"));
       argv = command ? native : ["--no-daemon", ...native];
     } else {
